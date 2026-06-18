@@ -1,0 +1,56 @@
+# Change Log — Conservative Red-Line Revision
+
+This revision edits the **original manuscript in place**, preserving its
+structure, headings, numbering, fonts (Times New Roman), figure/reference style,
+and writing flow. **All added or changed text is coloured RED** in the DOCX;
+unchanged original text is left untouched. No section was removed or rewritten.
+
+Original figures (1–6) are preserved; four new figures were appended as
+**Figures 7–10** so existing numbering is not disturbed. Three references were
+appended as **[19]–[21]**.
+
+## Exact additions / changes and their location
+
+| # | Location (existing section) | Change | Colour |
+|---|---|---|---|
+| 1 | Abstract | Relabelled "Proof-of-Work reference models (Bitcoin and Ethereum)" → PoW reference configurations incl. *historical Ethereum-like PoW configuration* not representing current PoS Ethereum | RED (changed span) |
+| 2 | Abstract | Appended sentence: PoW economic vs PoS validator distinction; γ varied; scenario-based, not a precise estimator | RED |
+| 3 | Keywords | Appended "Proof of Stake, Carbon Footprint, Energy Modeling, Sustainability" | RED |
+| 4 | Introduction (after "This study expands upon BlockSim…") | Added paragraph: PoW energy is economically driven (coin price, block subsidy, fees, electricity price, efficiency, difficulty/hashrate); PoS validator-driven; Ethereum Merge / not PoW | RED |
+| 5 | Background & Related Work (end) | Added subsection **"Energy, Permissionlessness, and Sybil Resistance"** + paragraph (PoW vs PoS, freeness/cost, Sybil trilemma) citing [16],[4],[19],[20],[8] | RED |
+| 6 | Energy Modeling §B (Communication) | Added pointer that communication energy is now instrumented and analysed | RED |
+| 7 | Energy Modeling §C (end) | Added subsection **"D. Proof-of-Work Economic Energy Model"** with R=(B+F)·P, E_budget=κR/C_elec, E_technical, E_PoW=min(…), E_i=s_i·E_PoW | RED |
+| 8 | Energy Modeling (after D) | Added subsection **"E. Proof-of-Stake Validator Energy Model"** with E_PoS=Σ(P_v·T·u_v)/1000+E_comm | RED |
+| 9 | Carbon Footprint Modeling §A | Added paragraph: γ treated as experimental variable (low/avg/high) | RED |
+| 10 | Carbon Footprint **Analysis** | Qualified pre-existing "fixed emission factor [3]" → emission factor varied across grid scenarios | RED (changed span) |
+| 11 | Experimental Setup §B | Relabelled "Bitcoin (Model 1) and Ethereum (Model 2)" → historical Ethereum-like PoW configuration, not current Ethereum | RED (changed span) |
+| 12 | Experimental Setup §C | Qualified "fixed electricity emission factor" → configurable, varied across low/avg/high grids | RED (changed span) |
+| 13 | Experimental Setup §D | Replaced "replicated several times … averaged values" → 30 seeds (base+i), mean, standard deviation, 95% CI | RED (changed span) |
+| 14 | Results §A | Added paragraphs: scenario-based caveat; PoW total invariant to miner count & price-driven; PoS validator results; PoW/PoS ratio; E=P·T sanity check | RED |
+| 15 | Results §A | Added **Figure 7** (PoW energy vs miners) and **Figure 8** (PoS energy vs validators) | RED captions |
+| 16 | Results §A | Added communication-energy analysis paragraph + **Figure 9** (computation vs communication) | RED |
+| 17 | Carbon Footprint Analysis | Added γ-sensitivity paragraph (numbers) + **Figure 10** (carbon vs γ) | RED |
+| 18 | Discussion / Threats to Validity | Added three limitation paragraphs (scenario-based; PoW/PoS sensitivities; regional γ; historical-Ethereum & communication caveats) | RED |
+| 19 | References | Appended **[19]** Platt et al. 2021, **[20]** Platt, Platt & McBurney 2024, **[21]** De Vries Patterns 2022/2023 (DOI 10.1016/j.patter.2022.100633) | RED |
+
+## Code changes (minimal, additive)
+The supporting models/experiments added in the prior commit are reused to
+generate the numbers and Figures 7–10:
+- `Models/Energy/` — `PowEconomicEnergyModel`, `PosValidatorEnergyModel`,
+  `CommunicationEnergyModel`, `CarbonFootprintModel`.
+- `experiments/` — PoW miner scaling, PoW price sensitivity, PoS validator
+  scaling, carbon γ sensitivity, communication analysis (30 seeds, mean/std/CI).
+- `tests/test_energy_models.py` — 11 unit tests.
+
+No existing BlockSim source file was modified; `Main.py` / `InputsConfig.py`
+are unchanged (backward compatible).
+
+## Build
+- `docs/conservative_revision.py` → red-line DOCX (edits the original).
+- `docs/docx_to_pdf.py` → matching PDF (preserves red + figures).
+
+## Phrase audit (revised DOCX & PDF)
+`validated` 0 · `Ethereum miners` 0 · `Ethereum PoW` 0 ·
+`Proof-of-Work reference models (Bitcoin and Ethereum)` 0 ·
+`replicated several times` 0 · `fixed emission factor` only in the added RED
+sentence stating it *is insufficient*. De Vries DOI present.
