@@ -73,3 +73,26 @@ mathematics into **native Word equations (OMML)** while keeping them RED:
 
 Build order: `python docs/conservative_revision.py` then
 `python docs/fix_math_omml.py` then `python docs/docx_to_pdf.py`.
+
+## Figure-reference & citation stage
+A third stage (`docs/add_figure_refs.py`) adds the missing in-text references
+and citation, leaving Figures 1-6 untouched:
+- **Figure 7** cited in Results (red): "Figure 7 summarizes the sensitivity of
+  PoW network energy to the number of miners ...".
+- **Figure 8** cited in Results (red): "As shown in Figure 8, PoS total energy
+  scales linearly with the number of validators ...".
+- **Figure 9** cited in Results (red): "Figure 9 compares computational
+  (consensus) energy with communication energy ...".
+- **Figure 10** cited in Carbon Analysis (red): "Figure 10 reports the
+  carbon-emission sensitivity under low, average, and high ... γ.".
+- **Reference [21]** (De Vries, Patterns) is now cited 3× in the De Vries/Merge
+  discussion (Introduction, Background, Results). These red sentences previously
+  pointed to [8] (Gervais in the original list); the pointer was corrected to
+  [21]. Original black [8] (Gervais) citations are unchanged and still cited.
+- Audit: Figures 1-6 images byte-identical (6/6 unchanged); all references
+  [1]-[21] cited at least once; every figure number in a caption also appears in
+  the text; numbering sequential 1-10, no duplicates; all added sentences RED.
+
+Full build order: `python docs/conservative_revision.py` ->
+`python docs/fix_math_omml.py` -> `python docs/add_figure_refs.py` ->
+`python docs/docx_to_pdf.py`.
