@@ -22,7 +22,7 @@ Consumption Modeling section, where the expected reward R=(B+F)·P and the
 economic budget E_budget=κ·R/C_elec make coin price, subsidy, fees, and
 electricity price explicit; Results §A reports that the network total is
 invariant to miner count and scales with coin price. Location: Introduction;
-Energy Modeling §D; Results §A; Figures 7.
+Energy Modeling §D; Results §A; Figures 4.
 
 **R1.2 — Ethereum is no longer PoW; cite De Vries 2022.**
 Response: Corrected. Revision made: red statements that Ethereum moved to PoS at
@@ -34,9 +34,9 @@ References [21].
 **R1.3 — Model PoW and PoS as two distinct models.**
 Response: Done. Revision made: red subsection "D. Proof-of-Work Economic Energy
 Model" and red subsection "E. Proof-of-Stake Validator Energy Model"
-(E_PoS=Σ(P_v·T·u_v)/1000+E_comm) added; PoS results and Figure 8 added. Cites
+(E_PoS=Σ(P_v·T·u_v)/1000+E_comm) added; PoS results and Figure 5 added. Cites
 Sedlmeir [16] and Platt et al. [19]. Location: Energy Modeling §D, §E; Results
-§A; Figure 8.
+§A; Figure 5.
 
 **R1.4 — Permissionlessness, Sybil resistance, freeness; cite Platt/Platt/McBurney 2024.**
 Response: Added. Revision made: new red subsection "Energy, Permissionlessness,
@@ -55,9 +55,9 @@ real-world measurements. Location: Abstract; Results; Threats.
 
 **R2.2 — γ sensitivity.**
 Response: Added. Revision made: red paragraph in Carbon Footprint Modeling §A
-defining low/average/high γ; red γ-sensitivity results paragraph and Figure 10
+defining low/average/high γ; red γ-sensitivity results paragraph and Figure 7
 in Carbon Footprint Analysis. Location: Carbon Modeling §A; Carbon Analysis;
-Figure 10.
+Figure 7.
 
 **R2.3 — Mining difficulty / hashrate dynamics.**
 Response: Added as parameters/hooks. Revision made: red text in Energy Modeling
@@ -68,8 +68,8 @@ Location: Energy Modeling §D.
 **R2.4 — Seeds, replications, standard deviation, 95% CI.**
 Response: Done. Revision made: red replacement in Experimental Setup §D — 30
 independent seeds (base+i), mean, standard deviation, and 95% confidence
-interval; CIs shown in Figures 7–10 and Results §A. Location: §D; Results;
-Figures 7–10.
+interval; CIs shown in Figures 4–7 and Results §A. Location: §D; Results;
+Figures 4–7.
 
 **R2.5 — Inconsistent values across text/figures/tables.**
 Response: Addressed. Revision made: added numbers are generated from a single
@@ -78,17 +78,17 @@ inconsistent Ethereum-vs-Bitcoin framing is relabelled as a historical
 Ethereum-like PoW configuration. Location: Results; Carbon Analysis.
 
 **R2.6 — Improve criticized figures, keep style.**
-Response: Done conservatively. Revision made: original Figures 1–6 are retained;
+Response: Done. Revision made: original Figures 1–3 are retained; the uncited old carbon-comparison plots (former Figures 4–6) were removed, and
 four improved figures with error bars and appropriate log/separate axes were
-added in the same locations as Figures 7–10 (energy vs miners, PoS vs
+added as Figures 4–7 (energy vs miners, PoS vs
 validators, computation vs communication, carbon vs γ), avoiding the compressed
 single-axis comparison the reviewer flagged. Location: Results; Carbon Analysis.
 
 **R2.7 — Communication-energy model defined but not analyzed.**
 Response: Fixed. Revision made: red pointer in Energy Modeling §B and a red
 communication-energy analysis in Results §A (transaction rate / block size /
-peer degree), with Figure 9, reported separately from consensus energy.
-Location: Energy Modeling §B; Results §A; Figure 9.
+peer degree), with Figure 6, reported separately from consensus energy.
+Location: Energy Modeling §B; Results §A; Figure 6.
 
 **R2.8 — Remove/qualify "validated".**
 Response: The word "validated" does not appear in the manuscript. Revision made:

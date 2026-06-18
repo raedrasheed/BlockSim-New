@@ -116,3 +116,30 @@ Full build order: `python docs/conservative_revision.py` ->
 
 Full build order: conservative_revision.py -> fix_math_omml.py ->
 add_figure_refs.py -> format_revision_pass.py -> docx_to_pdf.py.
+
+## Numbering & figure-cleanup pass (stage 5)
+`docs/renumber_eq_fig.py` — numbering/consistency only, no content rewrite:
+- **Equations renumbered by order of appearance** so they run 1–11 with no gaps
+  or duplicates. The added PoW/PoS equations, previously (8)–(11), are now
+  **(5)–(8)**; the original carbon equations, previously (5)–(7), are now
+  **(9)–(11)**. In-text references updated: §D now cites Eq. (5)/(6)/(7); §E now
+  cites Eq. (8).
+- **Old uncited Figures 4–6 deleted** (the cumulative-CO₂ and Bitcoin-vs-Ethereum
+  carbon-comparison plots, images 4–6) together with their two orphaned
+  reference sentences ("Figure. 4 shows …", "Figures 5–6 compares …").
+- **Figures renumbered**: former Figures 7→**4**, 8→**5**, 9→**6**, 10→**7**
+  (markers, captions and in-text references all updated). Figures 1–3 unchanged.
+- **Separate figure files renamed** accordingly in `figures_revision/`:
+  Figure4_PoW_energy_sensitivity, Figure5_PoS_validator_scaling,
+  Figure6_computation_vs_communication, Figure7_carbon_gamma_sensitivity.
+- The response letter was updated (former Figures 7–10 → 4–7; note that old
+  uncited Figures 4–6 were removed).
+
+> NOTE on earlier sections of this changelog: references above to the added
+> figures as "Figures 7–10" and to "Figures 1–6" predate this stage. The
+> authoritative final numbering is: original Figures **1–3** retained; old
+> Figures **4–6 deleted**; new figures are **4–7**; displayed equations **1–11**.
+
+Full build order: conservative_revision.py → fix_math_omml.py →
+add_figure_refs.py → format_revision_pass.py → renumber_eq_fig.py →
+docx_to_pdf.py.
