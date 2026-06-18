@@ -1,0 +1,14 @@
+parameter,value
+seed_count,30
+seed_base,20260101
+seed_list,20260101..20260130
+horizon_seconds,86400
+pow_miner_counts,50;100;500;1000
+pos_validator_counts,100;500;1000;5000
+gamma_low,0.05
+gamma_average,0.475
+gamma_high,0.82
+pow_mean_energy_500miners_kwh,467478070.912
+pos_mean_energy_1000val_kwh,2374.839
+pow_pos_ratio,196846.2
+validation_max_rel_error,0.00e+00
