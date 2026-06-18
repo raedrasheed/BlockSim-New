@@ -27,11 +27,11 @@ Below we respond to each comment in turn.
 
 **Comment:** Ethereum has not run PoW for a long time; the De Vries (Patterns) paper should be cited.
 
-**Response:** We corrected all wording that could imply Ethereum currently runs PoW. Ethereum is now described as a Proof-of-Stake system after The Merge (September 2022). Any remaining Ethereum PoW discussion is explicitly labelled as a historical Ethereum-like PoW configuration that does not represent current Ethereum. We added the De Vries (Patterns) reference and cite it in the text as [21].
+**Response:** We corrected all wording that could imply Ethereum currently runs PoW. Following the reviewer's later comment, we also generalized the experimental framing away from specific cryptocurrencies, so the experiments are now described as PoW and PoS consensus scenarios. We added the De Vries (Patterns) reference and cite it once, as background, in the related-work discussion of Ethereum's transition to PoS (see also our response to Reviewer 1's latest comment below).
 
-**Revision made:** We updated the Abstract, Introduction, the Experimental Setup, and the Results so that Ethereum is presented as post-Merge PoS, and we relabelled the former "Ethereum (Model 2)" as a historical Ethereum-like PoW configuration. Reference [21] (De Vries, "Cryptocurrencies on the Road to Sustainability: Ethereum Paving the Way for Bitcoin," Patterns, DOI 10.1016/j.patter.2022.100633) was added to the reference list and cited in the text.
+**Revision made:** We updated the Abstract, Introduction, Experimental Setup, and Results so that the consensus families are presented as PoW and PoS scenarios rather than named coins; the former second PoW configuration is now the "high-throughput PoW scenario." Reference [21] (De Vries, "Cryptocurrencies on the Road to Sustainability: Ethereum Paving the Way for Bitcoin," Patterns, DOI 10.1016/j.patter.2022.100633) was added to the reference list and is cited in the background.
 
-**Location in revised manuscript:** Introduction (paragraph beginning "It is important to clarify the energy characteristics…", where [21] is cited in the Merge discussion); Background and Related Work, subsection "Energy, Permissionlessness, and Sybil Resistance" ([21] cited); Experimental Setup, subsection "B. Consensus and Workload Parameters" (historical Ethereum-like PoW configuration); Results and Analysis, subsection "A. Energy Consumption Analysis" ([21] cited); References [21].
+**Location in revised manuscript:** Abstract; Introduction; Background and Related Work, subsection "Energy, Permissionlessness, and Sybil Resistance" (the single retained Ethereum/PoS-transition sentence, where [21] is cited); Experimental Setup, subsection "B. Consensus and Workload Parameters"; Results and Analysis, subsection "A. Energy Consumption Analysis"; References [21].
 
 ### Reviewer 1, Major Comment 3
 
@@ -52,6 +52,16 @@ Below we respond to each comment in turn.
 **Revision made:** We added the subsection "Energy, Permissionlessness, and Sybil Resistance," which contrasts the Sybil-resistance mechanisms of PoW and PoS, discusses the Sybil-attack vulnerability trilemma, and explains why PoW security depends on costly external resources while PoS relies on validator/stake participation. It cites [16], [19], [20], and [21].
 
 **Location in revised manuscript:** Background and Related Work, subsection "Energy, Permissionlessness, and Sybil Resistance."
+
+### Reviewer 1, latest comment (generalize away from specific cryptocurrencies)
+
+**Comment:** References to pre-Merge Ethereum reduce readability and make the model appear tied to a historical system; the paper should generalize to virtually all PoW and PoS cryptocurrencies. In particular, the abstract fragment "Bitcoin, and a historical Ethereum-like PoW configuration that does not represent current Ethereum" should be removed.
+
+**Response:** We agree. We removed the cryptocurrency-specific and pre-Merge wording from the abstract and from the experimental framing, and we now present the framework as generalizable to PoW and PoS consensus scenarios rather than to particular coins. The model is no longer tied to a historical system, and the De Vries reference is retained only as brief background support for Ethereum's transition to PoS.
+
+**Revision made:** In the Abstract, we replaced the fragment "Proof-of-Work reference configurations (Bitcoin, and a historical Ethereum-like PoW configuration that does not represent current Ethereum…)" with "representative PoW and PoS consensus scenarios." Throughout the experimental framing we replaced "Bitcoin" with "PoW baseline scenario," the former Ethereum-like PoW configuration with "high-throughput PoW scenario," and "Bitcoin vs Ethereum" with a comparison of the two PoW scenarios; the data labels, figure references, discussion, and limitations were generalized accordingly. We removed the pre-Merge Ethereum framing from the Introduction and the Merge/[21] mention from the Results experiment description, keeping a single background sentence on Ethereum's PoS transition (with [21]) in the related-work subsection. The only remaining cryptocurrency mentions are one historical reference to Bitcoin's inception in the Introduction and the De Vries background sentence on Ethereum's transition to PoS; bibliographic references retain their original titles. All changed text is marked in red.
+
+**Location in revised manuscript:** Abstract; Introduction; Background and Related Work, subsection "Energy, Permissionlessness, and Sybil Resistance" ([21]); Experimental Setup, subsections "B. Consensus and Workload Parameters" and "C. Energy and Carbon Parameters"; Results and Analysis, subsections "A. Energy Consumption Analysis" and "B. Carbon Footprint Analysis"; Discussion and Threats to Validity.
 
 ---
 

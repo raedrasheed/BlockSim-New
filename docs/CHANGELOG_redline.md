@@ -143,3 +143,22 @@ add_figure_refs.py -> format_revision_pass.py -> docx_to_pdf.py.
 Full build order: conservative_revision.py → fix_math_omml.py →
 add_figure_refs.py → format_revision_pass.py → renumber_eq_fig.py →
 docx_to_pdf.py.
+
+## Generalization pass (stage 6)
+`docs/generalize_crypto.py` — generalize the experimental framing away from
+specific cryptocurrencies, per Reviewer 1's latest comment (no structural or
+numbering changes):
+- Abstract: replaced "Proof-of-Work reference configurations (Bitcoin, and a
+  historical Ethereum-like PoW configuration … since The Merge)" with
+  "representative PoW and PoS consensus scenarios."
+- Experimental framing generalized: "Bitcoin" → "PoW baseline scenario"; former
+  Ethereum-like PoW config → "high-throughput PoW scenario"; "Bitcoin vs
+  Ethereum" → comparison of the two PoW scenarios; data labels, figure
+  references (Figs 1–3 text), discussion and limitations updated to match.
+- Removed the pre-Merge/Merge framing from the Introduction and the Merge/[21]
+  mention from the Results experiment description; kept one background sentence
+  on Ethereum's PoS transition (with [21]) in the "Energy, Permissionlessness,
+  and Sybil Resistance" subsection.
+- Remaining cryptocurrency mentions in the body: one historical reference to
+  Bitcoin's inception (Introduction) and one Ethereum/PoS-transition background
+  sentence (Background, [21]); reference titles unchanged. All changed spans RED.
