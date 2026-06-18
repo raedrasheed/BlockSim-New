@@ -96,3 +96,23 @@ and citation, leaving Figures 1-6 untouched:
 Full build order: `python docs/conservative_revision.py` ->
 `python docs/fix_math_omml.py` -> `python docs/add_figure_refs.py` ->
 `python docs/docx_to_pdf.py`.
+
+## Formatting-only pass (stage 4)
+`docs/format_revision_pass.py` finalises formatting without changing content:
+- **New figures de-embedded**: the four embedded new figures (image7-10) are
+  replaced by RED, 10 pt, centered placement markers — "[Insert Figure N here:
+  ...]" — immediately after the paragraph that cites each figure; captions kept.
+- **Separate figure files**: new figures exported to `figures_revision/` as
+  Figure7_PoW_energy_sensitivity, Figure8_PoS_validator_scaling,
+  Figure9_computation_vs_communication, Figure10_carbon_gamma_sensitivity
+  (PNG + PDF each).
+- **Added/revised text → 10 pt, justified**; new subsection headings now inherit
+  the original Heading-2 style (10 pt) instead of an 11 pt override.
+- **Bug fix (Figures 5-6 restored)**: a spanned phrase-replacement in the carbon
+  paragraph had earlier removed the embedded original Figures 5 and 6; the
+  replacement now preserves image runs. All six original figures (1-6) are again
+  byte-identical to the source and remain unchanged.
+- Equations (11 displayed) and all in-text references/citations preserved.
+
+Full build order: conservative_revision.py -> fix_math_omml.py ->
+add_figure_refs.py -> format_revision_pass.py -> docx_to_pdf.py.

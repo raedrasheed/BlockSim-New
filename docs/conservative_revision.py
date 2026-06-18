@@ -66,6 +66,22 @@ def find_para(substr, start=0):
     return -1
 
 
+def _mk_wr(text, red):
+    """Build a standalone w:r (Times New Roman 11pt, red if requested)."""
+    r = OxmlElement("w:r")
+    rpr = OxmlElement("w:rPr")
+    rf = OxmlElement("w:rFonts")
+    rf.set(qn("w:ascii"), "Times New Roman"); rf.set(qn("w:hAnsi"), "Times New Roman")
+    rpr.append(rf)
+    if red:
+        col = OxmlElement("w:color"); col.set(qn("w:val"), RED); rpr.append(col)
+    sz = OxmlElement("w:sz"); sz.set(qn("w:val"), "22"); rpr.append(sz)
+    r.append(rpr)
+    t = OxmlElement("w:t"); t.set(qn("xml:space"), "preserve"); t.text = text
+    r.append(t)
+    return r
+
+
 def _mk_run_elem(template_run, text, red):
     """Create a w:r element cloned from template_run, with given text and color."""
     new_r = deepcopy(template_run._element)
@@ -102,18 +118,26 @@ def replace_phrase(substr, old, new, label):
             run.text = before
             report.append(f"[OK replace] {label}")
             return True
-    # phrase spans runs -> rebuild paragraph text (loses inner sub/superscript but rare)
+    # phrase spans runs -> rebuild only the TEXT runs; PRESERVE any runs that
+    # contain drawings/images (e.g. original Figures embedded in this paragraph).
     full = para.text
     if old in full:
         b, a = full.split(old, 1)
-        for r in list(para.runs):
-            r._element.getparent().remove(r._element)
-        for txt, red in ((b, False), (new, True), (a, False)):
-            if txt:
-                rr = para.add_run(txt); rr.font.name = BASE_FONT; rr.font.size = BASE_SIZE
-                if red:
-                    rr.font.color.rgb = RGBColor.from_string(RED)
-        report.append(f"[OK replace*spanned] {label}")
+        all_r = para._p.findall(qn("w:r"))
+        draw_elems = [r for r in all_r if r.findall(".//" + qn("w:drawing"))]
+        text_elems = [r for r in all_r if not r.findall(".//" + qn("w:drawing"))]
+        for r in text_elems:
+            r.getparent().remove(r)
+        new_runs = [_mk_wr(txt, red) for txt, red in
+                    ((b, False), (new, True), (a, False)) if txt]
+        if draw_elems:
+            for wr in new_runs:
+                draw_elems[0].addprevious(wr)   # keep text before the figures
+        else:
+            for wr in new_runs:
+                para._p.append(wr)
+        tag = "spanned-preserve-img" if draw_elems else "spanned"
+        report.append(f"[OK replace*{tag}] {label}")
         return True
     report.append(f"[MISS phrase] {label}: '{old[:40]}'")
     return False
