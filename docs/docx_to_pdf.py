@@ -41,6 +41,7 @@ IN = os.path.join(os.path.dirname(__file__),
 OUT = os.path.join(os.path.dirname(__file__),
                    "Extending_BlockSim_Energy_Carbon_REVISED_redline.pdf")
 RED_HEX = "C00000"
+GREEN_HEX = "008000"
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 MM = "{http://schemas.openxmlformats.org/officeDocument/2006/math}"
@@ -127,18 +128,19 @@ def run_markup(r):
     if not txt:
         return ""
     s = esc(txt)
-    red = False; bold = False; ital = False
+    color = None; bold = False; ital = False
     if rpr is not None:
         bold = rpr.find(W + "b") is not None
         ital = rpr.find(W + "i") is not None
         col = rpr.find(W + "color")
-        red = col is not None and col.get(qn("w:val")) == RED_HEX
+        if col is not None and col.get(qn("w:val")) in (RED_HEX, GREEN_HEX):
+            color = col.get(qn("w:val"))
     if bold:
         s = f"<b>{s}</b>"
     if ital:
         s = f"<i>{s}</i>"
-    if red:
-        s = f'<font color="#{RED_HEX}">{s}</font>'
+    if color:
+        s = f'<font color="#{color}">{s}</font>'
     return s
 
 

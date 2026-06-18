@@ -22,23 +22,25 @@ from docx.oxml.ns import qn
 
 F = os.path.join(os.path.dirname(__file__),
                  "Extending_BlockSim_Energy_Carbon_REVISED_redline.docx")
-RED = "C00000"
+# This (stage-6) generalization is coloured GREEN so it is distinguishable from
+# the earlier RED revision content.
+GREEN = "008000"
 doc = docx.Document(F)
 report = []
 
 
-def _clone(run_el, text, red):
+def _clone(run_el, text, mark):
     r = deepcopy(run_el)
     for ch in list(r):
         if ch.tag in (qn("w:t"), qn("w:br"), qn("w:drawing")):
             r.remove(ch)
-    if red:
+    if mark:
         rpr = r.find(qn("w:rPr"))
         if rpr is None:
             rpr = OxmlElement("w:rPr"); r.insert(0, rpr)
         for c in rpr.findall(qn("w:color")):
             rpr.remove(c)
-        col = OxmlElement("w:color"); col.set(qn("w:val"), RED); rpr.append(col)
+        col = OxmlElement("w:color"); col.set(qn("w:val"), GREEN); rpr.append(col)
     t = OxmlElement("w:t"); t.set(qn("xml:space"), "preserve"); t.text = text
     r.append(t)
     return r
@@ -64,9 +66,9 @@ def replace_red(anchor, old, new, label):
             run.text = before
             el = run._element
             if after:
-                el.addnext(_clone(el, after, red=False))
+                el.addnext(_clone(el, after, False))
             if new:
-                el.addnext(_clone(el, new, red=True))
+                el.addnext(_clone(el, new, True))
             report.append(f"[OK] {label}")
             return
     # spanned fallback (paragraphs here carry no images)
@@ -77,9 +79,9 @@ def replace_red(anchor, old, new, label):
         for r in list(p._p.findall(qn("w:r"))):
             if not r.findall(".//" + qn("w:drawing")):
                 r.getparent().remove(r)
-        for txt, red in [(b, False), (new, True), (a, False)]:
+        for txt, mark in [(b, False), (new, True), (a, False)]:
             if txt:
-                p._p.append(_clone(template, txt, red))
+                p._p.append(_clone(template, txt, mark))
         report.append(f"[OK spanned] {label}")
         return
     report.append(f"[MISS text] {label}: {old[:35]!r}")
@@ -238,6 +240,12 @@ EDITS = [
      "Ethereum, which uses Proof-of-Stake, and communication energy",
      "Finally, the PoW results represent scenario configurations rather than any "
      "specific cryptocurrency, and communication energy", "threats"),
+
+    # --- Threats to Validity: generalize the predictive-scope sentence ---
+    ("not intended to predict the exact real-world consumption",
+     "the exact real-world consumption of Bitcoin or Ethereum",
+     "the exact real-world consumption of any specific cryptocurrency",
+     "threats-predict"),
 ]
 
 for anchor, old, new, label in EDITS:

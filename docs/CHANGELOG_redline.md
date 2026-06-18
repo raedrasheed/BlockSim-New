@@ -162,3 +162,7 @@ numbering changes):
 - Remaining cryptocurrency mentions in the body: one historical reference to
   Bitcoin's inception (Introduction) and one Ethereum/PoS-transition background
   sentence (Background, [21]); reference titles unchanged. All changed spans RED.
+
+> NOTE: The stage-6 generalization edits are coloured **GREEN** (008000) to
+> distinguish them from the earlier RED revision content; all prior red markings
+> are unchanged.
