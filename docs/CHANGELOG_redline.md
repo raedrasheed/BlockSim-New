@@ -54,3 +54,22 @@ are unchanged (backward compatible).
 `Proof-of-Work reference models (Bitcoin and Ethereum)` 0 ·
 `replicated several times` 0 · `fixed emission factor` only in the added RED
 sentence stating it *is insufficient*. De Vries DOI present.
+
+## Math formatting stage (OMML)
+A second stage (`docs/fix_math_omml.py`) converts the added plain-text
+mathematics into **native Word equations (OMML)** while keeping them RED:
+- Rebuilt the PoW (§D) and PoS (§E) prose so every symbol is inline OMML
+  (10 inline equations in §D, 6 in §E).
+- Added **displayed, numbered equations (8)–(11)** — R_t=(B_t+F_t)·P_t,
+  E_budget,t=κR_t/C_elec,t, E_i,t=s_i,t·E_PoW,t, and
+  E_PoS=(Σ_{v=1..V} P_v·T·u_v)/1000+E_comm — built as clones of the original
+  equation-table style (so they match Equations 1–7 and continue the numbering).
+- Converted inline "E = P × T" in the Results to OMML (E = P · T).
+- Greek (κ, γ, ε), proper sub/superscripts, upright roman labels (PoW, PoS,
+  elec, budget, comm, block, tx), fraction bars, and Σ with limits are used.
+- Audit: no raw LaTeX (`\frac`, `\sum`, `\mathrm`, `_{`, `^{`) and no plain-text
+  math tokens (E_PoS, E_budget, gamma, kappa, …) remain. Original Equations
+  (1)–(7) are untouched (black); all added equations are red.
+
+Build order: `python docs/conservative_revision.py` then
+`python docs/fix_math_omml.py` then `python docs/docx_to_pdf.py`.
