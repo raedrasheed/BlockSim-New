@@ -1,0 +1,52 @@
+@startuml
+title Proof of Collaboration (PoCol) Consensus Genesis Round (Round 0)
+skinparam dpi 180
+skinparam sequenceMessageAlign left
+actor Client
+participant "Miner A" as A
+participant "Miner B" as B
+participant "Miner C" as C
+participant "Blockchain ledger" as L
+
+A -> A: Store registration information of Miner A\n(miner A identifier, public key of Miner A, network address of Miner A)\nin the local registered miner set on the local machine of Miner A
+B -> A: Send registration request from Miner B to Miner A\ncontaining miner B identifier, public key of Miner B,\nand network address of Miner B
+A -> A: Add Miner B to the local registered miner set\non the local machine of Miner A
+A -> B: Send confirmation of registration to Miner B\nand send the current registered miner set\n(which now contains Miner A and Miner B)
+C -> A: Send registration request from Miner C to Miner A\ncontaining miner C identifier, public key of Miner C,\nand network address of Miner C
+A -> A: Add Miner C to the local registered miner set\non the local machine of Miner A
+A -> B: Broadcast registration information of Miner C to Miner B
+B -> B: Add Miner C to the local registered miner set\non the local machine of Miner B
+A -> C: Send confirmation of registration to Miner C\nand send the current registered miner set\n(which now contains Miner A, Miner B, and Miner C)
+Client -> A: Submit new transaction
+A -> A: Validate transaction and add it to the local mempool of Miner A
+A -> B: Relay validated transaction from Miner A to Miner B
+A -> C: Relay validated transaction from Miner A to Miner C
+B -> B: Validate received transaction and add it to\nthe local mempool of Miner B
+C -> C: Validate received transaction and add it to\nthe local mempool of Miner C
+A -> A: Read the initial previous block hash (genesis hash)\nfrom the local blockchain ledger\nand build candidate block header for round 0\nfrom the local mempool of Miner A and the genesis hash
+B -> B: Read the initial previous block hash (genesis hash)\nfrom the local blockchain ledger\nand build candidate block header for round 0\nfrom the local mempool of Miner B and the genesis hash
+C -> C: Read the initial previous block hash (genesis hash)\nfrom the local blockchain ledger\nand build candidate block header for round 0\nfrom the local mempool of Miner C and the genesis hash
+A -> A: Compute round seed for round 0 as a cryptographic hash\nof a fixed domain separator string, the genesis hash,\nand the round number 0
+B -> B: Compute the same round seed for round 0\nusing the same inputs (fixed string, genesis hash, round number 0)
+C -> C: Compute the same round seed for round 0\nusing the same inputs (fixed string, genesis hash, round number 0)
+A -> A: Apply the Proof of Collaboration nonce distribution function\nfor round 0 using the round seed, the set of registered miner identifiers,\nthe candidate block header, the genesis hash,\nand the maximum nonce value to:\n(1) compute a ticket value for each registered miner identifier\n    as a cryptographic hash of the round seed concatenated with the miner identifier,\n(2) sort all registered miner identifiers by their ticket values\n    to obtain a pseudo-random but deterministic ordered list of miners for round 0,\n(3) determine the index of Miner A in this ordered list,\n(4) compute the start and end of the nonce range assigned to Miner A\n    by dividing the global nonce space evenly by the number of registered miners
+B -> B: Apply the same Proof of Collaboration nonce distribution function\nusing the same public inputs to:\n(1) compute ticket values for all registered miner identifiers,\n(2) obtain the same ordered list of miners for round 0,\n(3) determine the index of Miner B in this ordered list,\n(4) compute the start and end of the nonce range assigned to Miner B
+C -> C: Apply the same Proof of Collaboration nonce distribution function\nusing the same public inputs to:\n(1) compute ticket values for all registered miner identifiers,\n(2) obtain the same ordered list of miners for round 0,\n(3) determine the index of Miner C in this ordered list,\n(4) compute the start and end of the nonce range assigned to Miner C
+A -> A: Repeatedly compute the cryptographic hash of the candidate block header\ncombined with nonce values from the nonce range of Miner A\nand compare each hash value with the difficulty target
+B -> B: Repeatedly compute the cryptographic hash of the candidate block header\ncombined with nonce values from the nonce range of Miner B\nand compare each hash value with the difficulty target
+C -> C: Repeatedly compute the cryptographic hash of the candidate block header\ncombined with nonce values from the nonce range of Miner C\nand compare each hash value with the difficulty target
+B -> B: Detect nonce value for which the cryptographic hash\nof the candidate block header combined with this nonce value\nis below the difficulty target and construct a new block that contains\nthe candidate block header, the winning nonce value,\nand the selected transactions
+B -> B: Compute reward share for each registered miner\naccording to the Proof of Collaboration reward distribution function\n(for example, based on equal shares or on the size of the assigned nonce range)\nfor this genesis round
+B -> B: Create reward outputs in the new block so that the block reward\nand the transaction fees are distributed among all registered miners\n(for example, create separate outputs for Miner A, Miner B, Miner C,\nand all other registered miners)
+B -> A: Broadcast new block of round 0 with winning nonce value\nand distributed reward outputs to Miner A
+B -> C: Broadcast new block of round 0 with winning nonce value\nand distributed reward outputs to Miner C
+A -> A: Verify validity of the received genesis round block,\nincluding proof of work, validity of all transactions,\ncorrectness of the nonce range used by Miner B\naccording to the round 0 Proof of Collaboration nonce distribution function,\nand correctness of the reward distribution among all registered miners
+C -> C: Verify validity of the received genesis round block,\nincluding proof of work, validity of all transactions,\ncorrectness of the nonce range used by Miner B,\nand correctness of the reward distribution among all registered miners
+B -> B: Verify the constructed genesis round block again for consistency\nbefore committing it to the local blockchain ledger
+A -> L: Append the new valid genesis round block\nto the local view of the blockchain ledger of Miner A
+B -> L: Append the new valid genesis round block\nto the local view of the blockchain ledger of Miner B
+C -> L: Append the new valid genesis round block\nto the local view of the blockchain ledger of Miner C
+A -> A: Remove all transactions that were included in the genesis round block\nfrom the local mempool of Miner A
+B -> B: Remove all transactions that were included in the genesis round block\nfrom the local mempool of Miner B
+C -> C: Remove all transactions that were included in the genesis round block\nfrom the local mempool of Miner C
+@enduml
