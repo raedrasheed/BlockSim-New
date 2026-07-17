@@ -168,3 +168,81 @@ no unimplemented mechanism as implemented.
 Experimental values, result tables, Chapter 7 numbers, research questions,
 references, page layout and margins, and all content unrelated to the
 common-template correction.
+
+---
+
+# Final-28 — Layout and Pagination Pass
+
+**Final file:** `PhDThesisRaedRasheed-final28-PoCol-CommonTemplate-FinalLayout.docx`
+(final-27 kept unchanged; original still untouched)
+
+**Layout engine:** LibreOffice Writer 24.2 headless (the `libreoffice-writer`
+filter was installed to enable rendering), A4, Liberation Serif — the
+metric-compatible substitute for Times New Roman, so pagination closely tracks
+Microsoft Word. **Total: 147 pages** (original: 142; +5 from the revision).
+Printed-number scheme verified from footers: front matter I–XII, body 1–133,
+References heading on printed page 127.
+
+## Verified page number of every figure and table (rendered layout)
+
+| Item | Page | Item | Page |
+|---|---|---|---|
+| Table 3.1 | 24 | Figure 3.1 | 37 |
+| Table 3.2 | 27 | Figure 3.2 | 38 |
+| Table 3.3 | 28 | Figure 5.1 | 76 |
+| Table 3.4 | 29 | Figure 5.2 | 79 |
+| Table 3.5 | 31 | Figure 5.3 | 87 |
+| Table 3.6 | 35 | Figure 5.4 | 91 |
+| Table 3.7 | 47 | Figure 7.1 | 110 |
+| Table 3.8 | 49 | Figure 7.2 | 111 |
+| Table 6.1 | 102 | Figure 7.3 | 112 |
+| Table 6.2 | 104 | Figure 7.4 | 113 |
+| Table 7.1 | 109 | Figure 7.5 | 114 |
+| | | Figure 7.6 | 114 |
+| | | Figure 7.7 | 115 |
+| | | Figure 7.8 | 116 |
+
+## List of Tables / List of Figures — manually synchronized
+
+16 typed page numbers corrected, **new digits in red**: LoT — Table 3.7
+(46→47), 3.8 (48→49), 6.1 (97→102), 6.2 (99→104), 7.1 (104→109); LoF — Figure
+3.2 (37→38), 5.3 (84→87), 5.4 (88→91), 7.1 (105→110), 7.2 (106→111), 7.3
+(107→112), 7.4 (108→113), 7.5 (109→114), 7.6 (109→114), 7.7 (110→115), 7.8
+(111→116). The Chapter-3 off-by-ones pre-dated this revision (verified by
+rendering the untouched original). All other entries already matched and were
+left black. Every list title was re-verified against its caption; all match
+(LoF 5.1 carries the earlier red wording correction and wraps to two lines —
+cosmetic, consistent with its full caption).
+
+## Table of Contents and cross-references
+
+All 158 cached TOC page numbers (152 sections/chapters + front-matter entries
++ References) were recomputed from the rendered layout and corrected in place;
+a 9-entry sample re-verified after repackaging (all consistent, including
+5.8.2 → 80 and References → 127). Cached TOC text is field-generated, so it is
+kept black; `updateFields` remains set, and Word will re-derive the same
+numbers (±1 possible if Word's line breaking differs marginally from the
+metric-compatible engine — the field refresh on open absorbs exactly this).
+
+## Visual inspection performed
+
+- Figures 5.1 (p. 76), 5.2 (p. 79), 5.3 (p. 87), 5.4 (p. 91) inspected in the
+  rendered final document: each shows one canonical template, TemplateID
+  verification, predetermined T_reward(r) before mining, disjoint ranges,
+  nonce-only search, committed-template broadcast, and the no-independent-
+  restart rule; changed steps are red inside the images.
+- No figure is stretched (aspect ratios preserved exactly), clipped, split
+  across pages, or separated from its caption; each caption sits directly
+  beneath its figure on the same page.
+- Diagram text legibility: embedded at ≈500 effective DPI (sharper than the
+  original diagrams at the same page width); small at 100% zoom — as in the
+  original thesis diagrams — and fully crisp when zoomed or printed.
+- Whole-document scan: no accidental blank pages (the near-blank page "II"
+  after the title page exists in the untouched original), no headings stranded
+  at page bottoms, no abnormal whitespace introduced.
+
+## Red-marking status after this pass
+
+**92 red runs, 4,475 red words** (76 + 16 list-number corrections). All manual
+corrections of this pass are red; unchanged text remains black; no Track
+Changes or highlighting used.
