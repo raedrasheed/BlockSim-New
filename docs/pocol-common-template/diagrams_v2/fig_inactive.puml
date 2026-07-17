@@ -1,0 +1,35 @@
+@startuml
+title Proof of Collaboration (PoCol) Consensus Round with Unused Nonce Space Due to Inactive Miner
+skinparam dpi 180
+skinparam sequenceMessageAlign left
+participant "Miner A (active miner)" as A
+participant "Miner B (active miner)" as B
+participant "Miner C (inactive miner)" as C
+participant "Blockchain ledger" as L
+
+A -> A: Read current registered miner set and committed state\nfrom the local blockchain ledger\n(for example: Miner A, Miner B, Miner C)
+B -> B: Read the same registered miner set and committed state\nfrom the local blockchain ledger
+C -> C: Read the same registered miner set and committed state\nfrom the local blockchain ledger (if online as a node)
+A -> A: <color:red>Derive the canonical block template for round r deterministically</color>\n<color:red>from the committed state and the synchronized pending-transaction set:</color>\n<color:red>previous block hash, round number, protocol version, difficulty target,</color>\n<color:red>deterministic round timestamp, ordered transaction list, Merkle root,</color>\n<color:red>and the predetermined reward-distribution transaction T_reward(r)</color>
+B -> B: <color:red>Derive the same canonical block template</color>\n<color:red>from the same public inputs and deterministic rules</color>
+C -> C: <color:red>If online as a node, derive the same canonical block template;</color>\n<color:red>as a miner, Miner C remains inactive in this round</color>
+A -> A: <color:red>Compute TemplateID_r = H(BlockTemplate_r) and verify that it matches</color>\n<color:red>the committed template of round r; the template is immutable and</color>\n<color:red>the nonce is the only field that may change during the round</color>
+B -> B: <color:red>Compute and verify the same TemplateID_r</color>
+A -> A: Apply the PoCol nonce distribution function using\n<color:red>seed_r = H("PoColNonce" || prev_hash || r || TemplateID_r)</color>\nand the registered miner set to compute the deterministic ordered miner list\nand the disjoint nonce range assigned to Miner A
+B -> B: Apply the same nonce distribution function with the same public inputs\nto compute the same ordered list and the disjoint nonce range of Miner B
+C -> C: The same function assigns a disjoint nonce range to Miner C,\nbut Miner C does not search it in this round
+A -> A: <color:red>Search only the assigned range of Miner A by computing</color>\n<color:red>H(TemplateHeader_r || nonce) for nonce values in that range;</color>\n<color:red>no header field other than the nonce is modified</color>
+B -> B: <color:red>Search only the assigned range of Miner B in the same way</color>
+C -> C: Remain inactive: the nonce range of Miner C is not explored,\nso this part of the nonce space is unused in this round
+A -> A: <color:red>Find a nonce in the assigned range with</color>\n<color:red>H(TemplateHeader_r || nonce) below the difficulty target;</color>\n<color:red>the block is the already committed template plus this winning nonce;</color>\n<color:red>no transaction, timestamp, or reward output is created or changed now</color>
+A -> B: <color:red>Broadcast the committed block template together with the winning nonce</color>
+A -> C: <color:red>Broadcast the committed block template together with the winning nonce</color>\n(if Miner C is online as a node)
+B -> B: <color:red>Verify the received block: TemplateID equals the committed TemplateID_r,</color>\n<color:red>all immutable header fields, the transaction list, and the Merkle root</color>\n<color:red>match the canonical template, the reward-distribution transaction equals</color>\n<color:red>the predetermined T_reward(r), the winning nonce lies in the assigned</color>\n<color:red>range of Miner A, and the proof of work is below the difficulty target</color>
+C -> C: <color:red>Perform the same verification (as a node)</color>
+A -> L: Append the new valid block for this round\nto the local view of the blockchain ledger of Miner A
+B -> L: Append the new valid block for this round\nto the local view of the blockchain ledger of Miner B
+C -> L: Append the new valid block for this round\nto the local view of the blockchain ledger of Miner C
+A -> A: Remove the transactions included in the committed block\nfrom the local mempool of Miner A\n(Miner B and Miner C do the same)
+A -> A: <color:red>If all assigned nonce ranges are exhausted without a valid nonce,</color>\n<color:red>the round ends: a new round number is created, a new canonical block</color>\n<color:red>template (possibly with an updated deterministic timestamp or transaction</color>\n<color:red>set) is derived deterministically, all miners verify the same new</color>\n<color:red>TemplateID, and fresh disjoint nonce ranges are assigned before mining resumes</color>
+B -> B: <color:red>Follow the same round-restart rule; no miner may modify the template</color>\n<color:red>independently and continue mining within the current round</color>
+@enduml

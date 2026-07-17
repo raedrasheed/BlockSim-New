@@ -1,0 +1,35 @@
+@startuml
+title Proof of Collaboration (PoCol) Reward Distribution and Verification in Round r
+skinparam dpi 180
+skinparam sequenceMessageAlign left
+participant "Miner A (registered miner)" as A
+participant "Miner B (winner miner)" as B
+participant "Miner C (registered miner)" as C
+participant "Blockchain ledger" as L
+
+A -> A: <color:red>Before mining begins: read the registered miner set M_r for round r</color>\n<color:red>from the local view of the blockchain ledger</color>
+B -> B: <color:red>Read the same registered miner set M_r</color>\n<color:red>(every registered miner does this before mining)</color>
+C -> C: <color:red>Read the same registered miner set M_r</color>
+A -> A: <color:red>Apply the PoCol reward distribution function f_r to M_r and the protocol</color>\n<color:red>rules, using the block subsidy for round r plus the fees of the canonical</color>\n<color:red>ordered transaction list, to compute the deterministic reward share</color>\n<color:red>of every registered miner</color>
+B -> B: <color:red>Compute the same reward shares from the same on-chain inputs</color>
+C -> C: <color:red>Compute the same reward shares from the same on-chain inputs</color>
+A -> A: <color:red>Construct the deterministic reward-distribution transaction T_reward(r)</color>\n<color:red>with one output per registered miner, place it as the first transaction</color>\n<color:red>of the canonical ordered transaction list, and commit it through the</color>\n<color:red>Merkle root of the canonical block template of round r</color>
+B -> B: <color:red>Construct the identical T_reward(r) and verify that the resulting</color>\n<color:red>TemplateID_r matches the committed template of round r</color>
+C -> C: <color:red>Construct the identical T_reward(r) and verify the same TemplateID_r</color>
+B -> B: <color:red>During the collaborative search, detect a nonce in the assigned range</color>\n<color:red>of Miner B for which H(TemplateHeader_r || nonce) is below the</color>\n<color:red>difficulty target of round r</color>
+B -> B: <color:red>Do not create, modify, or insert any transaction after finding the nonce:</color>\n<color:red>the block for round r is the already committed template</color>\n<color:red>(including T_reward(r)) together with the winning nonce</color>
+B -> A: <color:red>Broadcast the committed block template with the winning nonce to Miner A</color>
+B -> C: <color:red>Broadcast the committed block template with the winning nonce to Miner C</color>
+A -> A: Verify the received block for round r by checking:\n<color:red>- the TemplateID equals the committed TemplateID_r and no template field</color>\n<color:red>  was modified,</color>\n- the validity of the block header and the winning nonce\n  (proof of work below the difficulty target),\n<color:red>- the winning nonce lies in the assigned nonce range of Miner B,</color>\n- the validity of all ordinary transactions in the block,\n- the correctness of the reward-distribution transaction, including:\n<color:red>  (1) it is identical to the predetermined T_reward(r) committed</color>\n<color:red>      in the canonical template,</color>\n  (2) all beneficiaries correspond exactly to miners in M_r,\n  (3) each registered miner receives exactly the share prescribed by f_r,\n  (4) the sum of all reward outputs equals the expected block reward\n      plus the total collected transaction fees,\n  (5) no extra value is created or destroyed
+C -> C: Perform the same verification procedure for the received block\nfor round r, including full verification of the reward distribution
+B -> B: Re-verify locally that the block remains consistent\nbefore committing it to the local blockchain ledger
+A -> L: Append the new valid block for round r\nto the local view of the blockchain ledger of Miner A
+B -> L: Append the new valid block for round r\nto the local view of the blockchain ledger of Miner B
+C -> L: Append the new valid block for round r\nto the local view of the blockchain ledger of Miner C
+A -> A: Update the local balances of all miners according to the\ncommitted reward outputs recorded in the new block
+B -> B: Update the local balances of all miners in the same way
+C -> C: Update the local balances of all miners in the same way
+A -> A: Use the updated blockchain state, including new balances and any\nchanges to the registered miner set, as input for the next round
+B -> B: Use the updated blockchain state as input for the next round
+C -> C: Use the updated blockchain state as input for the next round\n(if Miner C remains a registered miner and continues to participate)
+@enduml

@@ -1,0 +1,51 @@
+@startuml
+title Proof of Collaboration (PoCol) Consensus Genesis Round (Round 0)
+skinparam dpi 180
+skinparam sequenceMessageAlign left
+actor Client
+participant "Miner A" as A
+participant "Miner B" as B
+participant "Miner C" as C
+participant "Blockchain ledger" as L
+
+A -> A: Store registration information of Miner A\n(miner A identifier, public key of Miner A, network address of Miner A)\nin the local registered miner set on the local machine of Miner A
+B -> A: Send registration request from Miner B to Miner A\ncontaining miner B identifier, public key of Miner B,\nand network address of Miner B
+A -> A: Add Miner B to the local registered miner set\non the local machine of Miner A
+A -> B: Send confirmation of registration to Miner B\nand send the current registered miner set\n(which now contains Miner A and Miner B)
+C -> A: Send registration request from Miner C to Miner A\ncontaining miner C identifier, public key of Miner C,\nand network address of Miner C
+A -> A: Add Miner C to the local registered miner set\non the local machine of Miner A
+A -> B: Broadcast registration information of Miner C to Miner B
+B -> B: Add Miner C to the local registered miner set\non the local machine of Miner B
+A -> C: Send confirmation of registration to Miner C\nand send the current registered miner set\n(which now contains Miner A, Miner B, and Miner C)
+Client -> A: Submit new transaction
+A -> A: Validate transaction and add it to the local mempool of Miner A
+A -> B: Relay validated transaction from Miner A to Miner B
+A -> C: Relay validated transaction from Miner A to Miner C
+B -> B: Validate received transaction and add it to\nthe local mempool of Miner B
+C -> C: Validate received transaction and add it to\nthe local mempool of Miner C
+A -> A: <color:red>Read the genesis hash from the local ledger and deterministically derive</color>\n<color:red>the canonical genesis block template for round 0: genesis hash, round</color>\n<color:red>number 0, protocol version, difficulty target, deterministic timestamp,</color>\n<color:red>ordered list of bootstrap and initial transactions, Merkle root, and the</color>\n<color:red>predetermined initial reward-distribution transaction</color>
+B -> B: <color:red>Derive the same canonical genesis block template from the same inputs</color>
+C -> C: <color:red>Derive the same canonical genesis block template from the same inputs</color>
+A -> A: <color:red>Compute TemplateID_0 = H(BlockTemplate_0) and verify that it matches</color>\n<color:red>the network-wide genesis template; the template is immutable and</color>\n<color:red>only the nonce may vary during the round</color>
+B -> B: <color:red>Compute and verify the same TemplateID_0</color>
+C -> C: <color:red>Compute and verify the same TemplateID_0</color>
+A -> A: Compute the round seed for round 0 as\n<color:red>seed_0 = H("PoColNonce" || genesis_hash || 0 || TemplateID_0)</color>
+B -> B: Compute the same round seed from the same inputs
+C -> C: Compute the same round seed from the same inputs
+A -> A: Apply the PoCol nonce distribution function for round 0:\n(1) compute a ticket value for each registered miner identifier as a\n    cryptographic hash of the round seed and the miner identifier,\n(2) sort miners by ticket value into a deterministic ordered list,\n(3) determine the index of Miner A in this ordered list,\n(4) compute the disjoint nonce range assigned to Miner A\n    by dividing the global nonce space by the number of registered miners
+B -> B: Apply the same function with the same public inputs\nto obtain the same ordered list and the disjoint nonce range of Miner B
+C -> C: Apply the same function with the same public inputs\nto obtain the same ordered list and the disjoint nonce range of Miner C
+A -> A: <color:red>Search only the assigned range of Miner A by computing</color>\n<color:red>H(TemplateHeader_0 || nonce) and comparing each hash value</color>\n<color:red>with the difficulty target</color>
+B -> B: <color:red>Search only the assigned range of Miner B in the same way</color>
+C -> C: <color:red>Search only the assigned range of Miner C in the same way</color>
+B -> B: <color:red>Detect a winning nonce in the assigned range of Miner B;</color>\n<color:red>the genesis block B0 is the already committed template plus this nonce;</color>\n<color:red>no transaction or reward output is created after the nonce is found</color>
+B -> A: <color:red>Broadcast the committed genesis template with the winning nonce</color>
+B -> C: <color:red>Broadcast the committed genesis template with the winning nonce</color>
+A -> A: <color:red>Verify B0: the TemplateID equals the committed TemplateID_0, all immutable</color>\n<color:red>header fields, the transaction list, and the Merkle root match the canonical</color>\n<color:red>genesis template, the predetermined initial reward-distribution transaction</color>\n<color:red>is unchanged, the winning nonce lies in the assigned range of Miner B,</color>\n<color:red>and the proof of work is below the difficulty target</color>
+C -> C: <color:red>Perform the same verification of B0</color>
+B -> B: Re-verify the genesis block locally for consistency\nbefore committing it to the local blockchain ledger
+A -> L: Append the valid genesis round block\nto the local view of the blockchain ledger of Miner A
+B -> L: Append the valid genesis round block\nto the local view of the blockchain ledger of Miner B
+C -> L: Append the valid genesis round block\nto the local view of the blockchain ledger of Miner C
+A -> A: Remove the transactions included in the genesis block from the\nlocal mempool and update balances according to the committed\nreward outputs (Miner B and Miner C do the same)
+@enduml
