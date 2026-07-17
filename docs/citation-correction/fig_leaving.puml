@@ -1,0 +1,33 @@
+@startuml
+title Proof of Collaboration (PoCol) Miner Leaving Sequence
+skinparam dpi 180
+skinparam sequenceMessageAlign left
+participant "Miner A" as A
+participant "Miner B" as B
+participant "Miner C (leaving miner)" as C
+participant "Blockchain ledger" as L
+
+C -> C: Decide to leave the network as a registered miner\nand create a deregistration transaction containing:\n- identifier of Miner C\n- network address of Miner C\n- digital signature of Miner C over the deregistration message\n- timestamp or block height
+C -> A: Send deregistration transaction of Miner C to Miner A
+A -> A: Validate deregistration transaction of Miner C:\n- verify digital signature of Miner C\n- verify that Miner C is currently in the registered miner set\nIf valid, add deregistration transaction of Miner C\nto the local mempool of Miner A
+A -> B: Relay validated deregistration transaction of Miner C to Miner B
+A -> C: Optionally relay back for confirmation or redundancy
+B -> B: Validate deregistration transaction of Miner C:\n- verify digital signature of Miner C\n- verify that Miner C is currently in the registered miner set\nIf valid, add deregistration transaction of Miner C\nto the local mempool of Miner B
+C -> C: Add own deregistration transaction\nto the local mempool of Miner C (if not already stored)
+A -> A: Build candidate block header for the next block\nusing transactions from the local mempool of Miner A,\nincluding the deregistration transaction of Miner C,\nand using the hash of the previous block stored in the local blockchain ledger
+A -> A: Apply the Proof of Collaboration nonce distribution function\nand perform collaborative mining together with the other registered miners\nuntil a valid nonce value is found for the candidate block header
+A -> A: Construct new block containing:\n- candidate block header\n- winning nonce value\n- list of transactions including the deregistration transaction of Miner C
+A -> B: Broadcast new block containing the deregistration transaction of Miner C to Miner B
+A -> C: Broadcast new block containing the deregistration transaction of Miner C to Miner C
+B -> B: Verify the received block from Miner A:\n- verify proof of work for the block header and nonce\n- verify validity of all transactions in the block\n- verify that the deregistration transaction of Miner C is valid\nIf valid, accept the block as the next block in the local blockchain
+C -> C: Verify the received block from Miner A:\n- verify proof of work\n- verify validity of all transactions, including own deregistration transaction\nIf valid, accept the block as the next block in the local blockchain
+A -> A: Verify the constructed block again for consistency\nand accept it as the next block in the local blockchain
+A -> L: Append the new block containing the deregistration transaction of Miner C\nto the local view of the blockchain ledger of Miner A
+B -> L: Append the new block containing the deregistration transaction of Miner C\nto the local view of the blockchain ledger of Miner B
+C -> L: Append the new block containing the deregistration transaction of Miner C\nto the local view of the blockchain ledger of Miner C
+A -> A: Read the updated blockchain state from the local blockchain ledger\nand update the registered miner set by removing Miner C;\nnew registered miner set now contains Miner A and Miner B only
+B -> B: Read the updated blockchain state from the local blockchain ledger\nand update the registered miner set by removing Miner C;\nnew registered miner set now contains Miner A and Miner B only
+C -> C: Read the updated blockchain state from the local blockchain ledger\nand recognize that Miner C has been removed from the registered miner set;\nstop participating in future Proof of Collaboration consensus rounds
+A -> A: For the next consensus round, use the updated registered miner set\nthat contains Miner A and Miner B only as input to\nthe Proof of Collaboration nonce distribution function
+B -> B: For the next consensus round, use the updated registered miner set\nthat contains Miner A and Miner B only as input to\nthe Proof of Collaboration nonce distribution function
+@enduml
