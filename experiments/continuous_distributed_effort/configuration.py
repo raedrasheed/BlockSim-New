@@ -52,6 +52,9 @@ class ExperimentConfig:
     # H2 per-miner hardware defaults (fixed, independent of N)
     h2_active_power_w: float = 100.0
     seed: int = 0
+    # stochastic Bernoulli per-candidate success probability (None => deterministic)
+    p_success: float = None
+    txs_per_block: int = 2000
 
     def per_miner_hashrate_power(self):
         """Return (hashrate_hps, active_power_w) for one miner under the policy."""

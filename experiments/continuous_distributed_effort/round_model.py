@@ -86,6 +86,28 @@ def deterministic_outcome(cfg: ExperimentConfig, slot_index=0) -> RoundOutcome:
     raise NotImplementedError(f"deterministic mode {cfg.mode!r} not implemented yet")
 
 
+# ---------------------------------------------------------------------------
+# Stochastic outcomes (shared template for A & B; corrected local-time winner)
+# ---------------------------------------------------------------------------
+def stochastic_outcome(cfg: ExperimentConfig, slot_index=0) -> RoundOutcome:
+    """A fresh immutable template per slot: template_seed = f(cfg.seed, slot)."""
+    from .stochastic_template import (
+        pocol_disjoint_outcome, duplicate_baseline_outcome,
+    )
+    N, M, p = cfg.N, cfg.M, cfg.p_success
+    if p is None:
+        raise ValueError("stochastic_outcome requires cfg.p_success")
+    template_seed = cfg.seed * 1_000_003 + slot_index      # paired across A and B
+
+    if cfg.mode == MODE_A:
+        d = duplicate_baseline_outcome(M, N, p, template_seed)
+    elif cfg.mode == MODE_B:
+        d = pocol_disjoint_outcome(M, N, p, template_seed)
+    else:
+        raise NotImplementedError(f"stochastic mode {cfg.mode!r} not implemented yet")
+    return RoundOutcome(mode=cfg.mode, **d)
+
+
 def _play_slot(miners, outcome: RoundOutcome, r, slot_start, slot_end, cfg):
     """Integrate one FIXED_SLOT_IDLE slot. Miners are ACTIVE at slot_start.
 
