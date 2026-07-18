@@ -130,6 +130,11 @@ def main():
             BlockCommit.handle_event(next_event)
             Queue.remove_event(next_event)
 
+        # 3b) finalize wall-clock energy up to simTime (B1): close the open
+        #     mining interval after the last block so it is not omitted.
+        if hasattr(Node, "finalize_all"):
+            Node.finalize_all(p.simTime)
+
         # 4) AppendableBlock-only post-processing
         if p.model == 4:
             BlockCommit.process_gateway_transaction_pools()
