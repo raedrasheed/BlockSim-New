@@ -21,12 +21,13 @@ E_CONT = 8.420833333333333          # P_network * simTime = 3031.5 W * 10000 s
 _CACHE = {}
 
 
-def _run(protocol, n, seed, idle):
-    key = (protocol, n, seed, idle)
+def _run(protocol, n, seed, idle=None, mode=None):
+    mode = mode if mode is not None else ("slot" if idle else "off")
+    key = (protocol, n, seed, mode)
     if key not in _CACHE:
         out = subprocess.run(
             [sys.executable, os.path.join(ROOT, "experiments", "run_scenario_idle.py"),
-             protocol, str(n), str(seed), "1" if idle else "0"],
+             protocol, str(n), str(seed), mode],
             capture_output=True, text=True, cwd=ROOT)
         assert out.returncode == 0, out.stderr[-1500:]
         _CACHE[key] = json.loads(out.stdout.strip().splitlines()[-1])
@@ -107,6 +108,73 @@ def test_unit_pause_until_next_slot():
     assert math.isclose(nd.pocol_idle_time_s, 350.0)
     # cleanup so other tests see the default-OFF flag
     p.PoCol_IdleAfterRange = False
+    C.next_slot_start = 0.0
+
+
+def test_immediate_restart_no_waiting():
+    """immediate: the next round starts at the close time -- zero idle seconds,
+    miners ACTIVE 100% of the horizon (each still working only its own range)."""
+    r = _run("PoCol", 100, 1, mode="immediate")
+    assert r["idle_miner_seconds"] == 0.0
+    assert math.isclose(r["pct_time_active"], 100.0, abs_tol=1e-6)
+
+
+def test_immediate_restart_is_energy_neutral():
+    """immediate: continuous full-power mining -> exactly the Finding-1 energy.
+    Removing the wait removes the saving; range distribution alone saves nothing."""
+    r = _run("PoCol", 100, 1, mode="immediate")
+    assert math.isclose(r["energy_kWh"], E_CONT, rel_tol=1e-9)
+
+
+def test_immediate_matches_off_block_production():
+    """immediate reproduces the standard (flag-OFF) block schedule bit-for-bit:
+    same blocks, same intervals -- the rounds were already back-to-back."""
+    a = _run("PoCol", 100, 1, mode="off")
+    b = _run("PoCol", 100, 1, mode="immediate")
+    assert b["created_blocks"] == a["created_blocks"]
+    assert math.isclose(b["accepted_block_interval_s"], a["accepted_block_interval_s"],
+                        rel_tol=1e-12)
+
+
+def test_immediate_produces_blocks_faster_than_slot():
+    """immediate must beat slot on block production (no slot-boundary waits)."""
+    imm_blocks = slot_blocks = 0
+    for seed in (1, 2, 3, 4, 5):
+        imm_blocks += _run("PoCol", 100, seed, mode="immediate")["created_blocks"]
+        slot_blocks += _run("PoCol", 100, seed, mode="slot")["created_blocks"]
+    assert imm_blocks > slot_blocks, (imm_blocks, slot_blocks)
+
+
+def test_unit_pause_immediate_policy():
+    """Unit-level: with restart policy 'immediate' the pause is a checkpoint only:
+    next_slot_start == close time, miner stays ACTIVE, no idle time recorded."""
+    from InputsConfig import InputsConfig as p
+    from Models.PoCol.Node import Node as PoColNode
+    from Models.PoCol.Consensus import Consensus as C
+
+    p.model = 3
+    p.HashPowerIsShare = True
+    p.NetworkHashRate_Hps = 141e12
+    p.MinerEfficiency_J_per_TH = 21.5
+    p.GridEF_kgCO2e_per_kWh = 0.445
+    p.simTime = 10000.0
+    p.Binterval = 600.0
+    p.PoCol_IdleAfterRange = True
+    p.PoCol_RestartPolicy = "immediate"
+    p.NODES = [PoColNode(id=i, hashPower=1) for i in range(4)]
+    C.next_slot_start = 0.0
+    for nd in p.NODES:
+        nd.begin_mining(0.0)
+
+    C.pause_miners_until_next_slot(250.0)
+    assert C.next_slot_start == 250.0                  # no wait: next round at t
+    nd = p.NODES[0]
+    assert nd.mining_state == "ACTIVE"                 # never went IDLE
+    assert nd.last_energy_update_time == 250.0         # checkpointed at close
+    assert getattr(nd, "pocol_idle_time_s", 0.0) == 0.0
+    # cleanup so other tests see the defaults
+    p.PoCol_IdleAfterRange = False
+    p.PoCol_RestartPolicy = "slot"
     C.next_slot_start = 0.0
 
 
