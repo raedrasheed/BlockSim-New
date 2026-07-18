@@ -48,6 +48,10 @@ class Consensus(BaseConsensus):
     # closed rounds recorded as (parent_id, round_id) for lazy event rejection
     _closed_rounds = set()
 
+    # ---- B5: target-based success bookkeeping ----
+    active_exhausted_rounds = 0     # zero-success template attempts in the current round
+    total_exhausted_rounds = 0      # cumulative across the run
+
     # To prevent double-counting energy for the same created block event
     _energy_applied_block_ids = set()
 
@@ -229,29 +233,56 @@ class Consensus(BaseConsensus):
         Consensus.active_ranges = ranges
         Consensus.active_nonce_space = space
 
-        # sample solution nonce uniformly in [0, space-1]
-        Consensus.active_solution_nonce = random.randrange(0, space)
-
-        # identify winner: the range that contains the nonce
-        winner_id = None
-        for mid, (a, b) in ranges.items():
-            if a <= Consensus.active_solution_nonce <= b:
-                winner_id = mid
-                break
+        # ---- B5: target-based stochastic success (replaces guaranteed nonce) ----
+        # Per-hash success probability chosen so the expected NETWORK block time
+        # equals the target interval T:  p = 1 / (H_total * T)  =>  network first-
+        # success time ~ Exponential(rate = H_total * p = 1/T), mean T.
+        # A finite nonce domain means a round can EXHAUST (zero successes) before
+        # anyone finds a valid header; horizon = time to search the whole domain.
+        T = Consensus._target_interval()
+        winner_id, block_time, exhausted = Consensus._sample_round_outcome(
+            miners, rates, H_total, space, T)
         Consensus.active_winner_id = winner_id
+        Consensus.active_winner_time = float(block_time)
+        Consensus.active_exhausted_rounds = int(exhausted)
+        Consensus.total_exhausted_rounds += int(exhausted)
+        # kept for verification/debug only; no longer determines the winner
+        Consensus.active_solution_nonce = None
 
-        # compute winner time (seconds)
-        # attempts = (nonce - range_start) + 1, time = attempts / winner_rate
-        winner = next((m for m in miners if m.id == winner_id), None)
-        if winner is None:
-            # fallback
-            Consensus.active_winner_time = Consensus._target_interval()
-            return
+    @staticmethod
+    def _sample_round_outcome(miners, rates, H_total, space, T, rng=None):
+        """B5 success model. Returns (winner_id, block_time_s, exhausted_rounds).
 
-        w_rate = max(Consensus._miner_hashrate_hps(winner), 1e-12)
-        w_start, _ = ranges[winner_id]
-        attempts = (Consensus.active_solution_nonce - w_start) + 1
-        Consensus.active_winner_time = float(attempts) / float(w_rate)
+        - p_success = 1/(H_total*T) (target-based per-hash probability).
+        - Network first-success time ~ Exponential(1/T) (memoryless).
+        - horizon = space / H_total is the time to exhaust the whole nonce domain.
+          If the drawn success time exceeds the horizon, that attempt EXHAUSTS
+          with zero successes; a fresh template is drawn (counted) and we retry.
+          This makes zero/one/many successes all possible, as required.
+        - The winner is chosen with probability proportional to hash share
+          (equivalently, the miner whose range would contain the success).
+        """
+        rng = rng or random
+        H_total = float(max(H_total, 1e-12))
+        horizon = float(space) / H_total
+        T = float(max(T, 1e-12))
+        elapsed = 0.0
+        exhausted = 0
+        # geometric number of exhausted domains before a success
+        while True:
+            t = rng.expovariate(1.0 / T)
+            if t <= horizon:
+                block_time = elapsed + t
+                break
+            exhausted += 1
+            elapsed += horizon
+            if exhausted > 100000:      # numerical safety valve
+                block_time = elapsed
+                break
+        # hash-weighted winner (uniform over the nonce domain -> proportional to range size = hash share)
+        ids = [m.id for m in miners]
+        winner_id = rng.choices(ids, weights=rates, k=1)[0]
+        return winner_id, block_time, exhausted
 
     @staticmethod
     def Protocol(miner):
