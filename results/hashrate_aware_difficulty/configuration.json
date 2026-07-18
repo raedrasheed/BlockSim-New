@@ -1,0 +1,56 @@
+{
+  "experiment": "hashrate_aware_difficulty",
+  "t_target_s": 600.0,
+  "formulas": {
+    "W_expected": "H_network * T_target",
+    "p_success": "1/W = (target+1)/2^256",
+    "target": "floor(2^256/W) - 1 (256-bit clamped)"
+  },
+  "hardware": {
+    "H1": "fixed aggregate 141e12 H/s (difficulty constant in N)",
+    "H2": "fixed per-miner 1.41e12 H/s (D2: D_N = N*D_1)"
+  },
+  "difficulty_modes": {
+    "D1": "constant (reference-frozen)",
+    "D2": "hashrate-scaled (primary)",
+    "D3": "dynamic retarget (window 10, clamp [0.25,4], start 0.1x)"
+  },
+  "domain": "M_total = H_network * 1200s (aggregate-based; double-scaling removed)",
+  "stochastic": {
+    "primary": {
+      "mode": "D2",
+      "hardware": [
+        "H1",
+        "H2"
+      ],
+      "N": [
+        100,
+        200,
+        300,
+        400,
+        500
+      ],
+      "n_seeds": 100
+    },
+    "d1_demo": {
+      "hardware": "H2",
+      "N": [
+        1,
+        2,
+        5,
+        10
+      ],
+      "n_seeds": 100
+    },
+    "d3_demo": {
+      "hardware": "H2",
+      "N": [
+        10,
+        100
+      ],
+      "n_seeds": 100
+    },
+    "fresh_subprocess_per_run": true
+  },
+  "tost_margin_rel_preregistered": 0.01
+}

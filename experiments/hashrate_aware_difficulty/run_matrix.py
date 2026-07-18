@@ -119,7 +119,7 @@ def summarize(sto):
 
 def paired(sto):
     rows = []
-    for hw in ("H1", "H2"):
+    for hw_label, hw in (("H1", HW_H1), ("H2", HW_H2)):
         for N in PRIMARY_N:
             by = {p: {r["seed"]: r for r in sto
                       if r["hardware"] == hw and r["difficulty_mode"] == D2_SCALED
@@ -133,7 +133,7 @@ def paired(sto):
                     a = [by[other][s][metric] for s in seeds]
                     b = [by[PROTO_POCOL][s][metric] for s in seeds]
                     pd = st.paired_diff(a, b)
-                    rec = {"hardware": hw, "N": N,
+                    rec = {"hardware": hw_label, "N": N,
                            "comparison": f"pocol_minus_{other}", "metric": metric,
                            "other_mean": float(np.nanmean(a)) if a else float("nan"),
                            "pocol_mean": float(np.nanmean(b)) if b else float("nan"),
