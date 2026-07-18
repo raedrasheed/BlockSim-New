@@ -24,8 +24,12 @@ if p.model == MODEL_APPENDABLE:
 class Scheduler:
 
     @staticmethod
-    def create_block_event(miner, eventTime):
-        """Schedule a block creation event for a miner."""
+    def create_block_event(miner, eventTime, round_id=None):
+        """Schedule a block creation event for a miner.
+
+        `round_id` (B2) stamps the round this event belongs to so that events
+        from a round that is already CLOSED can be rejected when popped.
+        """
         if eventTime is None:
             return
         if eventTime <= p.simTime:
@@ -35,6 +39,7 @@ class Scheduler:
             block.id = random.randrange(100000000000)
             block.previous = miner.last_block().id
             block.timestamp = float(eventTime)
+            block.round_id = round_id            # B2: None for models without rounds
 
             event = Event("create_block", block.miner, float(eventTime), block)
             Queue.add_event(event)

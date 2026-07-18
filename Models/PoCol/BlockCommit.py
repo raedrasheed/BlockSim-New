@@ -35,9 +35,22 @@ class BlockCommit(BaseBlockCommit):
         miner = p.NODES[event.block.miner]
         eventTime = event.time
         blockPrev = event.block.previous
+        round_id = getattr(event.block, "round_id", None)
+
+        # B2: reject events belonging to a round that another miner already won.
+        # An invalidated event is not counted, charged, executed, or propagated,
+        # and does not start a new round.
+        if c.is_round_closed(blockPrev, round_id):
+            return
 
         # miner still mining on top of its last block?
         if blockPrev == miner.last_block().id:
+            # B2: the first valid block closes this (parent, round); every other
+            # pending event for the same round will now be rejected above.
+            c.close_round(parent_id=blockPrev, round_id=round_id,
+                          winning_block_id=event.block.id, winning_miner_id=miner.id,
+                          t=eventTime)
+
             # Count created block
             Statistics.totalBlocks += 1
 
@@ -109,7 +122,8 @@ class BlockCommit(BaseBlockCommit):
     def generate_next_block(node, currentTime):
         if getattr(node, "hashPower", 0) > 0:
             blockTime = currentTime + c.Protocol(node)
-            Scheduler.create_block_event(node, blockTime)
+            # B2: stamp the event with the round it belongs to
+            Scheduler.create_block_event(node, blockTime, round_id=c.round_id)
 
     @staticmethod
     def generate_initial_events():

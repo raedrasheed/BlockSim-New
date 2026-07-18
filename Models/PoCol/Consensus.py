@@ -37,6 +37,17 @@ class Consensus(BaseConsensus):
     active_winner_id = None
     active_winner_time = None  # seconds (time to produce this block)
 
+    # ---- B2: explicit round context ----
+    round_id = 0                       # monotonic round counter
+    active_round_status = "ACTIVE"     # "ACTIVE" | "CLOSED"
+    active_template_id = None          # H(parent_id, round_id) stand-in
+    round_start_time = 0.0
+    round_end_time = None
+    winning_block_id = None
+    winning_miner_id = None
+    # closed rounds recorded as (parent_id, round_id) for lazy event rejection
+    _closed_rounds = set()
+
     # To prevent double-counting energy for the same created block event
     _energy_applied_block_ids = set()
 
@@ -141,9 +152,43 @@ class Consensus(BaseConsensus):
 
         return int(getattr(p, "PoCol_NonceSpace", 3_000_000))
 
+    # ----------------------------
+    # B2: round lifecycle API
+    # ----------------------------
+    @staticmethod
+    def _open_round(parent_id):
+        """Begin a new round for `parent_id`: bump round_id, derive template_id,
+        set status ACTIVE."""
+        Consensus.round_id += 1
+        Consensus.active_parent_id = parent_id
+        Consensus.active_round_status = "ACTIVE"
+        Consensus.active_template_id = hash(("PoColTemplate", parent_id, Consensus.round_id))
+        Consensus.round_end_time = None
+        Consensus.winning_block_id = None
+        Consensus.winning_miner_id = None
+
+    @staticmethod
+    def is_round_closed(parent_id, round_id):
+        """True if the (parent_id, round_id) round has already produced a block."""
+        if round_id is None:
+            return False
+        return (parent_id, round_id) in Consensus._closed_rounds
+
+    @staticmethod
+    def close_round(parent_id, round_id, winning_block_id, winning_miner_id, t):
+        """Mark a round CLOSED; subsequent events for it must be rejected."""
+        Consensus._closed_rounds.add((parent_id, round_id))
+        if parent_id == Consensus.active_parent_id:
+            Consensus.active_round_status = "CLOSED"
+            Consensus.winning_block_id = winning_block_id
+            Consensus.winning_miner_id = winning_miner_id
+            Consensus.round_end_time = float(t)
+
     @staticmethod
     def _init_round(parent_id):
         miners = Consensus._miners()
+        # B2: a fresh round begins whenever we (re)initialize for a parent
+        Consensus._open_round(parent_id)
         if not miners:
             # Nothing to do
             Consensus.active_parent_id = parent_id
