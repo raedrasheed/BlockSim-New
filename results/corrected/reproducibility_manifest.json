@@ -1,7 +1,7 @@
 {
-  "git_commit": "ffbc86120631686b6e896168c2082e5165a2173a",
+  "git_commit": "68096fda71f6b8944e4c468e34b1f90635d18ac2",
   "git_branch": "claude/fix-energy-round-semantics",
-  "git_dirty": true,
+  "git_dirty": false,
   "python_version": "3.11.15 (main, Mar  3 2026, 09:26:23) [GCC 13.3.0]",
   "platform": "Linux-6.18.5-x86_64-with-glibc2.39",
   "packages": {
