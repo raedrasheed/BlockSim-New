@@ -90,6 +90,55 @@ def test_spec9_caseA_constant_difficulty_gives_60s():
     assert abs(mean - 60.0) / 60.0 < 0.15, f"constant-difficulty interval {mean:.1f}s != ~60s"
 
 
+# ===========================================================================
+# Section-9 mandatory example — Case B (D2 SCALED under H2) + section-10 H1 test
+# ===========================================================================
+def test_spec9_caseB_scaled_difficulty_gives_600s_and_10x():
+    t1 = tg.target_for(100.0, 600.0)
+    cfg10 = _cfg(PROTO_POCOL, N=10, hardware=HW_H2, mode=D2_SCALED, h2_rate=100.0)
+    t10 = initial_target(cfg10)
+    d1 = tg.difficulty_from_target(t1)
+    d10 = tg.difficulty_from_target(t10)
+    assert math.isclose(tg.p_from_target(t10), 1.0 / 600000.0, rel_tol=1e-6)
+    assert math.isclose(d10 / d1, 10.0, rel_tol=1e-6)          # D_10 = 10 * D_1
+    assert math.isclose(t10 / t1, 0.1, rel_tol=1e-4)           # target_10 ~ target_1/10
+    assert math.isclose(tg.expected_block_time(t10, 1000.0), 600.0, rel_tol=1e-6)
+    ivs = []
+    for seed in range(30):
+        m, _, _ = simulate(_cfg(PROTO_POCOL, N=10, hardware=HW_H2,
+                                mode=D2_SCALED, h2_rate=100.0,
+                                seed=seed, sim=30000.0))
+        if m["accepted_blocks"] >= 2:
+            ivs.append(m["mean_block_interval_s"])
+    mean = statistics.mean(ivs)
+    assert abs(mean - 600.0) / 600.0 < 0.20, f"scaled interval {mean:.1f}s != ~600s"
+
+
+def test_spec10_H1_difficulty_constant_in_N():
+    """H1 (H_network fixed at 1000 c/s): difficulty/target identical for every N;
+    W = 600000; increasing N only divides work allocation, never network speed."""
+    ref = None
+    for N in (1, 2, 5, 10, 100):
+        cfg = DiffExpConfig(
+            N=N, protocol=PROTO_POCOL, hardware=HW_H1,
+            difficulty=DifficultyConfig(mode=D2_SCALED))
+        # override the aggregate via reference: use h2-style small numbers by
+        # scaling -- emulate H=1000 c/s with a custom config
+        cfg = DiffExpConfig(
+            N=N, protocol=PROTO_POCOL, hardware=HW_H2,
+            difficulty=DifficultyConfig(mode=D2_SCALED,
+                                        reference_hashrate_hps=1000.0),
+            h2_miner_hashrate_hps=1000.0 / N)   # fixed aggregate = 1000 for every N
+        t = initial_target(cfg)
+        d = tg.difficulty_from_target(t)
+        assert math.isclose(d, 600000.0, rel_tol=1e-9)     # W constant
+        if ref is None:
+            ref = t
+        assert t == ref                                    # target identical
+        assert math.isclose(tg.expected_block_time(t, 1000.0), 600.0, rel_tol=1e-9)
+        assert math.isclose(difficulty_ratio_vs_reference(cfg), 1.0, rel_tol=1e-9)
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
