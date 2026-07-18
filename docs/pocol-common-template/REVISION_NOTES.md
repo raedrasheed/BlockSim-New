@@ -862,3 +862,46 @@ untouched; all 25 List-of-Tables/Figures entries and all 157 body TOC entries
 match the LibreOffice-rendered layout (no shifts this pass; References 126 =
 TOC); front-matter cached TOC retains the Word-layout values set in final-32;
 OOXML validation passed; final33 not overwritten.
+
+---
+
+# Code correction (examiner findings 3.1 & 3.2) — unified energy model + invariant test
+
+Scope: source code only. Experimental result workbooks are NOT regenerated here;
+re-running all scenarios and updating the thesis numbers is the separate next step.
+
+## Fix 1 — PoW baseline hash-rate normalization (finding 3.2)
+`Models/Node.py::_effective_hashrate_hps` returned `net * (hp / 100.0)`, hardcoding
+every miner to 1% of the 141 TH/s network. With `hashPower=1` per miner the
+aggregate became `N/100 x net` — correct only at N=100, and 5x inflated at N=500,
+which is why PoW energy rose ~7.9 -> ~40.4 kWh across 100 -> 500 miners. Replaced
+with fractional normalization `net * (hp / sum_j hp_j)`, so `sum_i H_i == net` for
+any N — matching the PoCol and Ethereum models, which were already correct.
+
+## Fix 2 — PoCol per-round energy (finding 3.1)
+`Models/PoCol/Consensus.py::apply_energy_for_created_block` charged each miner
+`time_share = block_time / N`. Since each `P_i` already carries the 1/N hash-rate
+share, this divided by the miner count a second time and injected an artificial
+~1/N energy reduction (the source of the reported ~98-99% "savings"). Corrected to
+`time_share = block_time`: every concurrently-active miner is charged for the real
+round wall-clock, giving `sum_i E_i = P_network * block_time` (physically correct
+energy for one block). Class and method docstrings updated accordingly.
+
+## Verification
+- `tests/test_energy_invariants.py` (new, 6 tests, all pass): aggregate hash rate
+  fixed at `net` for PoW and PoCol across N in {1,50,100,200,300,400,500};
+  aggregate power fixed at `P_network`; PoW and PoCol use the same normalization;
+  per-round PoCol energy equals `P_network * block_time` with no 1/N; and a guard
+  that `block_time / float(N)` is not reintroduced.
+- Existing `tests/test_energy_models.py` (11 tests) still pass.
+- End-to-end smoke through the real `Consensus._init_round` +
+  `apply_energy_for_created_block`: round energy equals `P_network * block_time`
+  exactly for N=100/300/500, ranges disjoint and covering.
+
+## Consequence (expected on re-run, not yet executed)
+With both models on one basis (`sum_i H_i == net`, `E = sum_i P_i * t_i`), PoW and
+PoCol consume essentially the same aggregate energy for the same realized block
+rate. The legitimate PoCol saving is limited to eliminated duplicate complete hash
+inputs (finding 3.7) and must be measured separately, not produced by the time
+term. The ~98-99% headline should therefore be withdrawn pending corrected,
+multi-seed, workload- and difficulty-matched experiments (findings 3.3, 3.4, 5).

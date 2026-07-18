@@ -17,10 +17,14 @@ class Consensus(BaseConsensus):
       4) the miner whose range contains the solution becomes winner
       5) winner time is derived from the position within its range
 
-    Energy model (your requirement):
+    Energy model (corrected):
     - block_time is the network time to produce the block (winner_time)
-    - In PoCol, each miner is charged only (block_time / N_miners) for energy
-      to represent collaborative splitting of work (time division).
+    - Each concurrently-active miner is charged E_i = P_i * block_time, because
+      all miners search their disjoint nonce ranges in parallel during the same
+      wall-clock interval. The network total is therefore P_network * block_time.
+    - The earlier (block_time / N_miners) rule is removed: it double-counted the
+      1/N share (already present in each P_i) and produced an artificial ~1/N
+      energy reduction. See apply_energy_for_created_block for details.
     """
 
     # Active round state
@@ -235,9 +239,28 @@ class Consensus(BaseConsensus):
     def apply_energy_for_created_block(block):
         """
         Call this ONLY when a create_block event is actually accepted (blockPrev matches miner.last_block()).
-        We charge each miner energy based on:
-            time_share = block_time / N_miners
-        where block_time = active_winner_time for this parent round.
+
+        Energy model (corrected): each miner that is concurrently searching in
+        this round is charged for the ACTUAL wall-clock duration of the round,
+
+            E_i = P_i * block_time,
+
+        where block_time = active_winner_time is the elapsed time until the
+        winner finds the solution. All miners search their disjoint ranges in
+        parallel during that same interval, so the network total is
+
+            sum_i E_i = (sum_i P_i) * block_time = P_network * block_time,
+
+        which is the physically correct energy for producing one block.
+
+        NOTE: a previous version charged each miner block_time / N_miners, which
+        divided the elapsed round time by the miner count a second time (each
+        P_i already carries the 1/N hash-rate share). That inserted an artificial
+        1/N energy reduction by construction and is the reason earlier runs
+        reported ~98-99% "savings"; it has been removed. The legitimate saving
+        from disjoint nonce ranges is the elimination of duplicate complete hash
+        inputs, which does not reduce aggregate concurrent power and must be
+        measured separately, not injected through the time term.
         """
         if block is None:
             return
@@ -260,8 +283,9 @@ class Consensus(BaseConsensus):
             return
 
         block_time = float(Consensus.active_winner_time)
-        N = max(1, len(miners))
-        time_share = block_time / float(N)  # <<< 핵 requirement: divide by #miners
+        # Corrected model: charge each concurrently-active miner for the FULL
+        # round wall-clock (block_time), NOT block_time / N. See docstring.
+        time_share = block_time
 
         winner_id = Consensus.active_winner_id
 

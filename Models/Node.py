@@ -38,17 +38,34 @@ class Node(object):
 
     # ---------------- Energy helpers ----------------
     def _effective_hashrate_hps(self):
-        """Return miner hashrate in H/s, supporting share-based configs."""
+        """Return miner hashrate in H/s, supporting share-based configs.
+
+        When hashPower is a relative share, this miner's absolute hash rate is
+        its FRACTION of the total configured network hash rate:
+
+            H_i = NetworkHashRate_Hps * (hashPower_i / sum_j hashPower_j)
+
+        so that sum_i H_i == NetworkHashRate_Hps for ANY number of miners.
+        (The previous implementation used a hardcoded `hp / 100.0`, which fixed
+        each miner at 1% of the network regardless of miner count; the aggregate
+        hash rate then scaled with N and was correct only at exactly 100 miners.
+        This matched neither the PoCol model (Models/PoCol/Node.py) nor the
+        Ethereum model (Models/Ethereum/Node.py), both of which already normalize
+        by the sum of shares.)
+        """
         from InputsConfig import InputsConfig as p
 
         hp = float(getattr(self, "hashPower", 0.0))
         if hp <= 0:
             return 0.0
 
-        # If hashPower is a percentage share (0..100)
+        # hashPower is a relative share: normalize by the sum of all shares
         if bool(getattr(p, "HashPowerIsShare", True)):
             net = float(getattr(p, "NetworkHashRate_Hps", 0.0))
-            return net * (hp / 100.0)
+            total_hp = sum(float(getattr(n, "hashPower", 0.0) or 0.0) for n in getattr(p, "NODES", []))
+            if total_hp <= 0.0:
+                return 0.0
+            return net * (hp / total_hp)
 
         # Else hashPower is already H/s
         return hp
