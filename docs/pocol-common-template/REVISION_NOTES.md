@@ -719,3 +719,51 @@ List-of-Tables/Figures entries match the rendered body pages (Figures 5.1–5.4 
 108); References on 126 = its TOC entry; body TOC entries synchronized; no
 stranded headings; Figures 5.1–5.4, Table 7.1, and every experimental number
 unchanged; passes OOXML validation.
+
+---
+
+# Final-33 — Submission Ready (Opus)
+
+**Final file:** `PhDThesisRaedRasheed-final33-SubmissionReady.docx`
+(final-32 and all earlier files unchanged; original untouched)
+
+**Page count:** LibreOffice renders 147; Word/other parsers report 148 (Word wraps
+the two-page Arabic Abstract differently). Reported as both. Cached front-matter
+TOC set to the Word layout (Abstract I, الملخص III, Acknowledgment V, List of
+Tables XII, List of Figures XIII, List of Abbreviations XIV).
+
+**New this pass: 14 red text corrections + 20 run-level RTL fixes on the Arabic
+abstract.** Totals: 284 red runs, 8,871 red words.
+
+## Root-cause fix — Arabic Abstract RTL (item 1)
+The artifacts ")PoW )", "إثبات التعاون . )PoCol )", "داخل كل : جولة تعدين",
+"بروتوكول PoCol . الكامل", "عند 300 ( معدن" were not wording errors: every red run
+added to the abstract in earlier passes lacked <w:rtl/> (paragraphs had <w:bidi/>,
+runs did not), so Word mis-ordered neutral punctuation and Latin tokens. <w:rtl/>
+added to all 20 Arabic-bearing runs (Latin-only runs left LTR). Verified in a
+rendered image: (PoW), (PoCol), "جولة تعدين:", "بروتوكول PoCol الكامل",
+"(… عند 300 معدن)" now correct.
+
+## Chapter 1 (item 5)
+RQ1 "superfluous labor"->"redundant computation"; O2 "Propose"->"To propose";
+methodology "developed ... in full"->"fully specified"; 1.6 "Much of the fifth
+chapter discusses"->"Chapter 5 presents"; "(i.e., PoW, et al.)"->"such as PoW."
+
+## Chapter 2 (items 2,3,6)
+Replicated-state-machine corrected (transaction = state transition, not a state);
+partial synchrony correctly defined (bounded delay after global stabilization
+time); Nakamoto greatest-cumulative-work explanation corrected; smart-contract
+clause fixed; append-only ledger tense/hyphen; 2.3 energy sentence rewritten;
+2.3.1 metric list + workload/hardware/security list normalized to lowercase
+parallel structure. (PBFT already correct; left unchanged.)
+
+## Chapter 3 (item 4)
+3.2 "A structured literature review method was used ... PRISMA principles were
+used in how ..." -> "This research employed a structured comparative
+literature-review method, informed by PRISMA principles ...".
+
+## Verification (on delivered DOCX)
+14 defective phrases absent; 14 replacements present and each inside a red run;
+Arabic runs without <w:rtl/> = 0; experimental values/Table 7.1/Figures 5.1-5.4
+unchanged; 25/25 lists match rendered pages; References 126 = TOC; OOXML valid;
+filename contains "final33"; final32 not overwritten.
