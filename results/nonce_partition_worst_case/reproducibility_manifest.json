@@ -1,0 +1,15 @@
+{
+  "git_commit": "01f340f1bdcd9e28a1a85cf56822b87c07ce5bc3",
+  "git_branch": "claude/pocol-disjoint-nonce-worst-case",
+  "git_dirty": true,
+  "python_version": "3.11.15 (main, Mar  3 2026, 09:26:23) [GCC 13.3.0]",
+  "platform": "Linux-6.18.5-x86_64-with-glibc2.39",
+  "packages": {
+    "numpy": "2.4.6"
+  },
+  "n_deterministic_rows": 36,
+  "n_stochastic_runs": 450,
+  "n_seeds": 30,
+  "reproduce": "python experiments/nonce_partition/run_matrix.py 30",
+  "note": "Analytical model; results reproduce exactly from the fixed seeds. This experiment does NOT modify results/corrected/ or the wall-clock energy model."
+}

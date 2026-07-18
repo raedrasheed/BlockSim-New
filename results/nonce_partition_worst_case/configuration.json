@@ -1,0 +1,51 @@
+{
+  "experiment": "nonce_partition_worst_case",
+  "modes": {
+    "A": "duplicate_full_domain (Common-Template Duplicate-Search Baseline)",
+    "B": "disjoint_partition (PoCol Disjoint-Nonce Allocation)",
+    "C": "independent_candidate_headers (reference control)"
+  },
+  "interval_convention": "half-open [domain_start, domain_end); M = end - start",
+  "deterministic": {
+    "miner_counts": [
+      1,
+      2,
+      5,
+      10,
+      20,
+      50,
+      100,
+      200,
+      500
+    ],
+    "domain_sizes": [
+      100,
+      1000,
+      1000000,
+      4294967296
+    ],
+    "solution_placement": "final position (domain_end - 1)"
+  },
+  "stochastic": {
+    "miner_counts": [
+      100,
+      200,
+      300,
+      400,
+      500
+    ],
+    "domain_size": 4294967296,
+    "p_success": 4.656612873077393e-10,
+    "p_success_repr": "2**-31",
+    "expected_successes_M_times_p": 2.0,
+    "expected_exhaustion_probability_approx": "e^-2 ~= 0.135",
+    "n_seeds": 30,
+    "seed_pairing": "A and B share the same seed draw"
+  },
+  "energy_model": {
+    "hashrate_per_miner": 1.0,
+    "energy_per_attempt": 1.0,
+    "power_per_miner": 1.0,
+    "rule": "energy = attempts * (P/r) = P * active_time; never block_time/N"
+  }
+}
