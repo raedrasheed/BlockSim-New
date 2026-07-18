@@ -19,8 +19,10 @@ from typing import Optional, Callable
 
 from .configuration import (
     ExperimentConfig, build_miners, SCHED_IMMEDIATE, SCHED_FIXED_SLOT,
+    MODE_A, MODE_B, MODE_C1, MODE_C2,
 )
 from .power_states import ACTIVE, IDLE, SLEEP
+from experiments.nonce_partition.partition import partition_nonce_domain, range_size
 
 
 @dataclass
@@ -44,6 +46,28 @@ class RoundOutcome:
 
 def _finished_state(cfg: ExperimentConfig):
     return SLEEP if cfg.power.use_sleep else IDLE
+
+
+# ---------------------------------------------------------------------------
+# Deterministic final-nonce worst-case outcomes (valid nonce at M-1)
+# ---------------------------------------------------------------------------
+def deterministic_outcome(cfg: ExperimentConfig, slot_index=0) -> RoundOutcome:
+    """Final-nonce worst case: the only valid nonce is at M-1. The template is
+    identical every slot, so slot_index is unused. Dispatches by mode."""
+    N, M = cfg.N, cfg.M
+    if cfg.mode == MODE_A:
+        # Every miner scans the SAME complete domain in the SAME order; the
+        # solution at M-1 is found only after the full scan -> t*=M, all miners
+        # evaluate all M candidates (maximal duplication).
+        ranges = [(0, M)] * N
+        evaluated = [M] * N
+        return RoundOutcome(
+            mode=MODE_A, ranges=ranges, evaluated=evaluated, t_star=M,
+            winner_id=0, winning_nonce=M - 1, solution_found=True,
+            unique_evals=M, duplicate_evals=(N - 1) * M,
+            exhausted=[True] * N)
+
+    raise NotImplementedError(f"deterministic mode {cfg.mode!r} not implemented yet")
 
 
 def _play_slot(miners, outcome: RoundOutcome, r, slot_start, slot_end, cfg):
