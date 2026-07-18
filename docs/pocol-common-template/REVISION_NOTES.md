@@ -246,3 +246,109 @@ metric-compatible engine — the field refresh on open absorbs exactly this).
 **92 red runs, 4,475 red words** (76 + 16 list-number corrections). All manual
 corrections of this pass are red; unchanged text remains black; no Track
 Changes or highlighting used.
+
+---
+
+# Final-29 — Scientific-Consistency Correction Pass
+
+**Final file:** `PhDThesisRaedRasheed-final29-ScientificConsistency-Corrected.docx`
+(final-28 and the original are unchanged)
+
+## Edits in this pass
+
+**53 new red textual edits** (51 batch + 2 pronoun fixes), all in red font, no
+Track Changes/highlighting. Red totals after this pass: **150 red runs,
+6,147 red words** (previous: 92 / 4,475). Non-red: 9 cached TOC numbers
+(field text, black by documented convention; Word regenerates them on open)
+and 3 whitespace-attribute fixes.
+
+## 1–2. Implementation claims and the "does not affect results" sentence
+
+- Abstract (EN + AR), C2/C4, §6.3, §6.9, §7.6.1, §7.7, §8.1, §8.2, §8.3 now
+  distinguish (A) the complete Chapter-5 protocol specification, (B) the
+  idealized shared-round BlockSim abstraction that was implemented and
+  measured, and (C) the unimplemented mechanisms (TemplateID enforcement,
+  mempool reconciliation, collection window, pre-committed rewards, etc.).
+- The unsupported sentence "This distinction does not affect the measured
+  results" (§6.3) was **removed** and replaced with the cautious formulation
+  enumerating what the abstraction idealizes away (transaction-set
+  disagreement, mempool divergence, TemplateID mismatches, reconciliation/
+  retrieval delays, synchronization failures, agreement overhead, excluded
+  miners, template-disagreement stale blocks). The same limitation was added
+  to §6.9 (Threats to Validity, new sixth item), §7.6.1, §8.5, and in
+  abbreviated form to both abstracts.
+
+## 3. Energy/performance claims bounded
+
+"PoCol was implemented and evaluated" → idealized-abstraction wording;
+"PoCol achieved its greatest achievement" → "largest improvement observed for
+the simulated PoCol abstraction"; "strong empirical evidence … completely
+alter" → "simulation-based proof-of-concept evidence … substantially improve";
+"convincing evidence … dramatically lower" → "results indicate … substantially
+lower … under the evaluated simulation assumptions"; "This paper" → "This
+chapter". **No numerical value changed** (verified: Table 7.1 and all figures
+in §7.x retain 11.33/2.87 tps, 0.454/33.078 kWh, 98–99%, etc.).
+
+## 4. Security claims corrected
+
+C2 no longer claims "the same cryptographic assurance and probabilistic
+finality"; §4.4.1 finality paragraph, §5.11.1 (double-spend argument),
+§5.11.5 (backbone properties "expected to remain valid — a preliminary
+argument rather than a proven equivalence"), §5.12 (both occurrences), and
+Chapter 8 now uniformly state: PoCol retains the hash-puzzle and
+longest-chain structure; the security analysis is preliminary/informal;
+formal equivalence of common-prefix, chain-growth, chain-quality, and
+double-spend guarantees remains to be established for the complete protocol.
+
+## 5. Abstracts
+
+English and Arabic abstracts now state, symmetrically: complete protocol
+specified in Chapter 5; idealized shared-round abstraction implemented;
+TemplateID/mempool-agreement/pre-committed-reward enforcement not yet
+executable; results obtained under controlled simulation assumptions and
+constituting proof-of-concept evidence; stale-block rate the major
+limitation; real-network agreement overhead unmeasured and future work. The
+Arabic abstract makes no stronger claim than the English one.
+
+## 6. Informal language corrected (all red)
+
+RQ2, O1, O3, scope statement (per the prescribed formulations); "everything
+you need to know"; "works great"; "It is all about / doesn't talk about";
+"poised to significantly impact"; "greatest achievement"; "concrete
+comparative proof"; "It is thus readily seen"; "he/she sees" and all
+miner-pronoun uses of he/his (→ it/its; the Acknowledgment's reference to the
+supervisor was left untouched).
+
+## 7. Claims matched to actual measurements
+
+§1.4 methodology now states: descriptive analysis only (no statistical
+significance testing); fairness/decentralization (Gini) defined but not
+experimentally evaluated; fixed latency and workload parameters, miner count
+100–500 the only independent variable. C4 states no real-world measurement.
+§8.2: **RQ3 explicitly only partially answered** — fairness,
+decentralization, adversarial robustness, and pool-centralization behaviour
+not evaluated, remain future work.
+
+## 8. Common-template correction preserved
+
+The one-round/one-template/one-TemplateID/disjoint-ranges/nonce-only model,
+Figures 5.1–5.4, their captions, and the implemented-vs-specified distinction
+are unchanged.
+
+## 9. Overstatement sweep
+
+Patterns (complete/fully implemented, proves/proven, guarantees, same/
+equivalent security, same finality, real-world validation, statistically
+significant, comprehensive evaluation, fully answered, production ready)
+re-searched after editing: remaining hits are only (a) literature-review
+descriptions of other systems, (b) explicit design-objective statements
+(§4.6 problem statement), and (c) the new qualifying sentences themselves.
+
+## 10. Layout after this pass
+
+148 pages (+1: the longer English Abstract now spans printed pages I–II,
+shifting الملخص→III, Acknowledgment→IV, List of Tables→XI, List of
+Figures→XII, List of Abbreviations→XIII). All body caption pages are
+unchanged (verified: Figures 5.1–5.4 on 76/79/87/91; all 25 list entries
+match the rendered layout; References on 127 in both text and TOC). The 9
+affected cached TOC numbers were re-synchronized; `updateFields` remains set.
