@@ -1,0 +1,85 @@
+"""Hash-rate-aware difficulty — invariants (spec §16; grows with each commit).
+
+Run:  python -m pytest tests/test_hashrate_aware_difficulty.py -v
+  or:  python tests/test_hashrate_aware_difficulty.py
+"""
+import os
+import sys
+import math
+import statistics
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, ROOT)
+
+from experiments.hashrate_aware_difficulty.configuration import (
+    DiffExpConfig, DifficultyConfig, PowerConfig,
+    PROTO_DUP, PROTO_IND, PROTO_POCOL, HW_H1, HW_H2,
+    D1_CONSTANT, D2_SCALED, D3_RETARGET, AGG_HASHRATE_HPS,
+)
+from experiments.hashrate_aware_difficulty import target as tg
+from experiments.hashrate_aware_difficulty.difficulty import (
+    initial_target, difficulty_ratio_vs_reference,
+)
+from experiments.hashrate_aware_difficulty.mining_round import simulate, _domain_total
+
+
+def _cfg(protocol=PROTO_POCOL, N=10, hardware=HW_H2, mode=D2_SCALED, seed=0,
+         sim=10200.0, h2_rate=100.0, budget=1200.0, **dkw):
+    return DiffExpConfig(
+        N=N, protocol=protocol, hardware=hardware,
+        difficulty=DifficultyConfig(mode=mode, **dkw),
+        seed=seed, sim_seconds=sim, h2_miner_hashrate_hps=h2_rate,
+        domain_time_budget=budget)
+
+
+# ===========================================================================
+# Section-4 mandatory test: the double-scaling defect is gone
+# ===========================================================================
+def test_no_double_scaling_share_exhaust_time_is_budget():
+    """H1: M_total = H_network*budget (NOT (H/N)*budget). Each equal share then
+    exhausts in exactly `budget` seconds for EVERY N: T_i = M_i/H_i = budget."""
+    for N in (1, 2, 5, 10, 100, 500):
+        cfg = DiffExpConfig(N=N, hardware=HW_H1, domain_time_budget=1200.0)
+        M_total = _domain_total(cfg)
+        assert abs(M_total - AGG_HASHRATE_HPS * 1200.0) <= cfg.N, (N, M_total)
+        m_i = M_total / N
+        h_i = cfg.per_miner_hashrate()
+        assert math.isclose(m_i / h_i, 1200.0, rel_tol=1e-9), \
+            f"N={N}: share exhaust time {m_i/h_i} != budget (double scaling back?)"
+
+
+def test_no_double_scaling_discovery_not_600_over_N():
+    """H1 + D2: discovery-time distribution is governed by p*H_network alone, so
+    the MEAN block interval must stay ~600 s for every N — the old artificial
+    600/N discovery must not exist."""
+    means = {}
+    for N in (1, 10, 100):
+        ivs = []
+        for seed in range(30):
+            m, _, _ = simulate(_cfg(PROTO_POCOL, N=N, hardware=HW_H1,
+                                    mode=D2_SCALED, seed=seed, sim=30000.0))
+            if m["accepted_blocks"] >= 2:
+                ivs.append(m["mean_block_interval_s"])
+        means[N] = statistics.mean(ivs)
+        assert abs(means[N] - 600.0) / 600.0 < 0.20, \
+            f"H1 N={N}: mean interval {means[N]:.1f}s not ~600s"
+    # and N=100 must NOT be ~6s (the defect's signature)
+    assert means[100] > 100.0, f"600/N artifact returned: {means[100]}"
+
+
+def _run_all():
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    failed = 0
+    for fn in fns:
+        try:
+            fn(); print(f"PASS  {fn.__name__}")
+        except AssertionError as e:
+            failed += 1; print(f"FAIL  {fn.__name__}: {e}")
+        except Exception as e:
+            failed += 1; print(f"ERROR {fn.__name__}: {type(e).__name__}: {e}")
+    print(f"\n{len(fns)-failed}/{len(fns)} passed")
+    return failed
+
+
+if __name__ == "__main__":
+    sys.exit(1 if _run_all() else 0)
