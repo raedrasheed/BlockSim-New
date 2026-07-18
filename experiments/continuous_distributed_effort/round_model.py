@@ -83,6 +83,23 @@ def deterministic_outcome(cfg: ExperimentConfig, slot_index=0) -> RoundOutcome:
             winner_id=owner, winning_nonce=M - 1, solution_found=True,
             unique_evals=sum(evaluated), duplicate_evals=0, exhausted=exhausted)
 
+    if cfg.mode in (MODE_C1, MODE_C2):
+        # Independent headers, distinct per-miner search. Worst case: the winner
+        # finds only at the last candidate of the largest budget (no duplicate
+        # work). C1 total budget = M (partition sizes); C2 budget = M per miner.
+        if cfg.mode == MODE_C1:
+            budgets = [range_size(rg) for rg in partition_nonce_domain(0, M, N)]
+        else:
+            budgets = [M] * N
+        t_star = max(budgets)
+        evaluated = [min(b, t_star) for b in budgets]     # == budgets (all exhaust)
+        winner = max(range(N), key=lambda i: budgets[i])
+        return RoundOutcome(
+            mode=cfg.mode, ranges=[(0, b) for b in budgets], evaluated=evaluated,
+            t_star=t_star, winner_id=winner, winning_nonce=None, solution_found=True,
+            unique_evals=sum(evaluated), duplicate_evals=0,
+            exhausted=[True] * N)
+
     raise NotImplementedError(f"deterministic mode {cfg.mode!r} not implemented yet")
 
 
@@ -93,6 +110,7 @@ def stochastic_outcome(cfg: ExperimentConfig, slot_index=0) -> RoundOutcome:
     """A fresh immutable template per slot: template_seed = f(cfg.seed, slot)."""
     from .stochastic_template import (
         pocol_disjoint_outcome, duplicate_baseline_outcome,
+        independent_headers_outcome,
     )
     N, M, p = cfg.N, cfg.M, cfg.p_success
     if p is None:
@@ -103,6 +121,11 @@ def stochastic_outcome(cfg: ExperimentConfig, slot_index=0) -> RoundOutcome:
         d = duplicate_baseline_outcome(M, N, p, template_seed)
     elif cfg.mode == MODE_B:
         d = pocol_disjoint_outcome(M, N, p, template_seed)
+    elif cfg.mode == MODE_C1:
+        budgets = [range_size(rg) for rg in partition_nonce_domain(0, M, N)]
+        d = independent_headers_outcome(N, p, template_seed, budgets)
+    elif cfg.mode == MODE_C2:
+        d = independent_headers_outcome(N, p, template_seed, [M] * N)
     else:
         raise NotImplementedError(f"stochastic mode {cfg.mode!r} not implemented yet")
     return RoundOutcome(mode=cfg.mode, **d)

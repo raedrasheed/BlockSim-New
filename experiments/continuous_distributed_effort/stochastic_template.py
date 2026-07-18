@@ -74,6 +74,35 @@ def pocol_disjoint_outcome(M, N, p, template_seed):
     }
 
 
+def independent_headers_outcome(N, p, seed, budgets):
+    """Modes C1/C2: each miner searches a DISTINCT header (its own independent
+    sequence) with its own per-miner budget. No shared template, no duplicate
+    complete-header work. Network stops at the earliest per-miner success.
+
+    budgets: per-miner candidate budget (partition sizes summing to M for C1;
+    [M]*N for C2). Independent per-miner seeds (distinct from the shared template).
+    """
+    import random
+    Gs = []
+    for i in range(N):
+        rng = random.Random(_derive_seed(seed * 2_654_435_761 + 7, i + 101))
+        g = _geometric_first_success_from_u(rng.random(), p)
+        Gs.append(g if (budgets[i] > 0 and g <= budgets[i]) else None)
+    valid = [(g, i) for i, g in enumerate(Gs) if g is not None]
+    if valid:
+        t_star, winner = min(valid)
+        solution_found = True
+    else:
+        winner, t_star, solution_found = None, (max(budgets) if budgets else 0), False
+    evaluated = [min(b, t_star) for b in budgets]
+    exhausted = [ev == b for ev, b in zip(evaluated, budgets)]
+    return {
+        "ranges": [(0, b) for b in budgets], "evaluated": evaluated, "t_star": t_star,
+        "winner_id": winner, "winning_nonce": None, "solution_found": solution_found,
+        "unique_evals": sum(evaluated), "duplicate_evals": 0, "exhausted": exhausted,
+    }
+
+
 def duplicate_baseline_outcome(M, N, p, template_seed):
     """Mode A outcome fields, using the SAME per-range success set. All miners scan
     the whole domain in numeric order, so the winner is the smallest GLOBAL
