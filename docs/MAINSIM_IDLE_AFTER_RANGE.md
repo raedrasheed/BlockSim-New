@@ -1,8 +1,9 @@
 # PoCol Main-Simulator Extension — Equal Nonce Shares + Power-Down After Work
 
 **Branch:** `claude/pocol-equal-nonce-idle-mainsim`
-**Flag:** `PoCol_IdleAfterRange` (opt-in, **default OFF**)
-**Data:** `results/mainsim_idle_after_range/raw_runs.csv` (PoCol, N ∈ {100…500}, 30 seeds, flag OFF/ON, fresh process per run)
+**Flags:** `PoCol_IdleAfterRange` (opt-in, **default OFF**) ·
+`PoCol_RestartPolicy` = `"slot"` (default) | `"immediate"`
+**Data:** `results/mainsim_idle_after_range/raw_runs.csv` (PoCol, N ∈ {100…500}, 30 seeds, fresh process per run)
 
 ## What the extension does (as requested / حسب الطلب)
 
@@ -38,6 +39,46 @@ dividing energy by N** (test: `energy == E_continuous × active_fraction` exactl
 
 Per-miner energy is **exactly equal** across miners in every ON run.
 
+## Immediate-restart policy (بدون انتظار الدورة الزمنية — كما في PoW)
+
+`PoCol_RestartPolicy = "immediate"`: the next round begins **at the round-close
+time** — no slot-boundary wait. Each miner still works only its own disjoint
+range. With ranges proportional to hash rate, no miner finishes its share before
+the round closes, so **no idle time physically occurs** and the block schedule
+matches the standard model bit-for-bit.
+
+Results (30 seeds, mean; PoW shown for reference):
+
+| N | variant | Energy (kWh) | blocks | interval (s) | throughput (tx/s) | % ACTIVE |
+|---:|:--|---:|---:|---:|---:|---:|
+| 100 | PoW | 8.4208 | 17.9 | 548 | 3.300 | 100.0 |
+| 100 | PoCol **immediate** | **8.4208** | **18.5** | **533** | **3.399** | 100.0 |
+| 100 | PoCol slot | 5.0269 | 11.3 | 875 | 2.092 | 59.7 |
+| 200 | PoW | 8.4208 | 17.4 | 571 | 3.202 | 100.0 |
+| 200 | PoCol **immediate** | **8.4208** | **17.9** | **544** | **3.302** | 100.0 |
+| 200 | PoCol slot | 5.2034 | 11.1 | 922 | 2.052 | 61.8 |
+| 300 | PoW | 8.4208 | 15.1 | 670 | 2.784 | 100.0 |
+| 300 | PoCol **immediate** | **8.4208** | **15.5** | **658** | **2.851** | 100.0 |
+| 300 | PoCol slot | 5.5955 | 10.0 | 987 | 1.852 | 66.4 |
+| 400 | PoW | 8.4208 | 16.7 | 599 | 3.074 | 100.0 |
+| 400 | PoCol **immediate** | **8.4208** | **16.9** | **581** | **3.111** | 100.0 |
+| 400 | PoCol slot | 5.2993 | 10.9 | 892 | 2.011 | 62.9 |
+| 500 | PoW | 8.4208 | 17.2 | 567 | 3.164 | 100.0 |
+| 500 | PoCol **immediate** | **8.4208** | **16.8** | **592** | **3.102** | 100.0 |
+| 500 | PoCol slot | 5.4167 | 10.2 | 998 | 1.880 | 64.3 |
+
+**The trade-off is now explicit and unavoidable:**
+
+- **immediate** (كما طلب: بدون انتظار): blocks come **~40–47 % faster** than slot
+  mode and match PoW's production rate — but miners are ACTIVE 100 % of the time,
+  so energy returns to **exactly 8.4208 kWh = PoW**. The saving disappears.
+- **slot**: saves ~34–40 % energy — but blocks are ~60–70 % slower.
+- You can have fast blocks or idle-time savings, **not both**: the energy saving
+  *is* the waiting time. This is the central principle
+  (`docs/CONTINUOUS_DISTRIBUTED_EFFORT_METHODOLOGY.md §2`) confirmed inside the
+  main simulator: **nonce distribution alone does not reduce energy** —
+  `E = P × active_time`, and immediate restart keeps `active_time = simTime`.
+
 ## Honest interpretation (اقرأ هذا قبل الاقتباس)
 
 - **The ~34–40 % saving is NOT the (1−1/N) worst-case figure.** It is the idle
@@ -59,7 +100,8 @@ Per-miner energy is **exactly equal** across miners in every ON run.
 ## Reproduce
 
 ```bash
-python experiments/run_scenario_idle.py PoCol 100 1 0    # flag OFF
-python experiments/run_scenario_idle.py PoCol 100 1 1    # flag ON
+python experiments/run_scenario_idle.py PoCol 100 1 off        # standard
+python experiments/run_scenario_idle.py PoCol 100 1 slot       # idle until next slot
+python experiments/run_scenario_idle.py PoCol 100 1 immediate  # no waiting (like PoW)
 python -m pytest tests/test_idle_after_range.py -v
 ```
