@@ -596,3 +596,126 @@ All 25 List-of-Tables/Figures entries match the rendered pages (Figures
 5.1–5.4 on 75/78/86/90; Tables on 24–108); References on 126 = its TOC entry;
 163 TOC entries synchronized; no genuinely stranded headings; Figures 5.1–5.4,
 Table 7.1, and every experimental number unchanged; passes OOXML validation.
+
+---
+
+# Final-32 — Verified Academic Final (Opus)
+
+**Final file:** `PhDThesisRaedRasheed-final32-VerifiedAcademicFinal.docx`
+(final-31 and all earlier files unchanged; original untouched)
+
+**Rendered (LibreOffice Writer): 147 pages.** Word renders ~148 because it wraps
+the Arabic Abstract onto two pages (III–IV) whereas LibreOffice fits it on one
+(III). This one-page front-matter difference does not affect body pagination
+(the body restarts at Arabic 1). **The cached front-matter TOC numerals have
+been set to the Word layout you reported** (not LibreOffice's), so the visible
+cached field results are correct in Word before any field refresh:
+Abstract I, الملخص III, Acknowledgment V, List of Tables XII, List of Figures
+XIII, List of Abbreviations XIV. `updateFields` remains set as a secondary
+safeguard. (A LibreOffice viewer will show these front-matter entries one lower,
+because LibreOffice paginates the Arabic Abstract on a single page; this is the
+expected consequence of matching the Word layout, which is authoritative here.)
+
+## New red edits this pass: 20 textual edits + 2 red list-number corrections
+(269 red runs, 8,565 red words total; previous 245 / 8,117). Front-matter TOC
+numeral bumps (4) are cached field values and remain black by the standing
+convention.
+
+### Recorded deletions (cannot remain visibly red)
+- The black lead-in "As there has been many Consensus Algorithms developed,"
+  (§3.1) was removed and merged into a single red replacement sentence
+  ("The development of numerous consensus algorithms has enriched the
+  consensus-design space; however, it has also made systematic comparison more
+  difficult.").
+- 39 `<w:lastRenderedPageBreak/>` layout hints were removed to merge
+  text runs that Word had split mid-sentence; these are non-content rendering
+  hints that Word regenerates on open (no visible text removed).
+- No other prose content was deleted.
+
+### Chapter 1 (45 prose paragraphs inspected; 27 contain red cumulatively; 6 edited this pass)
+- "conflict between the security benefits … versus … decentralization benefits"
+  → "creates a sustainability challenge despite the established security and
+  open-participation properties of PoW".
+- "intense anti-climate change activities … untenable with sustainability
+  initiatives" → "as global climate-change mitigation and sustainability
+  policies intensify …".
+- "To address the aforementioned issues … subsequently developed alternative
+  consensus methods … seek to" (broken subject) → "To address these issues,
+  alternative consensus methods such as PoS and its derivatives were
+  subsequently developed; they reduce energy consumption by …".
+- "Permissioned consensus such as PoA … are" → "Permissioned consensus
+  mechanisms such as PoA … are" (subject–verb) and "will be limited" → "are
+  limited".
+- RQ3 "the suggested PoCol algorithm … weaknesses like" → "the proposed PoCol
+  algorithm … resistance to common blockchain attacks such as".
+- §1.6 "preliminary security and accuracy analysis" → "… robustness analysis".
+
+### Chapter 2 (37 prose paragraphs inspected; 16 contain red cumulatively; 5 edited this pass)
+- "UTXO (coinage) models" → "UTXO-based models".
+- "All transactions must be validated through syntactical rules … (if not PoW
+  must meet the eligibility requirements for staking)" → "Transactions must
+  satisfy syntactic validity rules, authorization requirements such as digital
+  signatures, and any protocol-specific state-transition or consensus
+  conditions before inclusion in a block."
+- "Proof of Space-Time (also referred to as Proof of Replication)" —
+  **corrected**: they are distinct → "Proof of Space, Proof of Replication, and
+  Proof of Space-Time. Proof of Replication and Proof of Space-Time are related
+  storage-based proofs that establish, respectively, the storage of a unique
+  replica and its continued availability over time."
+- "the opportunities blockchain-based credential verification technology
+  provide" → "the opportunities that blockchain-based credential-verification
+  technologies provide".
+- §2.5 first-person summary paragraph ("In this chapter, we have provided …")
+  rewritten in the third person as concise sentences.
+
+### Chapter 3 (190 prose paragraphs inspected, excl. table cells; 9 contain red cumulatively; 5 edited this pass)
+- "As there has been many Consensus Algorithms developed …" rewritten (above).
+- "(e.g., Taxonomy, Architecture, Protocol Design or Application Orientation)"
+  → lowercase, serial comma.
+- Ladder/Orthrus/Crackle paragraph: citations moved inside the sentence
+  ("latency [79]. Similarly …"; "[80]"; "[81]"), "Multi-BFT mechanism where …
+  mechanism" de-duplicated to "Multi-BFT scheme in which …", "less than the
+  Linear (O(n))" → "below the linear (O(n))".
+- Standalone fragment "questions:" → "The structured review addresses the
+  following research questions:".
+- §3.1 contribution paragraph closing "…among a wide range of blockchain
+  environments.[73], [75]." → "… across a wide range of blockchain environments
+  [73], [75]."
+
+### Arabic Abstract (re-verified in a rendered high-resolution image)
+My earlier (final-29/31) diacritic insertions were the source of the visible
+corruption and have been replaced with clean, diacritic-free forms consistent
+with the thesis body:
+- "لا يَحسب معدِّنان أمينان" (kasra+shadda mis-ordered → broke shaping) →
+  "لا يحسب معدنان أمينان".
+- "في ظل الافتراضات المُقيَّمة" (fatha+shadda broke shaping) →
+  "في ظل افتراضات المحاكاة المعتمدة".
+- Percentage: rendered as "98–%99"/"%99–98" because of the bidi-sensitive "%";
+  an LRE/PDF wrap made it worse, so the "%" was eliminated by spelling it out —
+  "بنحو 98 إلى 99 بالمئة" — which renders identically in Word and LibreOffice.
+- "الكتل الملغاة" (cancelled blocks) → "الكتل المتقادمة" (stale blocks),
+  the technically correct term.
+- Verified in the render: no broken shaping, no punctuation at line starts, no
+  reversed numerals, no stray bidi control characters, RTL intact; (PoW)/(PoCol)
+  parentheses well-formed; "عند 300 معدن"/"عند 400 معدن" consistent;
+  "إثبات صحة المفهوم" consistent. Miner spelling kept diacritic-free to match
+  the thesis body and guarantee stable shaping.
+
+### Terminology verification
+- CBECI vs CBNSI: the thesis references **two distinct Cambridge indices** — the
+  Cambridge Bitcoin Electricity Consumption Index (named in full in §3.4) and
+  the Cambridge Blockchain Network Sustainability Index (CBNSI, with acronym and
+  cited via ccaf.io/cbnsi). The abbreviations list correctly defines CBNSI (the
+  only one used as an acronym); no incorrect conflation remains. Left unchanged.
+- Proof of Space, Proof of Replication, Proof of Space-Time, Proof of Elapsed
+  Time now used as distinct terms; "finality" retained only where the
+  deterministic-vs-probabilistic distinction is stated (§4.4.1), replaced by
+  "approximate (six-block) confirmation time" in experimental contexts (§7.3.2).
+
+## Layout verification (rendered final32)
+147 pages; only blank page is the intentional unnumbered cover verso; all 25
+List-of-Tables/Figures entries match the rendered body pages (Figures 5.1–5.4 on
+75/78/86/90; Tables 3.1–3.8 on 24–48 after Chapter-3 compression; Table 7.1 on
+108); References on 126 = its TOC entry; body TOC entries synchronized; no
+stranded headings; Figures 5.1–5.4, Table 7.1, and every experimental number
+unchanged; passes OOXML validation.
