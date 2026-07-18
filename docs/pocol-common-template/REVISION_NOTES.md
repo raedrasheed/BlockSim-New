@@ -462,3 +462,137 @@ all 163 TOC entries re-verified against the rendered layout (Figures 5.1–5.4
 now on 75/78/86/90; References on 126, matching its TOC entry). No stranded
 headings; the only near-blank page is the intentional unnumbered cover verso.
 Figures 5.1–5.4, Table 7.1, and every experimental number are untouched.
+
+---
+
+# Final-31 — Final Academic Quality-Control Pass (Opus)
+
+**Final file:** `PhDThesisRaedRasheed-final31-FinalAcademicQualityControl.docx`
+(final-30 and all earlier files unchanged; original untouched)
+
+**Rendered (LibreOffice Writer, Liberation Serif ≈ Times New Roman): 147 pages.**
+
+## Page-count reconciliation (147 vs 149)
+
+The 147 vs 149 discrepancy is a **two-renderer effect**, not an error.
+LibreOffice (the engine available here) renders the English Abstract on I–II
+and the Arabic Abstract on a single page III → 147 pages. Microsoft Word wraps
+the denser Arabic Abstract onto two pages (III–IV), shifting each subsequent
+front-matter page +1 → ~148–149 pages. Body pagination (Arabic numerals 1–133)
+is **identical in both renderers** because the body section restarts numbering,
+so all List-of-Tables / List-of-Figures entries, all References/section pages,
+and all body cross-references are renderer-independent and verified correct.
+The **TOC is a live field with `updateFields` set**, so Word recomputes the
+front-matter Roman numerals on open regardless of the cached values. The cached
+front-matter Roman numerals written here match the LibreOffice render; Word's
+field refresh reconciles them to Word's own layout automatically.
+
+## New red edits this pass: ~31 textual edits (245 red runs, 8,117 red words total)
+
+Previous total 210 runs / 7,478 words → +35 runs / +639 words.
+
+### Recorded deletions (cannot remain visibly red)
+None this pass — every change was an in-place replacement (e.g., the stray
+"Op " duplication in §3.1 was absorbed into a red replacement, not left as a
+gap). The cover "Title" line and the Chapter 3/4 blank-page paragraphs were
+already removed in final-30 (recorded there).
+
+### Chapter 1
+- "equitable reward distribution" → "a proposed collaborative reward-distribution
+  mechanism designed to improve fairness" (§1.2 and O2).
+- "maintaining safety and decentralization, akin to PoW" → "aiming to retain
+  safety and decentralization comparable to PoW … an objective that requires
+  formal and empirical validation" (§1.3).
+- C1–C5 verified to already share a consistent infinitive ("To …") structure.
+
+### Chapter 2 (reviewed paragraph by paragraph; ~7 corrections)
+- "if you were to modify" → "modifying the record of any previous block…";
+  "get rewarded … and creation of blocks from miners" → "are rewarded … with
+  newly created coins"; "very different amounts Latency/Throughput/Tolerance to
+  Faults/Decentralization" → "markedly different trade-offs in latency,
+  throughput, fault tolerance, and decentralization"; comma-splice in the
+  smart-contract paragraph fixed; "Turing-complete (i.e. A language…)" →
+  "(i.e., a language in which any computable function can be expressed)";
+  "Farooq/Vyas and team" → "Farooq/Vyas et al."; PBFT "agreement on a consensus
+  amongst a maximum of 33% of Byzantine nodes" → "consensus among honest nodes
+  provided that fewer than one-third of the nodes are Byzantine"; "many rounds
+  of communications" → "multiple rounds of communication"; "Proofs of Time and
+  Space (or Replication)" → "Proof of Space-Time (also referred to as Proof of
+  Replication)".
+
+### Chapter 3 (reviewed paragraph by paragraph; ~5 corrections)
+- §3.1 opening paragraph ("In the past, many different types of Consensus
+  Algorithms…", pervasively over-capitalized) rewritten in normal academic
+  capitalization.
+- "richness of the Consensus Space; However…" and "surveys … detailing
+  Blockchain Architecture; Security; Consensus Mechanisms;" de-capitalized and
+  semicolon misuse fixed.
+- §3.2 survey paragraph: dangling "They wanted to demonstrate … they
+  encountered" (no antecedent) rewritten to "The survey characterizes…"; the
+  garbled "Op Operational Effectiveness" repaired to "operational
+  effectiveness"; "Examples of CA Evaluation Criteria were Functionality,
+  Security and Energy Consumption" normalized.
+- (The §3.1 three-dimension framework paragraph and the "current work…"
+  paragraph were already repaired in final-30 and re-verified complete.)
+
+### Chapter 5 (~2 corrections)
+- "entitled to participate in PoCol meetings" → "eligible to participate in
+  PoCol mining rounds".
+- "Afterwards, this transaction like other transactions broadcast on the
+  network and included into a block" → "Afterward, this transaction is
+  broadcast across the network in the same manner as other valid transactions
+  and is included in a block".
+
+### Chapter 6 (~4 corrections)
+- "All simulation inputs remained unchanged between test runs" → "All
+  simulation inputs other than the miner population remained unchanged"
+  (the miner population was the varied factor).
+- "experimental output's workbooks" → "result workbooks".
+- "ten complete experimental workbooks for PoW and PoCol each containing
+  100–500 miners in total" → "ten result workbooks — five PoW scenarios and
+  five PoCol scenarios, corresponding to miner populations of 100, 200, 300,
+  400, and 500".
+- "a credible experimental basis" → "a proof-of-concept simulation basis — one
+  run per configuration, analysed descriptively without significance testing".
+
+### Terminology (thesis-wide)
+- "Proof-of-Elapse-Time" → "Proof of Elapsed Time (PoET)".
+- lowercase "bitcoin network"/"bitcoin style" → "Bitcoin network"/"Bitcoin-style"
+  (proper noun; the bitcoin.org URL left intact).
+- Heading 7.3.2 "Latency and finality" → "Latency and approximate confirmation
+  time" (experimental subsection; heading text + TOC entry both updated). The
+  Chapter 4 metric-definition heading 4.4.1 "Throughput, latency, and finality"
+  was **kept**, as it introduces the deterministic-vs-probabilistic finality
+  distinction as general theory.
+- Confirmed already-clean from final-30: "Crypto Currency", "HealthCare",
+  "GOSSIP TYPE protocol", CBECI/CBNSI.
+
+### Arabic Abstract (2 corrections; scope matched to English)
+- "لا يحسب أي معدنين أمينين مدخل التجزئة نفسه" (ungrammatical dual) →
+  "لا يَحسب معدِّنان أمينان القيمة نفسها لمدخل التجزئة".
+- "في ظل الافتراضات المقيمة" (typo) → "في ظل الافتراضات المُقيَّمة".
+- Verified: parentheses around (PoW)/(PoCol) well-formed; "98–99%" order
+  correct; "عند 300 معدن"/"عند 400 معدن" consistent; "stale blocks" =
+  "الكتل الملغاة" and proof-of-concept = "إثبات صحة المفهوم" consistent;
+  no punctuation at line starts; RTL directionality intact (verified in render).
+  Miner spelling left as the thesis-wide convention (no shadda) to avoid an
+  abstract-vs-body mismatch; the abstract is internally consistent.
+
+## Overstatement review
+Re-swept for equitable/fair reward, equivalent/same security, preserves
+security, fully decentralized, production-ready, can be applied in practice,
+proves/validates, strong empirical evidence, complete mechanisms. Remaining
+occurrences are all either already-qualified (design objective / preliminary
+analysis / proof-of-concept) or literature descriptions of other systems.
+
+## Mechanical grammar sweep
+Whole-body scan for space-before-punctuation, doubled punctuation, repeated
+words, and space-before-citation returned only legitimate hits (TOC
+dot-leaders; standard "e.g.,"/"i.e.,"/"et al.,"). No fragments introduced.
+
+## Layout verification (rendered)
+147 pages; the only blank page is the intentional unnumbered cover verso.
+All 25 List-of-Tables/Figures entries match the rendered pages (Figures
+5.1–5.4 on 75/78/86/90; Tables on 24–108); References on 126 = its TOC entry;
+163 TOC entries synchronized; no genuinely stranded headings; Figures 5.1–5.4,
+Table 7.1, and every experimental number unchanged; passes OOXML validation.
