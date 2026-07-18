@@ -1,0 +1,77 @@
+{
+  "shared_parameters": {
+    "Tn": 10,
+    "Binterval": 600.0,
+    "Bsize": 1.0,
+    "Bdelay": 0.42,
+    "Tdelay": 5.1,
+    "Tfee": 6.2e-05,
+    "Tsize": 0.000546,
+    "NetworkHashRate_Hps": 141000000000000.0,
+    "MinerEfficiency_J_per_TH": 21.5,
+    "GridEF_kgCO2e_per_kWh": 0.445,
+    "HashPowerIsShare": true,
+    "simTime": 10000.0,
+    "hasTrans": true,
+    "Ttechnique": "Light"
+  },
+  "experiment_axes": {
+    "protocols": [
+      "PoW",
+      "PoCol"
+    ],
+    "miner_counts": [
+      100,
+      200,
+      300,
+      400,
+      500
+    ],
+    "seeds": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30
+    ]
+  },
+  "protocol_specific": {
+    "PoW": {},
+    "PoCol": {
+      "PoCol_AutoNonceSpace": true,
+      "PoCol_TargetInterval": 600.0,
+      "PoCol_AssignStrategy": "equal"
+    }
+  },
+  "model_ids": {
+    "PoW": 1,
+    "PoCol": 3
+  },
+  "config_hash_shared": "602d261342d617fd",
+  "notes": "config_hash covers protocol-INDEPENDENT parameters only and is identical for PoW and PoCol at a given miner count; seeds are paired."
+}

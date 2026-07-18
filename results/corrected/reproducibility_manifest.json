@@ -1,0 +1,61 @@
+{
+  "git_commit": "ffbc86120631686b6e896168c2082e5165a2173a",
+  "git_branch": "claude/fix-energy-round-semantics",
+  "git_dirty": true,
+  "python_version": "3.11.15 (main, Mar  3 2026, 09:26:23) [GCC 13.3.0]",
+  "platform": "Linux-6.18.5-x86_64-with-glibc2.39",
+  "packages": {
+    "numpy": "2.4.6",
+    "pandas": "3.0.3"
+  },
+  "n_runs": 300,
+  "protocols": [
+    "PoW",
+    "PoCol"
+  ],
+  "miner_counts": [
+    100,
+    200,
+    300,
+    400,
+    500
+  ],
+  "seeds": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30
+  ],
+  "seed_pairing": "PoW and PoCol share the seed at each (n, seed)",
+  "fresh_process_per_run": true,
+  "runner": "experiments/run_scenario.py",
+  "reproduce": "python experiments/run_matrix.py 30 8",
+  "per_run_commands_example": "/usr/local/bin/python /home/user/BlockSim-New/experiments/run_scenario.py PoCol 100 1",
+  "config_hash_shared": "602d261342d617fd"
+}
