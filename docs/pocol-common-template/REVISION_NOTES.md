@@ -767,3 +767,98 @@ literature-review method, informed by PRISMA principles ...".
 Arabic runs without <w:rtl/> = 0; experimental values/Table 7.1/Figures 5.1-5.4
 unchanged; 25/25 lists match rendered pages; References 126 = TOC; OOXML valid;
 filename contains "final33"; final32 not overwritten.
+
+---
+
+# Final-34 — Examiner Ready (Fable)
+
+**Final file:** `PhDThesisRaedRasheed-final34-ExaminerReady.docx`
+(final-33 and all earlier files unchanged; original untouched)
+
+## Title note (item 2 — no change made)
+The thesis title's phrase **"Highly Efficient Power Consumption" is scientifically
+and grammatically awkward** — power consumption itself is not "efficient"; the
+system is. A more precise title phrase would be **"High Energy Efficiency"**
+(e.g., "…A Novel Blockchain Consensus Algorithm with High Energy Efficiency").
+Per instruction, the title was **left unchanged** pending the author's explicit
+approval.
+
+## Page counts (item 8 — both reported)
+- LibreOffice Writer render: **147 pages**.
+- `docProps/app.xml` metadata: `<Pages>1</Pages>` — a stale value from the
+  original save; only Microsoft Word recomputes this property, so parsers that
+  read metadata see a wrong value, and parsers that re-render (e.g., Word
+  itself) may report ~148 because Word wraps the two-page Arabic Abstract
+  differently. Microsoft Word was **not** used; no Word validation is claimed.
+
+## New red edits this pass: 26 (17 in-run + 9 cross-run span replacements)
+Totals: **304 red runs, 9,413 red words** (previous 284 / 8,871). One run-level
+RTL fix for the new Arabic sentence (formatting, not text).
+
+### 1. Abstract opening bounded (EN + AR, red)
+"…because every miner independently repeats the same search for a valid block
+nonce" (false for real PoW: miners use different headers) → "their
+uncoordinated, competitive hash-search process can consume substantial energy."
+Arabic mirrored ("ولكن عملية البحث التنافسية غير المنسقة عن التجزئة فيها قد
+تستهلك قدرا كبيرا من الطاقة"). The later precise PoCol claim (duplicate hash
+inputs eliminated only under one immutable template + disjoint ranges) is
+retained unchanged.
+
+### 3. Chapter 1
+Ledger sentence rewritten; "electric power consumption … TWh/year" →
+"electricity consumption" (energy, not power); Ethereum evidence sentence
+recast as measurements; "There is an increasing number of studies" → "A growing
+number of studies address…"; C1–C5 made parallel ("To provide / To design /
+To develop / To implement / To establish"), informal phrases removed
+("a way for miners", "quite some time", "the way we view", "typical consensus
+algorithms" → "a PoW baseline").
+
+### 4. Section 2.2
+Opening rewritten ("Distributed systems employ consensus protocols so that
+non-faulty nodes agree on the order of state transitions despite crashes,
+network faults, or adversarial behaviour"); **PBFT corrected**: normal-case
+pre-prepare/prepare/commit message phases + view change, safety from the
+one-third fault bound, liveness additionally from partial synchrony — no
+"three-phase commit process"; "highly complex messages" → **O(n²) message
+complexity** of all-to-all exchange; **PoW 50% qualified** — majority assumption
+stated, with the explicit caveat that selfish mining and low-confirmation
+double-spending remain possible below the threshold; "very simple and open" →
+"openness and conceptual simplicity".
+
+### 5. Sections 2.3 / 2.3.1 rewritten
+SI-consistent definitions: power in W/MW; energy in J, Wh, kWh, TWh; metrics
+list: energy per block, per transaction, per hash (J/hash), energy intensity
+(kWh/USD); plus hardware efficiency, workload characteristics, and
+adversarial/security assumptions as required comparison context.
+
+### 6. Chapter 3
+"Looking at the literature…" → direct statement; "[73], [74] ." spacing fixed;
+subject of "The authors have described" clarified ("The authors of these
+surveys…"); classification/synthesis construction made parallel; "Recent work
+has shown that research … continues to be developed in new ways" → "Recent work
+continues to extend blockchain consensus design in new directions";
+"applications.[79], [81]" → "applications [79], [81]."; **Ladder/Orthrus/Crackle
+claims verified against the cited references**: [79] "Ladder: A
+Convergence-Based Structured DAG Blockchain for High Throughput and Low
+Latency" (NSDI'25), [80] "Orthrus: Accelerating Multi-BFT Consensus through
+Concurrent Partial Ordering of Transactions" (ICDE'25), [81] "Crackle: A Fast
+Sector-Based BFT Consensus with **Sublinear Communication Complexity**"
+(INFOCOM'24) — the sublinear-complexity claim is explicitly established by the
+cited source's title, so it was retained and reworded to mirror the source.
+Terminology unified: "structured comparative survey" (2 occurrences, §3.1 and
+§3.9 limitations) → **"structured comparative literature review"** everywhere.
+
+### 7. Arabic Abstract visually rechecked (on the delivered final34 render)
+High-resolution page image inspected: (PoW), (PoCol), TemplateID,
+"جولة تعدين: إذ", "(مثلا 11.33 مقابل 2.87 … عند 300 معدن)",
+"(مثلا 0.454 … عند 400 معدن)", "98 إلى 99 بالمئة" all in correct RTL order;
+no punctuation at line starts; no reversed parentheses; the new red opening
+sentence renders correctly. Arabic runs lacking <w:rtl/>: 0.
+
+### 8. Validation
+All 24 targeted defective phrases absent; all 32 replacements present, each
+verified inside a red run; no numerical result changed; Figures 5.1–5.4
+untouched; all 25 List-of-Tables/Figures entries and all 157 body TOC entries
+match the LibreOffice-rendered layout (no shifts this pass; References 126 =
+TOC); front-matter cached TOC retains the Word-layout values set in final-32;
+OOXML validation passed; final33 not overwritten.
