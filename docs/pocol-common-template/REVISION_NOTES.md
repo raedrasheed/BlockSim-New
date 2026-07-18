@@ -352,3 +352,113 @@ Figures→XII, List of Abbreviations→XIII). All body caption pages are
 unchanged (verified: Figures 5.1–5.4 on 76/79/87/91; all 25 list entries
 match the rendered layout; References on 127 in both text and TOC). The 9
 affected cached TOC numbers were re-synchronized; `updateFields` remains set.
+
+---
+
+# Final-30 — Comprehensive Academic Edit (full thesis)
+
+**Final file:** `PhDThesisRaedRasheed-final30-ComprehensiveAcademicEdit.docx`
+(final-29, final-28, final-27, and the original are all unchanged)
+
+## Edit accounting
+
+- **52 red textual edit operations** (47 main batch; CBECI→CBNSI abbreviation;
+  Acknowledgment reorder — 4 paragraphs relocated and set red; §5.12 closing
+  sentence; gossip-protocol and "chain.," fixes), plus **19 list page-number
+  corrections** across two re-syncs (3 new black→red digit splits: Table 3.2,
+  Figures 5.1, 5.2; 16 digit swaps inside already-red runs).
+- Red totals: **210 red runs, 7,478 red words** (previous pass: 150 / 6,147).
+- Non-red (documented): 111 cached TOC page numbers (field text, regenerated
+  by Word on open); 7 `xml:space` fixes; front-matter footer restructuring.
+
+## Recorded deletions (cannot remain visibly red)
+
+1. Stray paragraph containing only the word **"Title"** below the supervisor's
+   name on the cover page — deleted.
+2. Stray phrase **"Source: Xu et al."** in §2.1 (mid-paragraph artifact before
+   "Based on our review…") — removed as part of the red rewrite of that sentence.
+3. **4 empty/page-break paragraphs** at the Chapter 3→4 boundary (an explicit
+   page break duplicating the section break, plus empty paragraphs) — removed
+   to eliminate an accidental blank numbered page; no text content was involved.
+
+## Front matter
+
+- Cover: "Title" removed; date 07/2026 verified at the foot of the cover.
+- Page numbering restructured: section 1 (cover + verso) now uses an empty
+  footer, so the title page and its verso are **unnumbered** (the stray "II"
+  before the Abstract is gone); the front-matter section carries the numbered
+  footer explicitly. Sequence verified in the rendered PDF: Abstract I–II,
+  الملخص III, Acknowledgment IV, Table of Contents V–X, List of Tables XI,
+  List of Figures XII, List of Abbreviations XIII; body pages 1–133 (arabic).
+- Acknowledgment reordered (Allah → supervisor → university/committee →
+  family), all four paragraphs red.
+- Abbreviations list: CBECI / "Cambridge Bitcoin Electricity Consumption
+  Index" corrected to CBNSI / "Cambridge Blockchain Network Sustainability
+  Index" to match the body text and reference (ccaf.io/cbnsi).
+
+## Methodology, RQs, objectives
+
+- §1.4 fully converted from proposal (future) tense to past tense —
+  ~15 future-tense constructions corrected (also C3, §6.1 objectives, §5.12
+  closing). Completed work is now distinguished from future work.
+- RQ2 and O3 rewritten to match the actual experiment (miner populations
+  100–500 varied; latency, workload, hardware efficiency, and duration fixed;
+  fairness/decentralization analytical only). §1.6's Chapter 7 description now
+  lists the actually measured quantities.
+
+## Overstatements and terminology
+
+- "solves the dilemma"→"addresses the design challenge"; "complete
+  mechanisms"→"specification includes mechanisms"; "fair reward
+  distribution"→"proposed collaborative reward-distribution mechanism designed
+  to improve fairness"; "maintains equivalent levels of decentralization and
+  security"→design objective requiring formal and empirical validation;
+  "six-confirmation finality"→"approximate (six-block) confirmation time"
+  throughout (both abstracts, §6.1, §7.3 incl. Figure 7.2 caption + LoF entry,
+  §7.6.1); §5.12 closing no longer promises comparisons that were not run.
+- Technical corrections: consensus validation ("voted on"→validated per
+  consensus rules); block header (not "header of the transaction"); UTXO
+  correctly described as a transaction-output accounting model; gossip
+  protocol; annual energy in TWh/year (not "terawatts"); power (W) vs energy
+  (kWh) definitions; "Power Usage Effectiveness (PUE)"; kilowatt-hours.
+
+## Systematic-review claim — replaced
+
+Chapter 3 cites PRISMA principles and describes screening/dedup steps, but
+contains **no record counts, no per-database numbers, no PRISMA flow diagram,
+and no study-quality assessment**. Both abstracts therefore now say
+"structured comparative literature review", and §3.2's "completed according to
+PRISMA guidelines" was softened to "informed by PRISMA principles". The
+chapter's own §3.1 already described the method as a structured review.
+
+## Chapter 3 repairs
+
+The corrupted §3.1 framework paragraph ("The Additional to the framework, 2,
+across all categories…") was reconstructed to state the three review
+dimensions (functionality; security; energy consumption and sustainability)
+without inventing contributions. The paragraph ending "…focuses on addressing
+long-standing problems with throughput, latency, and/or communication
+overhead…" was inspected and found grammatically complete; no repair needed.
+The §3.3 over-capitalized opening paragraph was rewritten.
+
+## Copy-edit coverage
+
+Every passage enumerated in the instruction was corrected (fragments,
+agreement errors, informal register, capitalization, "We hope this chapter…",
+"Based on our review we feel…", "Following this work have been…", "The way
+blockchain consumes energy … are…", "Chapter four discusses…", "four
+categories"→"five categories", "current systems of PoCol", etc.), plus a
+whole-document sweep for future-tense proposal wording, "finality", "fair
+reward", "equivalent security", and informal phrases. Remaining "will"
+instances are genuine future-work or predictive statements.
+
+## Layout after this pass (rendered and verified)
+
+**147 pages.** One accidental blank numbered page (introduced at the Chapter
+3→4 boundary by text tightening interacting with a redundant explicit page
+break) was eliminated by removing the redundant break. Chapter 4 onward
+shifted one page earlier; all 25 List of Tables / List of Figures entries and
+all 163 TOC entries re-verified against the rendered layout (Figures 5.1–5.4
+now on 75/78/86/90; References on 126, matching its TOC entry). No stranded
+headings; the only near-blank page is the intentional unnumbered cover verso.
+Figures 5.1–5.4, Table 7.1, and every experimental number are untouched.
