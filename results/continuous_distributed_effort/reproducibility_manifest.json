@@ -1,0 +1,18 @@
+{
+  "git_commit": "c1e0ecaa2b91624f308e4a5f7a30723443bab517",
+  "git_branch": "claude/pocol-continuous-distributed-effort",
+  "git_dirty": true,
+  "python_version": "3.11.15 (main, Mar  3 2026, 09:26:23) [GCC 13.3.0]",
+  "platform": "Linux-6.18.5-x86_64-with-glibc2.39",
+  "packages": {
+    "numpy": "2.4.6"
+  },
+  "n_deterministic_rows": 1068,
+  "n_stochastic_runs": 2000,
+  "n_seeds": 100,
+  "reproduce": "python experiments/continuous_distributed_effort/run_matrix.py 100 12",
+  "protected_unchanged": [
+    "results/corrected/",
+    "results/nonce_partition_worst_case/"
+  ]
+}

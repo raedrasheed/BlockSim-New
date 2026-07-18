@@ -1,0 +1,68 @@
+{
+  "experiment": "continuous_distributed_effort",
+  "modes": {
+    "A": "COMMON_TEMPLATE_DUPLICATE_BASELINE",
+    "B": "POCOL_DISJOINT_NONCE",
+    "C1": "INDEPENDENT_HEADERS_EQUAL_TOTAL_BUDGET",
+    "C2": "INDEPENDENT_HEADERS_FULL_PER_MINER_BUDGET"
+  },
+  "deterministic": {
+    "miner_counts": [
+      1,
+      2,
+      5,
+      10,
+      20,
+      50,
+      100,
+      200,
+      300,
+      400,
+      500
+    ],
+    "schedules": [
+      "IMMEDIATE_RESTART",
+      "FIXED_SLOT_IDLE"
+    ],
+    "hardware": [
+      "H1_FIXED_AGGREGATE_NETWORK_HASHRATE",
+      "H2_FIXED_PER_MINER_HARDWARE"
+    ],
+    "idle_ratios": [
+      0.0,
+      0.05,
+      0.1,
+      0.2,
+      0.5,
+      1.0
+    ],
+    "sleep_ratios": [
+      0.0,
+      0.01,
+      0.05
+    ],
+    "solution": "final nonce M-1"
+  },
+  "stochastic": {
+    "miner_counts": [
+      100,
+      200,
+      300,
+      400,
+      500
+    ],
+    "M": 1000000,
+    "p_success": 2e-06,
+    "idle_ratio": 0.1,
+    "hardware": "H2_FIXED_PER_MINER_HARDWARE",
+    "schedule": "FIXED_SLOT_IDLE",
+    "slot_seconds": 600.0,
+    "sim_seconds": 10000.0,
+    "n_seeds": 100,
+    "fresh_subprocess_per_run": true,
+    "note": "energy RATIOS are hardware-independent, so H2 stochastic ratios transfer to H1; H1 IMMEDIATE_RESTART = 8.4208 kWh."
+  },
+  "formula": "reduction = (1-q)(1-1/N); E_B/E_A = 1/N + q(1-1/N)",
+  "bc1_equivalence_margin_rel_preregistered": 0.01,
+  "energy_model": "state power integrated over wall-clock time; never energy/N"
+}
