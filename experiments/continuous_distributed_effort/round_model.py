@@ -167,7 +167,8 @@ def simulate_continuous(cfg: ExperimentConfig, outcome_fn: Callable[[ExperimentC
     exhausted_rounds = 0
     unique_evals = 0
     duplicate_evals = 0
-    discovery_times = []
+    disc_sum = 0.0            # sum of discovery times (scalar accumulator, no list)
+    disc_count = 0
 
     if cfg.schedule == SCHED_IMMEDIATE:
         # Miners never leave ACTIVE: finishing a range/round immediately starts the
@@ -184,8 +185,9 @@ def simulate_continuous(cfg: ExperimentConfig, outcome_fn: Callable[[ExperimentC
             exhausted_rounds = n_rounds
         unique_evals = outcome.unique_evals * n_rounds
         duplicate_evals = outcome.duplicate_evals * n_rounds
-        if outcome.solution_found:
-            discovery_times = [round_wall] * n_rounds
+        if outcome.solution_found and n_rounds:
+            disc_sum = round_wall * n_rounds   # every round has the same duration
+            disc_count = n_rounds
         for m in miners:
             m.finalize(sim)                    # stays ACTIVE the whole horizon
 
@@ -199,7 +201,8 @@ def simulate_continuous(cfg: ExperimentConfig, outcome_fn: Callable[[ExperimentC
             n_slots += 1
             if outcome.solution_found:
                 successful_rounds += 1
-                discovery_times.append(outcome.t_star / r if r > 0 else 0.0)
+                disc_sum += outcome.t_star / r if r > 0 else 0.0
+                disc_count += 1
             else:
                 exhausted_rounds += 1
             unique_evals += outcome.unique_evals
@@ -240,8 +243,7 @@ def simulate_continuous(cfg: ExperimentConfig, outcome_fn: Callable[[ExperimentC
         "co2_kg": co2_kg,
         "energy_per_successful_round_kwh": (total_energy_j / 3.6e6 / successful_rounds)
                                            if successful_rounds else float("nan"),
-        "avg_discovery_time_s": (sum(discovery_times) / len(discovery_times))
-                                if discovery_times else float("nan"),
+        "avg_discovery_time_s": (disc_sum / disc_count) if disc_count else float("nan"),
         "pct_time_active": 100.0 * active_s / (cfg.N * sim) if sim else float("nan"),
         "slot_utilization": (successful_rounds / n_slots) if n_slots else float("nan"),
         "total_state_time_s": active_s + idle_s + sleep_s,
