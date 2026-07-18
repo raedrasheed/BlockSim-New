@@ -14,7 +14,7 @@ import math
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
-from .partition import range_size
+from .partition import range_size, partition_nonce_domain
 
 # Abstract defaults: one evaluation per second, one energy unit per evaluation.
 # power = energy_per_attempt * hashrate  =>  e_hash = power/hashrate = energy_per_attempt,
@@ -183,4 +183,25 @@ def duplicate_full_domain(M, N, solution="last",
     winning_nonce = _resolve_solution(solution, M)
     ranges = [(0, M) for _ in range(N)]         # identical whole-domain range for all
     return _run_engine("duplicate_full_domain", M, N, ranges, winning_nonce,
+                       hashrate=hashrate, energy_per_attempt=energy_per_attempt)
+
+
+# ---------------------------------------------------------------------------
+# Mode B — PoCol Disjoint-Nonce Allocation
+# ---------------------------------------------------------------------------
+def disjoint_partition(M, N, solution="last",
+                       hashrate=DEFAULT_HASHRATE,
+                       energy_per_attempt=DEFAULT_ENERGY_PER_ATTEMPT):
+    """Mode B: same immutable template, but the domain [0, M) is split into N
+    mutually disjoint sub-ranges (partition.partition_nonce_domain). Each miner
+    scans only its own range and never evaluates a nonce assigned to another
+    miner, so each candidate is evaluated exactly once.
+
+    Final-nonce worst case (solution='last', M divisible by N): the domain is
+    covered once -> total_attempts = M, total_energy = M*e_hash, a 1-1/N
+    reduction versus Mode A.
+    """
+    winning_nonce = _resolve_solution(solution, M)
+    ranges = partition_nonce_domain(0, M, N)
+    return _run_engine("disjoint_partition", M, N, ranges, winning_nonce,
                        hashrate=hashrate, energy_per_attempt=energy_per_attempt)
