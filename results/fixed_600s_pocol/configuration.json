@@ -1,0 +1,67 @@
+{
+  "experiment": "fixed_600s_pocol",
+  "round_seconds": 600.0,
+  "protocols": [
+    "common_template_duplicate_pow",
+    "independent_header_pow",
+    "pocol_disjoint_nonce"
+  ],
+  "deterministic": {
+    "miner_counts": [
+      1,
+      2,
+      5,
+      10,
+      20,
+      50,
+      100,
+      200,
+      300,
+      400,
+      500
+    ],
+    "hardware": [
+      "H1",
+      "H2"
+    ],
+    "placements": [
+      "first",
+      "p25",
+      "middle",
+      "p75",
+      "last"
+    ],
+    "idle_ratios": [
+      0.0,
+      0.05,
+      0.1,
+      0.2,
+      0.5,
+      1.0
+    ],
+    "sleep_ratios": [
+      0.0,
+      0.01,
+      0.05
+    ],
+    "sim_seconds": 10200.0
+  },
+  "stochastic": {
+    "miner_counts": [
+      100,
+      200,
+      300,
+      400,
+      500
+    ],
+    "hardware": "H1",
+    "p_success": "2/M (E[successes]=2 per template)",
+    "idle_ratio": 0.0,
+    "n_seeds": 100,
+    "sim_seconds": 10200.0,
+    "fresh_subprocess_per_run": true
+  },
+  "pocol_vs_independent_tost_margin_rel_preregistered": 0.01,
+  "energy_rule": "E_i = P_a*t_a + P_i*t_i + P_s*t_s; never divided by N",
+  "commit_rule": "block buffered; commit_time = round_start + 600 exactly"
+}
