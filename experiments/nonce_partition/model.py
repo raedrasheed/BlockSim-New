@@ -11,6 +11,7 @@ This module builds up in three commits:
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
@@ -205,3 +206,163 @@ def disjoint_partition(M, N, solution="last",
     ranges = partition_nonce_domain(0, M, N)
     return _run_engine("disjoint_partition", M, N, ranges, winning_nonce,
                        hashrate=hashrate, energy_per_attempt=energy_per_attempt)
+
+
+# ---------------------------------------------------------------------------
+# Dual-method energy accounting (explicit, per section 8)
+# ---------------------------------------------------------------------------
+def energy_by_attempts(m: MinerRecord) -> float:
+    """Method 1: attempts * (power/hashrate) = attempts * e_hash."""
+    return m.attempts * (m.power / m.hashrate)
+
+
+def energy_by_power_time(m: MinerRecord) -> float:
+    """Method 2: power * active_time."""
+    return m.power * m.active_time
+
+
+def assert_energy_methods_agree(result: ExperimentResult, tol=1e-9) -> bool:
+    """Assert per-miner Method 1 == Method 2 within floating-point tolerance.
+    The saving must come from fewer attempts / shorter active time, never from
+    dividing a final energy value by N."""
+    for m in result.miners:
+        e1, e2 = energy_by_attempts(m), energy_by_power_time(m)
+        assert math.isclose(e1, e2, rel_tol=tol, abs_tol=tol), \
+            f"miner {m.miner_id}: attempts-energy {e1} != power-time energy {e2}"
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Stochastic (target-based) solution model
+# ---------------------------------------------------------------------------
+def bernoulli_p_from_target(target, bits=256):
+    """Bitcoin-style success probability p = (target + 1) / 2**bits."""
+    return (int(target) + 1) / float(2 ** bits)
+
+
+def _geometric_first_success(rng, p):
+    """1-based index of the first Bernoulli(p) success (may exceed any domain M).
+
+    Drawn as a geometric jump so large domains are never enumerated:
+        P(G > k) = (1-p)^k  =>  G = floor(ln U / ln(1-p)) + 1,  U ~ Uniform(0,1).
+    """
+    if p <= 0.0:
+        return math.inf
+    if p >= 1.0:
+        return 1
+    u = rng.random()
+    if u <= 0.0:
+        u = 5e-324                       # smallest positive double, avoids log(0)
+    return int(math.floor(math.log(u) / math.log1p(-p))) + 1
+
+
+def duplicate_full_domain_stochastic(M, N, p, seed,
+                                     hashrate=DEFAULT_HASHRATE,
+                                     energy_per_attempt=DEFAULT_ENERGY_PER_ATTEMPT):
+    """Mode A, stochastic: one shared template assigns each nonce success/fail.
+    All miners scan the same order and stop at the first success (or exhaust).
+    Uses ONE geometric draw (the shared first-success position) so it PAIRS with
+    the disjoint stochastic run at the same seed."""
+    rng = random.Random(seed)
+    g = _geometric_first_success(rng, p)         # 1-based shared first-success step
+    sol = (g - 1) if g <= M else "none"          # 0-based index, or no solution
+    return duplicate_full_domain(M, N, solution=sol,
+                                 hashrate=hashrate, energy_per_attempt=energy_per_attempt)
+
+
+def disjoint_partition_stochastic(M, N, p, seed,
+                                  hashrate=DEFAULT_HASHRATE,
+                                  energy_per_attempt=DEFAULT_ENERGY_PER_ATTEMPT):
+    """Mode B, stochastic: SAME shared template as Mode A (identical seed -> same
+    shared first-success position g), but the domain is partitioned. Paired with
+    Mode A by construction."""
+    rng = random.Random(seed)
+    g = _geometric_first_success(rng, p)         # identical draw -> paired with Mode A
+    sol = (g - 1) if g <= M else "none"
+    return disjoint_partition(M, N, solution=sol,
+                              hashrate=hashrate, energy_per_attempt=energy_per_attempt)
+
+
+# ---------------------------------------------------------------------------
+# Mode C — Independent Candidate Headers (reference / control)
+# ---------------------------------------------------------------------------
+def independent_candidate_headers_stochastic(M, N, p, seed,
+                                             hashrate=DEFAULT_HASHRATE,
+                                             energy_per_attempt=DEFAULT_ENERGY_PER_ATTEMPT):
+    """Mode C: each miner searches a DISTINCT candidate header (its own
+    independent success sequence). No two miners repeat identical complete-header
+    work, so the 1/N duplicate-search saving does not apply. The network stops at
+    the earliest per-miner success; every miner has performed t* = min_i G_i
+    attempts by then (none succeeded earlier).
+
+    This is a reference control, never mixed with Modes A/B.
+    """
+    rng = random.Random(seed)
+    Gs = [_geometric_first_success(rng, p) for _ in range(N)]   # one draw per miner
+    power = energy_per_attempt * hashrate
+    e_hash = power / hashrate
+
+    finite = [(g, i) for i, g in enumerate(Gs) if g <= M]
+    if finite:
+        gmin, winner_id = min(finite)            # earliest success, tie -> lowest id
+        t_star = gmin
+        solution_found = True
+    else:
+        winner_id, t_star, solution_found = None, M, False
+
+    miners = []
+    total_attempts = 0
+    total_energy = 0.0
+    aggregate_active = 0.0
+    exhausted_ranges = 0
+    for i in range(N):
+        attempts = min(t_star, M)                 # every miner reaches the global stop step
+        active_time = attempts / hashrate
+        energy = attempts * e_hash
+        found = (i == winner_id)
+        exhausted = (attempts == M)               # scanned the whole domain (no success found)
+        if exhausted:
+            exhausted_ranges += 1
+        miners.append(MinerRecord(
+            miner_id=i, range_start=0, range_end=M, range_size=M,
+            hashrate=hashrate, power=power, attempts=attempts,
+            active_time=active_time, energy=energy,
+            exhausted=exhausted, found=found))
+        total_attempts += attempts
+        total_energy += energy
+        aggregate_active += active_time
+
+    return ExperimentResult(
+        mode="independent_candidate_headers", M=M, N=N,
+        solution_found=solution_found,
+        winning_nonce=(t_star - 1) if solution_found else None,
+        winner_id=winner_id,
+        discovery_step=t_star if solution_found else None,
+        completion_time=t_star / hashrate,
+        total_attempts=total_attempts,
+        aggregate_active_seconds=aggregate_active,
+        total_energy=total_energy,
+        exhausted_ranges=exhausted_ranges,
+        hashrate=hashrate, energy_per_attempt=energy_per_attempt, power=power,
+        miners=miners)
+
+
+# ---------------------------------------------------------------------------
+# Comparison (baseline vs pocol)
+# ---------------------------------------------------------------------------
+def compare_modes(baseline: ExperimentResult, pocol: ExperimentResult) -> dict:
+    """Attempt/energy/time ratios and duplicate work avoided (baseline vs pocol)."""
+    a_att, b_att = baseline.total_attempts, pocol.total_attempts
+    a_en, b_en = baseline.total_energy, pocol.total_energy
+    a_t, b_t = baseline.completion_time, pocol.completion_time
+    return {
+        "baseline_attempts": a_att,
+        "pocol_attempts": b_att,
+        "duplicate_evaluations_avoided": a_att - b_att,
+        "attempts_ratio": (b_att / a_att) if a_att else float("nan"),
+        "attempts_reduction_pct": (100.0 * (1 - b_att / a_att)) if a_att else float("nan"),
+        "energy_ratio": (b_en / a_en) if a_en else float("nan"),
+        "energy_reduction_pct": (100.0 * (1 - b_en / a_en)) if a_en else float("nan"),
+        "time_ratio": (b_t / a_t) if a_t else float("nan"),
+        "time_reduction_pct": (100.0 * (1 - b_t / a_t)) if a_t else float("nan"),
+    }
