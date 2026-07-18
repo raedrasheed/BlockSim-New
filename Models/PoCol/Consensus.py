@@ -116,6 +116,56 @@ class Consensus(BaseConsensus):
     def _target_interval():
         return float(getattr(p, "PoCol_TargetInterval", p.Binterval))
 
+    # ------------------------------------------------------------------
+    # Equal-share + idle-after-work extension (OPT-IN, default OFF).
+    #
+    # When p.PoCol_IdleAfterRange is True, mining runs in fixed slots of
+    # Binterval seconds: each round starts at a slot boundary, every miner works
+    # only on its own disjoint share of the nonce domain (ranges are already
+    # partitioned proportional to hash rate -> equal shares for equal miners),
+    # and as soon as the round closes (a valid block is found, which under
+    # proportional ranges happens no later than any miner finishes its share)
+    # ALL miners stop consuming power (IDLE, 0 W) until the next slot boundary.
+    #
+    # The energy saving therefore emerges from genuinely shorter ACTIVE time --
+    # never from dividing energy by the miner count. Default OFF so the
+    # corrected Finding-1 comparison (results/corrected/) is unchanged.
+    # ------------------------------------------------------------------
+    next_slot_start = 0.0        # earliest time the next round may begin
+
+    @staticmethod
+    def _idle_enabled():
+        return bool(getattr(p, "PoCol_IdleAfterRange", False))
+
+    @staticmethod
+    def _slot_seconds():
+        return float(getattr(p, "PoCol_SlotSeconds", Consensus._target_interval()))
+
+    @staticmethod
+    def pause_miners_until_next_slot(t):
+        """Round closed at time t: power every miner down (IDLE, 0 W) and record
+        the next slot boundary. Meters are advanced eagerly: ACTIVE is charged up
+        to t, the idle window [t, t_next) is integrated at 0 W, and the miner is
+        re-armed ACTIVE from t_next (the known, deterministic resume time)."""
+        if not Consensus._idle_enabled():
+            return
+        slot = Consensus._slot_seconds()
+        if slot <= 0:
+            return
+        import math as _math
+        t = float(t)
+        t_next = _math.floor(t / slot + 1.0) * slot
+        Consensus.next_slot_start = t_next
+        sim_end = float(getattr(p, "simTime", t_next))
+        for m in Consensus._miners():
+            if not hasattr(m, "set_mining_state"):
+                continue
+            m.set_mining_state("IDLE", t)              # charge ACTIVE up to t, then 0 W
+            m.pocol_idle_time_s = getattr(m, "pocol_idle_time_s", 0.0) + \
+                (min(t_next, sim_end) - min(t, sim_end))
+            if t_next < sim_end and hasattr(m, "begin_mining"):
+                m.begin_mining(t_next)                 # integrates [t, t_next) at 0 W
+
     @staticmethod
     def _loser_lag():
         # Ensure losers don't create before hearing winner (reduce forks).

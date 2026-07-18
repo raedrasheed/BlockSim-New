@@ -64,6 +64,11 @@ class BlockCommit(BaseBlockCommit):
             # >>> Apply PoCol energy for this successfully created block
             c.apply_energy_for_created_block(event.block)
 
+            # Equal-share idle extension (opt-in): the round is over, so every
+            # miner powers down (0 W) until the next slot boundary. The energy
+            # saving is the genuinely shorter ACTIVE time -- never energy/N.
+            c.pause_miners_until_next_slot(eventTime)
+
             # Add transactions if enabled
             if p.hasTrans:
                 if p.Ttechnique == "Light":
@@ -121,7 +126,12 @@ class BlockCommit(BaseBlockCommit):
     @staticmethod
     def generate_next_block(node, currentTime):
         if getattr(node, "hashPower", 0) > 0:
-            blockTime = currentTime + c.Protocol(node)
+            base = currentTime
+            # Equal-share idle extension: the next round may not begin before the
+            # next slot boundary (miners are IDLE at 0 W until then).
+            if c._idle_enabled() and c.next_slot_start > base:
+                base = c.next_slot_start
+            blockTime = base + c.Protocol(node)
             # B2: stamp the event with the round it belongs to
             Scheduler.create_block_event(node, blockTime, round_id=c.round_id)
 
