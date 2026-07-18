@@ -67,6 +67,29 @@ def test_no_double_scaling_discovery_not_600_over_N():
     assert means[100] > 100.0, f"600/N artifact returned: {means[100]}"
 
 
+# ===========================================================================
+# Section-9 mandatory numerical example — Case A (D1 CONSTANT under H2)
+# reference: 1 miner @ 100 c/s, T=600 => W_1 = 60000, p_1 = 1/60000
+# ===========================================================================
+def test_spec9_caseA_constant_difficulty_gives_60s():
+    """N=10 under H2 with CONSTANT difficulty: H=1000 c/s, E[T] = 60000/1000 = 60 s."""
+    t1 = tg.target_for(100.0, 600.0)
+    cfgA = _cfg(PROTO_POCOL, N=10, hardware=HW_H2, mode=D1_CONSTANT, h2_rate=100.0)
+    assert initial_target(cfgA) == t1                       # frozen at reference
+    assert math.isclose(tg.p_from_target(t1), 1.0 / 60000.0, rel_tol=1e-6)
+    assert math.isclose(tg.expected_block_time(t1, 1000.0), 60.0, rel_tol=1e-6)
+    # simulated mean interval ~ 60 s
+    ivs = []
+    for seed in range(30):
+        m, _, _ = simulate(_cfg(PROTO_POCOL, N=10, hardware=HW_H2,
+                                mode=D1_CONSTANT, h2_rate=100.0,
+                                seed=seed, sim=12000.0))
+        if m["accepted_blocks"] >= 5:
+            ivs.append(m["mean_block_interval_s"])
+    mean = statistics.mean(ivs)
+    assert abs(mean - 60.0) / 60.0 < 0.15, f"constant-difficulty interval {mean:.1f}s != ~60s"
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
