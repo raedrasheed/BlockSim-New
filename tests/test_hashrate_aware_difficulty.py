@@ -139,6 +139,68 @@ def test_spec10_H1_difficulty_constant_in_N():
         assert math.isclose(difficulty_ratio_vs_reference(cfg), 1.0, rel_tol=1e-9)
 
 
+# ===========================================================================
+# D3 retargeting (invariants 15-18)
+# ===========================================================================
+def test_inv15_16_retarget_up_when_blocks_too_fast():
+    from experiments.hashrate_aware_difficulty.retarget import Retargeter
+    t0 = tg.target_for(1000.0, 600.0)
+    rt = Retargeter(t0, window_blocks=10, t_target=600.0)
+    # 10 accepted blocks in 3000 s (2x too fast) -> difficulty *2, target /2
+    for i in range(10):
+        rt.on_block((i + 1) * 300.0)
+    assert len(rt.history) == 1                          # fired on the window, not per block
+    _, old, adj, new = rt.history[0]
+    assert math.isclose(adj, 2.0, rel_tol=1e-9)
+    assert math.isclose(tg.difficulty_from_target(new) /
+                        tg.difficulty_from_target(old), 2.0, rel_tol=1e-6)
+    assert new < old                                     # target decreased
+
+
+def test_inv17_retarget_down_when_blocks_too_slow():
+    from experiments.hashrate_aware_difficulty.retarget import Retargeter
+    t0 = tg.target_for(1000.0, 600.0)
+    rt = Retargeter(t0, window_blocks=10, t_target=600.0)
+    for i in range(10):
+        rt.on_block((i + 1) * 1200.0)                    # 2x too slow
+    _, old, adj, new = rt.history[0]
+    assert math.isclose(adj, 0.5, rel_tol=1e-9)
+    assert new > old                                     # target increased (easier)
+
+
+def test_inv18_retarget_clamps():
+    from experiments.hashrate_aware_difficulty.retarget import Retargeter
+    t0 = tg.target_for(1000.0, 600.0)
+    rt = Retargeter(t0, window_blocks=10, clamp_min=0.25, clamp_max=4.0)
+    for i in range(10):
+        rt.on_block((i + 1) * 1.0)                       # absurdly fast: raw = 600
+    assert math.isclose(rt.history[0][2], 4.0)           # clamped up
+    rt2 = Retargeter(t0, window_blocks=10, clamp_min=0.25, clamp_max=4.0)
+    for i in range(10):
+        rt2.on_block((i + 1) * 1e6)                      # absurdly slow
+    assert math.isclose(rt2.history[0][2], 0.25)         # clamped down
+
+
+def test_d3_end_to_end_converges_toward_600s():
+    """Start 10x TOO EASY (initial_factor=0.1 -> fast blocks); retargeting must
+    raise difficulty and push intervals toward 600 s."""
+    from experiments.hashrate_aware_difficulty.retarget import Retargeter
+    cfg = _cfg(PROTO_POCOL, N=10, hardware=HW_H2, mode=D3_RETARGET,
+               h2_rate=100.0, seed=5, sim=60000.0, d3_initial_factor=0.1,
+               d3_window_blocks=10)
+    rt = Retargeter(initial_target(cfg), window_blocks=10, t_target=600.0)
+    m, _, blocks = simulate(cfg, retargeter=rt)
+    assert len(rt.history) >= 1                          # retargets happened
+    d_first = blocks[0].difficulty
+    d_last = blocks[-1].difficulty
+    assert d_last > d_first * 1.5, "difficulty did not rise from a too-easy start"
+    # late-run intervals near 600 s (use the last half of blocks)
+    commits = [b.commit_time for b in blocks]
+    late = [b - a for a, b in zip(commits, commits[1:])][len(commits) // 2:]
+    mean_late = statistics.mean(late)
+    assert 300.0 < mean_late < 1200.0, f"late intervals {mean_late:.0f}s not near 600s"
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
