@@ -201,6 +201,101 @@ def test_d3_end_to_end_converges_toward_600s():
     assert 300.0 < mean_late < 1200.0, f"late intervals {mean_late:.0f}s not near 600s"
 
 
+# ===========================================================================
+# Remaining invariants 1, 2, 7, 8, 9, 11-14, 19-22
+# ===========================================================================
+def test_inv1_2_hashrate_policies():
+    for N in (1, 10, 500):
+        h2 = DiffExpConfig(N=N, hardware=HW_H2, h2_miner_hashrate_hps=100.0)
+        assert math.isclose(h2.network_hashrate(), N * 100.0)            # 1
+        h1 = DiffExpConfig(N=N, hardware=HW_H1)
+        assert math.isclose(h1.network_hashrate(), AGG_HASHRATE_HPS)     # 2
+
+
+def test_inv7_8_target_and_p_fall_as_difficulty_rises():
+    prev_t, prev_p = None, None
+    for w in (1e4, 1e6, 1e8, 1e12):
+        t = tg.target_from_work(w)
+        p = tg.p_from_target(t)
+        if prev_t is not None:
+            assert t < prev_t                                            # 7
+            assert p < prev_p                                            # 8
+        prev_t, prev_p = t, p
+
+
+def test_inv9_difficulty_not_via_domain_size():
+    """Changing the difficulty MODE must leave the finite domain unchanged;
+    difficulty lives only in the target."""
+    a = _cfg(PROTO_POCOL, N=10, hardware=HW_H2, mode=D1_CONSTANT, h2_rate=100.0)
+    b = _cfg(PROTO_POCOL, N=10, hardware=HW_H2, mode=D2_SCALED, h2_rate=100.0)
+    assert _domain_total(a) == _domain_total(b)          # same M_total
+    assert initial_target(a) != initial_target(b)        # different difficulty
+    # and the domain can hold zero/one/many successes: P(no success) in (0,1)
+    p = tg.p_from_target(initial_target(b))
+    pn = tg.domain_no_success_probability(p, _domain_total(b))
+    assert 0.0 < pn < 1.0
+
+
+def test_inv11_12_partition_and_range_confinement():
+    from experiments.hashrate_aware_difficulty.nonce_partition import (
+        partition_nonce_domain, ranges_are_disjoint, ranges_cover)
+    cfg = _cfg(PROTO_POCOL, N=10, hardware=HW_H2, h2_rate=100.0, seed=2)
+    M = _domain_total(cfg)
+    rg = partition_nonce_domain(0, M, 10)
+    assert ranges_are_disjoint(rg) and ranges_cover(rg, 0, M)            # 11
+    _, miners, _ = simulate(cfg)
+    for m in miners:
+        assert m.evaluated_candidates <= m.assigned_candidates           # 12
+
+
+def test_inv13_14_exhaustion_honest_and_difficulty_unchanged():
+    # make success very unlikely: freeze difficulty at a huge reference rate
+    cfg = _cfg(PROTO_POCOL, N=10, hardware=HW_H2, mode=D1_CONSTANT,
+               h2_rate=100.0, sim=6000.0, reference_hashrate_hps=1e12)
+    m, _, blocks = simulate(cfg)
+    assert m["accepted_blocks"] == 0                                     # 13: nothing fabricated
+    assert m["template_exhaustions"] > 0
+    assert math.isclose(m["final_difficulty"], m["initial_difficulty"])  # 14: unchanged
+
+
+def test_inv19_20_energy_integral_and_no_division_by_N():
+    for proto in (PROTO_DUP, PROTO_IND, PROTO_POCOL):
+        cfg = _cfg(proto, N=10, hardware=HW_H2, h2_rate=100.0, seed=4)
+        met, miners, _ = simulate(cfg)
+        total = 0.0
+        for m in miners:
+            e = (m.active_power_w * m.active_time_s + m.idle_power_w * m.idle_time_s
+                 + m.sleep_power_w * m.sleep_time_s)
+            assert math.isclose(m.cumulative_energy_j, e, rel_tol=1e-9)  # 19
+            total += e
+        assert math.isclose(met["total_energy_j"], total, rel_tol=1e-9)  # 20: plain sum
+    # source-level guard: no final energy division by the miner count
+    src_dir = os.path.join(ROOT, "experiments", "hashrate_aware_difficulty")
+    for fn in ("mining_round.py", "energy.py"):
+        src = open(os.path.join(src_dir, fn), encoding="utf-8").read()
+        assert "total_e / cfg.N" not in src and "total_e/cfg.N" not in src
+        assert "energy_j / cfg.N" not in src and "/ N  # energy" not in src
+
+
+def test_inv21_fixed_seed_reproducibility():
+    for proto in (PROTO_DUP, PROTO_IND, PROTO_POCOL):
+        m1, _, _ = simulate(_cfg(proto, seed=9))
+        m2, _, _ = simulate(_cfg(proto, seed=9))
+        assert m1 == m2                                                  # 21
+
+
+def test_inv22_protected_result_dirs_unchanged():
+    import subprocess
+    protected = ["results/corrected", "results/nonce_partition_worst_case",
+                 "results/continuous_distributed_effort",
+                 "results/mainsim_idle_after_range", "results/fixed_600s_pocol"]
+    r = subprocess.run(["git", "status", "--porcelain", "--"] + protected,
+                       capture_output=True, text=True, cwd=ROOT)
+    assert r.stdout.strip() == "", f"protected results modified:\n{r.stdout}"
+    r2 = subprocess.run(["git", "diff", "--quiet", "HEAD", "--"] + protected, cwd=ROOT)
+    assert r2.returncode == 0                                            # 22
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
