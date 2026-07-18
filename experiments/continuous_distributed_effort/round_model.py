@@ -67,6 +67,22 @@ def deterministic_outcome(cfg: ExperimentConfig, slot_index=0) -> RoundOutcome:
             unique_evals=M, duplicate_evals=(N - 1) * M,
             exhausted=[True] * N)
 
+    if cfg.mode == MODE_B:
+        # Same immutable template, domain split into disjoint subranges. The
+        # solution at M-1 lies in the owner's range; the round terminates when the
+        # owner reaches it (local step = owner range size). Other miners are cut
+        # off at t* by global stopping (or finish their smaller range earlier).
+        ranges = partition_nonce_domain(0, M, N)
+        owner = next(i for i, (s, e) in enumerate(ranges) if s <= (M - 1) < e)
+        os_, oe = ranges[owner]
+        t_star = (M - 1) - os_ + 1                 # owner's local discovery step
+        evaluated = [min(range_size(rg), t_star) for rg in ranges]
+        exhausted = [ev == range_size(rg) for ev, rg in zip(evaluated, ranges)]
+        return RoundOutcome(
+            mode=MODE_B, ranges=ranges, evaluated=evaluated, t_star=t_star,
+            winner_id=owner, winning_nonce=M - 1, solution_found=True,
+            unique_evals=sum(evaluated), duplicate_evals=0, exhausted=exhausted)
+
     raise NotImplementedError(f"deterministic mode {cfg.mode!r} not implemented yet")
 
 
