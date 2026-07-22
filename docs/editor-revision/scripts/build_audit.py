@@ -47,11 +47,12 @@ P("• All inserted, corrected, and replacement manuscript text is red (RGB 255,
   "body text identically.")
 P("• Both .docx files reopen and pass Office-Open-XML (ECMA-376) schema validation with no "
   "errors and no repair warnings.")
-P("• One item requires author confirmation: whether the target journal requires a "
-  "Generative-AI disclosure (no such section exists in the supplied manuscript version).")
-P("Overall assessment: Ready after minor author confirmation "
-  "(Generative-AI disclosure / journal APC field only). All numerical and formatting "
-  "checks pass.", bold=True)
+P("• Author-confirmation items only: three reference-metadata mismatches (Refs [3], [7], [8], "
+  "§7b), the Generative-AI disclosure (no such section in the supplied version), and the "
+  "journal APC field. None affect the scientific content.")
+P("Overall assessment: Ready after author confirmation of the listed reference-metadata and "
+  "journal-policy items only. All figure, numerical, parameter-provenance, confidence-interval, "
+  "and red-formatting checks pass.", bold=True)
 
 # 2 Editor-request compliance matrix
 H("2. Editor-request compliance matrix")
@@ -144,6 +145,25 @@ P("Every value in Table 1 was cross-checked against Models/Energy/scenarios.py, 
   "{4,8,16}, block size {0.5,1,2} MB, tx size 512 B, γ∈{0.05,0.475,0.82}, horizon 86,400 s, "
   "30 seeds (20260101-20260130). Author-selected values are labelled assumptions; externally "
   "sourced values cite [6],[11],[13],[14].")
+P("Stochastic-parameter provenance (no invented values). Every seed-varying quantity is "
+  "implemented in Models/Energy/scenarios.py and is now cited in the table with σ notation: "
+  "coin-price jitter price_jitter=0.05 (σ=5%); fee jitter fee_jitter=0.40 (σ=40%); Poisson "
+  "block count _poisson; Dirichlet hashpower shares _dirichlet_ones; validator power_jitter=0.10 "
+  "(σ=10%); uptime_jitter=0.01 (σ=1%); gossip msg_rate_per_validator_hz=5. The 2500 W per-miner "
+  "fixed-power value is labelled 'illustrative' and is not used for any network-level estimate.")
+
+# 7b Reference audit
+H("7b. Reference audit (QC item 8)")
+table(["Reference","Issue","Action"],
+[
+["[10] Lund (WETSEB); [17] Croman (Springer)","Stray ' .' (space+period) after the DOI","Removed - now bare DOI"],
+["[14] IPCC","'Website:https://…' run-on prefix","Changed to 'Available: https://…' (IEEE)"],
+["[21] de Vries (Patterns)","Manually typed '[21]' duplicating Word auto-number","Prefix removed (earlier)"],
+["[15] Sedlmeir","Stray ']' prefix","Removed (earlier)"],
+["[3] Stoll (Carbon Footprint of Bitcoin)","Journal 'Nature Climate Change, 9(10):798-800' inconsistent with Joule DOI 10.1016/j.joule.2019.05.012","FLAGGED for author confirmation (not fabricated)"],
+["[7] Schwartz (JABS)","'IEEE Trans. Network and Service Management, 2020' vs DOI 10.1109/TNSE.2023.3282916 (Trans. Network Science & Eng., 2023)","FLAGGED for author confirmation"],
+["[8] Gervais (CCS 2016)","Author initial 'C.'; CCS'16 first author is Arthur (A.) Gervais","FLAGGED for author confirmation"],
+], widths=[2.2,3.0,1.8])
 
 # 8 Editorial cleanup
 H("8. Editorial-cleanup audit")
@@ -212,6 +232,9 @@ P("2. Publication charges (APC): no APC statement is present. If the journal has
 P("3. The fixed-power 'per-miner power' contrast value in Table 1 is shown as 2500 W "
   "(illustrative, from the previous §C text). Authors may confirm or adjust this illustrative "
   "figure; it is not used for any network-level estimate.")
+P("4. Reference metadata mismatches flagged in §7b: Ref [3] journal vs Joule DOI; Ref [7] "
+  "journal/year vs TNSE DOI; Ref [8] author initial. These require authoritative bibliographic "
+  "confirmation and were not auto-corrected to avoid fabricating citation data.")
 
 d.save("Final_Consistency_Numerical_and_Red_Text_Audit.docx")
 print("saved audit")

@@ -71,6 +71,22 @@ rows = [
  ["C18","1","Figure artwork + script","Figure 4 (carbon)","results/figures/fig_carbon_vs_gamma_generic.png",
   "legend 'PoW BTC' / 'PoS ETH'","legend 'PoW scenario' / 'PoS scenario'",
   "Remove crypto labels from figure","regenerate_carbon_figure_generic.py; carbon CSV","N/A (artwork)","High"],
+ ["C19","QC-3","Manuscript","Experimental Setup (Table 1)","Table 1 stochastic rows",
+  "±5% / ±40% / ±10% / ±1% 'across seeds'; generic 'assumption' sources",
+  "Gaussian σ=5/40/10/1% with exact source symbols (price_jitter, fee_jitter, power_jitter, uptime_jitter); added Poisson block-count and Dirichlet-shares rows; each row cites scenarios.py / experiment script",
+  "Make every parameter traceable; no invented values","Models/Energy/scenarios.py","Yes","High"],
+ ["C20","QC-6,7","Manuscript","Experimental Setup §E; Results §A; Discussion","Randomness subsection; economic-PoW continuation; Discussion",
+  "verbose AI-style paragraphs with repetition","condensed prose; removed duplicated 'invariant/1-over-N' statements",
+  "Shorten AI-style writing; reduce repetition","-","Yes","High"],
+ ["C21","QC-7","Manuscript","Experimental Setup §B, §C","Consensus/Workload; Energy/Carbon params",
+  "longer explanatory paragraphs","condensed; Table 1 retained",
+  "Shorten Experimental Setup","-","Yes","High"],
+ ["C22","QC-8","Manuscript","References","refs [10], [17] DOI lines",
+  "'…00009 .' and '…53357-4_8 .' (stray trailing space+period)","'…00009' and '…53357-4_8'",
+  "Remove duplicated trailing punctuation","reference list","N/A (deletion)","High"],
+ ["C23","QC-8","Manuscript","References","ref [14] IPCC URL line",
+  "'Website:https://www.ipcc.ch/…'","'Available: https://www.ipcc.ch/…'",
+  "IEEE-consistent URL prefix; fix run-on","reference list","Yes","High"],
 ]
 for r in rows: ws.append(r)
 

@@ -16,7 +16,21 @@ introduced; all changes are numerical/consistency/figure/editorial corrections.
 | `Final_Consistency_Numerical_and_Red_Text_Audit.docx` | Internal audit: compliance matrix, numerical reconciliation, model/CI/figure/parameter/red-text audits. |
 | `Revision_Change_Log.xlsx` | Change log (18 changes) + numerical reconciliation sheet. |
 | `Acceptance_Readiness_Checklist.docx` | Final acceptance-readiness checklist. |
-| `scripts/` | Reproducible build scripts (edit + tracked + deliverable generators). |
+| `FINAL_PRE_SUBMISSION_QC_REPORT.docx` | Final journal-acceptance QC pass: issues corrected, items requiring author confirmation, recommendation. |
+| `scripts/` | Reproducible build scripts. `shared_edits.py` is the single source of truth consumed by both the clean and tracked builders. |
+
+## Final QC pass (journal-acceptance)
+
+A targeted QC pass (no rewrite) confirmed/added: figures kept as current 1–4
+(author-confirmed; old misleading 1–3 already removed); every stochastic
+parameter traced to `Models/Energy/scenarios.py` with σ notation (no invented
+values); all headline numbers re-verified against `results/data/*.csv`; the only
+±CI is on the stochastic PoW network energy; newly added prose shortened;
+reference DOIs cleaned (`Website:`→`Available:`, stray trailing punctuation
+removed). Three reference-metadata mismatches (Refs [3], [7], [8]) and the
+Generative-AI/APC journal fields are flagged for author confirmation rather than
+fabricated. Recommendation: **Ready after author confirmation of the listed
+items only.**
 
 ## Key resolutions
 
