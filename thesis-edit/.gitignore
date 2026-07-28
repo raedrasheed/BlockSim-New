@@ -1,0 +1,6 @@
+# Temporary artifacts from the reference-verification pass (not deliverables)
+batch_*.txt
+refs.json
+*.output
+draft-37-input.docx
+pdfout/
