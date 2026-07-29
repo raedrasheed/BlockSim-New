@@ -37,10 +37,12 @@ def test_b1_unique_coverage_not_sum_of_duplicate_work():
 
 
 def test_b1_simultaneous_discovery_handling():
-    # homogeneous B1 -> one accepted block per round, not N artificial successes
+    # homogeneous B1 -> at MOST one block per completed round, never N artificial
+    # simultaneous successes. Block production runs at a single miner's rate, so it
+    # may legitimately be zero within the horizon (Stage 5B1A zero-block policy).
     r = R("B1", miner_count=100)
-    assert r["accepted_blocks"] >= 1
-    assert r["duplicate_evaluations"] > 0
+    assert r["accepted_blocks"] <= 5              # governed by one miner's rate, never ~N
+    assert r["duplicate_evaluations"] > 0         # heavy redundant coverage regardless
 
 
 def test_b1_not_labelled_classical_pow():

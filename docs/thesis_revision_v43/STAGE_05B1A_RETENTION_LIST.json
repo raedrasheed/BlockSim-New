@@ -1,0 +1,264 @@
+{
+  "matrix_retained_count": 61,
+  "validation_retained_count": 0,
+  "total_retained": 61,
+  "matrix_retained_run_ids": [
+    "S5B2-00000",
+    "S5B2-00001",
+    "S5B2-00030",
+    "S5B2-00060",
+    "S5B2-00090",
+    "S5B2-00104",
+    "S5B2-00120",
+    "S5B2-00150",
+    "S5B2-00180",
+    "S5B2-00207",
+    "S5B2-00210",
+    "S5B2-00240",
+    "S5B2-00270",
+    "S5B2-00300",
+    "S5B2-00311",
+    "S5B2-00330",
+    "S5B2-00360",
+    "S5B2-00390",
+    "S5B2-00414",
+    "S5B2-00420",
+    "S5B2-00450",
+    "S5B2-00480",
+    "S5B2-00510",
+    "S5B2-00518",
+    "S5B2-00540",
+    "S5B2-00570",
+    "S5B2-00600",
+    "S5B2-00621",
+    "S5B2-00630",
+    "S5B2-00660",
+    "S5B2-00690",
+    "S5B2-00720",
+    "S5B2-00725",
+    "S5B2-00750",
+    "S5B2-00810",
+    "S5B2-00827",
+    "S5B2-00870",
+    "S5B2-00928",
+    "S5B2-00930",
+    "S5B2-00990",
+    "S5B2-01030",
+    "S5B2-01050",
+    "S5B2-01110",
+    "S5B2-01132",
+    "S5B2-01170",
+    "S5B2-01233",
+    "S5B2-01333",
+    "S5B2-01350",
+    "S5B2-01410",
+    "S5B2-01435",
+    "S5B2-01470",
+    "S5B2-01530",
+    "S5B2-01537",
+    "S5B2-01590",
+    "S5B2-01638",
+    "S5B2-01650",
+    "S5B2-01710",
+    "S5B2-01740",
+    "S5B2-01770",
+    "S5B2-01830",
+    "S5B2-01842"
+  ],
+  "validation_retained_run_ids": [],
+  "reason_codes": {
+    "S5B2-00000": [
+      "delay_level:0.42",
+      "dist:homogeneous",
+      "inactive_level:0.0",
+      "mu_level:2.0",
+      "scenario_count_cover"
+    ],
+    "S5B2-00030": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00060": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00090": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00120": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00150": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00180": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00210": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00240": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00270": [
+      "expected_zero_block_b1",
+      "scenario_count_cover"
+    ],
+    "S5B2-00300": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00330": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00360": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00390": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00420": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00450": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00480": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00510": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00540": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00570": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00600": [
+      "expected_zero_idle_c2",
+      "idle_power_level:0.0",
+      "scenario_count_cover"
+    ],
+    "S5B2-00630": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00660": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00690": [
+      "scenario_count_cover"
+    ],
+    "S5B2-00720": [
+      "scenario_count_cover"
+    ],
+    "S5B2-01590": [
+      "delay_level:0.0"
+    ],
+    "S5B2-01650": [
+      "delay_level:5.0"
+    ],
+    "S5B2-01710": [
+      "delay_level:30.0"
+    ],
+    "S5B2-01770": [
+      "delay_level:60.0",
+      "expected_legitimate_stale"
+    ],
+    "S5B2-00750": [
+      "expected_high_exhaustion",
+      "mu_level:0.5"
+    ],
+    "S5B2-01350": [
+      "mu_level:1.0"
+    ],
+    "S5B2-01410": [
+      "inactive_level:0.05"
+    ],
+    "S5B2-01470": [
+      "inactive_level:0.15"
+    ],
+    "S5B2-01530": [
+      "inactive_level:0.3"
+    ],
+    "S5B2-00810": [
+      "idle_power_level:0.05"
+    ],
+    "S5B2-00870": [
+      "idle_power_level:0.1"
+    ],
+    "S5B2-00930": [
+      "idle_power_level:0.2"
+    ],
+    "S5B2-00990": [
+      "idle_power_level:0.3"
+    ],
+    "S5B2-01050": [
+      "dist:heterogeneous_equal"
+    ],
+    "S5B2-01110": [
+      "dist:heterogeneous_weighted"
+    ],
+    "S5B2-01830": [
+      "dist:exploratory_high"
+    ],
+    "S5B2-01170": [
+      "expected_nonzero_idle_c2"
+    ],
+    "S5B2-00001": [
+      "one_percent_sample"
+    ],
+    "S5B2-00104": [
+      "one_percent_sample"
+    ],
+    "S5B2-00207": [
+      "one_percent_sample"
+    ],
+    "S5B2-00311": [
+      "one_percent_sample"
+    ],
+    "S5B2-00414": [
+      "one_percent_sample"
+    ],
+    "S5B2-00518": [
+      "one_percent_sample"
+    ],
+    "S5B2-00621": [
+      "one_percent_sample"
+    ],
+    "S5B2-00725": [
+      "one_percent_sample"
+    ],
+    "S5B2-00827": [
+      "one_percent_sample"
+    ],
+    "S5B2-00928": [
+      "one_percent_sample"
+    ],
+    "S5B2-01030": [
+      "one_percent_sample"
+    ],
+    "S5B2-01132": [
+      "one_percent_sample"
+    ],
+    "S5B2-01233": [
+      "one_percent_sample"
+    ],
+    "S5B2-01333": [
+      "one_percent_sample"
+    ],
+    "S5B2-01435": [
+      "one_percent_sample"
+    ],
+    "S5B2-01537": [
+      "one_percent_sample"
+    ],
+    "S5B2-01638": [
+      "one_percent_sample"
+    ],
+    "S5B2-01740": [
+      "one_percent_sample"
+    ],
+    "S5B2-01842": [
+      "one_percent_sample"
+    ]
+  },
+  "retention_checksum_sha256": "2283f2ff69bcabf423267b2984ef4acfce852b217b39e1efe8061e583bc1702e"
+}

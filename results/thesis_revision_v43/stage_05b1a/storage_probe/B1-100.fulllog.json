@@ -1,0 +1,14 @@
+[
+  {
+    "block_index": 1,
+    "exhausted_generations": 0,
+    "propagation_messages": 99,
+    "round_distinct_evaluations": 1.3929851520518332e+16,
+    "round_duration_s": 9879.327319516548,
+    "round_total_evaluations": 1.392985152051833e+18,
+    "solutions_found": 2,
+    "t_start_s": 0.0,
+    "winner_id": 0,
+    "winner_time_s": 9879.327319516548
+  }
+]

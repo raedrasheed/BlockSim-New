@@ -327,9 +327,12 @@ def category_G():
         r = run(EngineConfig(scen, **kw), f"G-{scen}")
         cont = scen != "C2"
         if cont:
+            # B1 may legitimately produce 0 blocks at N=500 (zero-block policy,
+            # Stage 5B1A); the energy invariant A1 still holds regardless.
+            min_blocks = 0 if scen == "B1" else 1
             check(f"G-{scen}", "G", f"{scen} N=500 executes; energy invariant A1 holds",
                   math.isclose(r["total_energy_kwh"], EXPECTED_KWH, rel_tol=1e-9)
-                  and r["accepted_blocks"] >= 1,
+                  and r["accepted_blocks"] >= min_blocks,
                   energy=r["total_energy_kwh"], accepted=r["accepted_blocks"])
         else:
             check(f"G-{scen}", "G", f"{scen} N=500 executes; energy <= invariant (idle saves)",

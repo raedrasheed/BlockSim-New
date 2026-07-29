@@ -1,0 +1,29 @@
+{
+  "schema": "coordination",
+  "version": "5b1a.1",
+  "message_categories": [
+    "block_propagation",
+    "transaction_reconciliation",
+    "template_announcement",
+    "nonce_allocation",
+    "registration"
+  ],
+  "fields": [
+    "block_propagation_message_count",
+    "transaction_reconciliation_message_count",
+    "template_announcement_message_count",
+    "nonce_allocation_message_count",
+    "registration_message_count",
+    "block_propagation_bytes",
+    "transaction_reconciliation_bytes",
+    "template_announcement_bytes",
+    "nonce_allocation_bytes",
+    "registration_bytes"
+  ],
+  "abstract_fields": [
+    "abstract_template_agreement_operations",
+    "abstract_transaction_reconciliation_operations",
+    "unimplemented_agreement_energy_kwh"
+  ],
+  "rule": "only block_propagation carries simulated bytes; control-message bytes are null"
+}

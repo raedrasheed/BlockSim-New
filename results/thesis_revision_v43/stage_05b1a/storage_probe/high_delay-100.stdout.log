@@ -1,0 +1,1 @@
+[run high_delay-100] scenario=B3_C1_CONTINUOUS_DISJOINT N=100 accepted=14 energy_kwh=8.420833333

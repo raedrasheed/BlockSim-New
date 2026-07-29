@@ -1,0 +1,39 @@
+{
+  "naive_planned_rows": 2760,
+  "exact_duplicates_removed": 0,
+  "b3_c1_merged": 870,
+  "other_semantic_duplicates_removed": 0,
+  "final_stage5b2_run_count": 1890,
+  "ceiling": 3500,
+  "under_ceiling": true,
+  "distinct_configuration_hashes": 1890,
+  "distinct_execution_semantics_hashes": 1890,
+  "distinct_analysis_group_hashes": 63,
+  "by_scenario": {
+    "B0": 150,
+    "B1": 150,
+    "B2": 150,
+    "B3_C1_CONTINUOUS_DISJOINT": 870,
+    "C2": 570
+  },
+  "by_class": {
+    "CORE": 600,
+    "CORE_C2": 150,
+    "SENS_IDLE": 300,
+    "SENS_HETERO": 240,
+    "SENS_MU": 120,
+    "SENS_INACTIVE": 180,
+    "SENS_DELAY": 240,
+    "EXPLORATORY": 60
+  },
+  "by_zero_block_risk": {
+    "low": 1590,
+    "high": 30,
+    "very_high": 120,
+    "unmodeled": 150
+  },
+  "full_log_retained": 61,
+  "retention_checksum_sha256": "2283f2ff69bcabf423267b2984ef4acfce852b217b39e1efe8061e583bc1702e",
+  "output_schema_version": "5b1a.1",
+  "matrix_sha256": "e436609dad106166ef4071c1a6cac6ed3cc2b22adda77b4bf87f7d6a61d404fc"
+}

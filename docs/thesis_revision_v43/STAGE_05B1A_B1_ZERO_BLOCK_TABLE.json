@@ -1,0 +1,47 @@
+[
+  {
+    "miner_count": 100,
+    "h_unique_hps": 1410000000000.0,
+    "p": 1.182033096926714e-17,
+    "expected_unique_evaluations": 1.41e+16,
+    "expected_accepted_blocks": 0.16666666666666669,
+    "zero_block_probability": 0.846481724890614,
+    "zero_block_risk_category": "high"
+  },
+  {
+    "miner_count": 200,
+    "h_unique_hps": 705000000000.0,
+    "p": 1.182033096926714e-17,
+    "expected_unique_evaluations": 7050000000000000.0,
+    "expected_accepted_blocks": 0.08333333333333334,
+    "zero_block_probability": 0.9200444146293233,
+    "zero_block_risk_category": "very_high"
+  },
+  {
+    "miner_count": 300,
+    "h_unique_hps": 470000000000.0,
+    "p": 1.182033096926714e-17,
+    "expected_unique_evaluations": 4700000000000000.0,
+    "expected_accepted_blocks": 0.05555555555555556,
+    "zero_block_probability": 0.9459594689067654,
+    "zero_block_risk_category": "very_high"
+  },
+  {
+    "miner_count": 400,
+    "h_unique_hps": 352500000000.0,
+    "p": 1.182033096926714e-17,
+    "expected_unique_evaluations": 3525000000000000.0,
+    "expected_accepted_blocks": 0.04166666666666667,
+    "zero_block_probability": 0.9591894571091382,
+    "zero_block_risk_category": "very_high"
+  },
+  {
+    "miner_count": 500,
+    "h_unique_hps": 282000000000.0,
+    "p": 1.182033096926714e-17,
+    "expected_unique_evaluations": 2820000000000000.0,
+    "expected_accepted_blocks": 0.03333333333333333,
+    "zero_block_probability": 0.9672161004820059,
+    "zero_block_risk_category": "very_high"
+  }
+]

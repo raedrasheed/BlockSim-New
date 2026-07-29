@@ -1,0 +1,480 @@
+{
+  "all_passed": true,
+  "b1_empirical": {
+    "100": {
+      "max_blocks": 1,
+      "mean_blocks": 0.3333333333333333,
+      "zero_frac": 0.6666666666666666
+    },
+    "200": {
+      "max_blocks": 1,
+      "mean_blocks": 0.25,
+      "zero_frac": 0.75
+    },
+    "300": {
+      "max_blocks": 1,
+      "mean_blocks": 0.25,
+      "zero_frac": 0.75
+    },
+    "400": {
+      "max_blocks": 1,
+      "mean_blocks": 0.16666666666666666,
+      "zero_frac": 0.8333333333333334
+    },
+    "500": {
+      "max_blocks": 1,
+      "mean_blocks": 0.16666666666666666,
+      "zero_frac": 0.8333333333333334
+    }
+  },
+  "checks": [
+    {
+      "category": "P",
+      "description": "B2 exact distinct == exhaustive (mixed wrap/overlap)",
+      "exact": 38,
+      "id": "P1",
+      "passed": true,
+      "ref": 38
+    },
+    {
+      "category": "P",
+      "description": "B2 exact total == distinct + duplicate (exact reconciliation)",
+      "distinct_candidate_evaluations": 38,
+      "duplicate_candidate_evaluations": 22,
+      "id": "P2",
+      "passed": true,
+      "total_candidate_evaluations": 60
+    },
+    {
+      "category": "P",
+      "description": "B2 one miner covering whole domain -> distinct == S",
+      "distinct": 40,
+      "id": "P3",
+      "passed": true
+    },
+    {
+      "category": "P",
+      "description": "B2 multiple full-domain miners -> distinct == S, duplicate == S",
+      "distinct_candidate_evaluations": 40,
+      "duplicate_candidate_evaluations": 40,
+      "id": "P4",
+      "passed": true,
+      "total_candidate_evaluations": 80
+    },
+    {
+      "category": "P",
+      "description": "B2 zero-length path contributes no candidates",
+      "distinct_candidate_evaluations": 4,
+      "duplicate_candidate_evaluations": 0,
+      "id": "P5",
+      "passed": true,
+      "total_candidate_evaluations": 4
+    },
+    {
+      "category": "P",
+      "description": "B2 N=100 engine total == distinct + duplicate (exact)",
+      "distinct": 4.7167551923532806e+17,
+      "duplicate": 4.436065254646754e+17,
+      "id": "P6-100",
+      "passed": true,
+      "total": 9.152820447000035e+17
+    },
+    {
+      "category": "P",
+      "description": "B2 N=500 engine total == distinct + duplicate (exact)",
+      "distinct": 4.3026333788785197e+17,
+      "duplicate": 3.0400372033520557e+17,
+      "id": "P6-500",
+      "passed": true,
+      "total": 7.342670582230575e+17
+    },
+    {
+      "category": "P",
+      "description": "B2 winner time/identity match independent reference",
+      "id": "P7",
+      "passed": true,
+      "ref": 2.0,
+      "wid": 1,
+      "wid_ref": 1,
+      "wt": 2.0
+    },
+    {
+      "analytical": 0.846481724890614,
+      "category": "Q",
+      "description": "B1 N=100 empirical zero-frac ~ analytical P0 (<=0.25)",
+      "empirical": 0.6666666666666666,
+      "id": "Q-agree-100",
+      "passed": true,
+      "risk": "high"
+    },
+    {
+      "analytical": 0.9200444146293233,
+      "category": "Q",
+      "description": "B1 N=200 empirical zero-frac ~ analytical P0 (<=0.25)",
+      "empirical": 0.75,
+      "id": "Q-agree-200",
+      "passed": true,
+      "risk": "very_high"
+    },
+    {
+      "analytical": 0.9459594689067654,
+      "category": "Q",
+      "description": "B1 N=300 empirical zero-frac ~ analytical P0 (<=0.25)",
+      "empirical": 0.75,
+      "id": "Q-agree-300",
+      "passed": true,
+      "risk": "very_high"
+    },
+    {
+      "analytical": 0.9591894571091382,
+      "category": "Q",
+      "description": "B1 N=400 empirical zero-frac ~ analytical P0 (<=0.25)",
+      "empirical": 0.8333333333333334,
+      "id": "Q-agree-400",
+      "passed": true,
+      "risk": "very_high"
+    },
+    {
+      "analytical": 0.9672161004820059,
+      "category": "Q",
+      "description": "B1 N=500 empirical zero-frac ~ analytical P0 (<=0.25)",
+      "empirical": 0.8333333333333334,
+      "id": "Q-agree-500",
+      "passed": true,
+      "risk": "very_high"
+    },
+    {
+      "category": "Q",
+      "description": "analytical P0 monotone increasing in N",
+      "id": "Q-mono-analytical",
+      "passed": true,
+      "values": [
+        0.846481724890614,
+        0.9200444146293233,
+        0.9459594689067654,
+        0.9591894571091382,
+        0.9672161004820059
+      ]
+    },
+    {
+      "category": "Q",
+      "description": "empirical zero-frac monotone non-decreasing in N",
+      "id": "Q-mono-empirical",
+      "passed": true,
+      "values": [
+        0.6666666666666666,
+        0.75,
+        0.75,
+        0.8333333333333334,
+        0.8333333333333334
+      ]
+    },
+    {
+      "category": "Q",
+      "description": "B1 is majority-zero for all planned N (P0 > 0.5)",
+      "id": "Q-majority-zero",
+      "passed": true,
+      "values": [
+        0.846481724890614,
+        0.9200444146293233,
+        0.9459594689067654,
+        0.9591894571091382,
+        0.9672161004820059
+      ]
+    },
+    {
+      "category": "Q",
+      "description": "zero-block run: block metrics are NA (null) + reason",
+      "epb": null,
+      "id": "Q-na",
+      "passed": true,
+      "thr": 0.0
+    },
+    {
+      "category": "Q",
+      "conditional_mean": 8.420833333333333,
+      "defined_runs": 4,
+      "description": "ratio-of-totals and conditional mean are reported as distinct estimands",
+      "id": "Q-estimands",
+      "passed": true,
+      "ratio_of_totals": 25.2625,
+      "undefined_runs": 8
+    },
+    {
+      "category": "R",
+      "description": "B0 per-miner & per-template schemas complete",
+      "id": "R-schema-B0",
+      "missing_miner": [],
+      "missing_template": [],
+      "passed": true
+    },
+    {
+      "category": "R",
+      "description": "B0 per-miner->network & per-template domain reconcile",
+      "id": "R-recon-B0",
+      "miner": true,
+      "passed": true,
+      "template": true
+    },
+    {
+      "category": "R",
+      "description": "B1 per-miner & per-template schemas complete",
+      "id": "R-schema-B1",
+      "missing_miner": [],
+      "missing_template": [],
+      "passed": true
+    },
+    {
+      "category": "R",
+      "description": "B1 per-miner->network & per-template domain reconcile",
+      "id": "R-recon-B1",
+      "miner": true,
+      "passed": true,
+      "template": true
+    },
+    {
+      "category": "R",
+      "description": "B2 per-miner & per-template schemas complete",
+      "id": "R-schema-B2",
+      "missing_miner": [],
+      "missing_template": [],
+      "passed": true
+    },
+    {
+      "category": "R",
+      "description": "B2 per-miner->network & per-template domain reconcile",
+      "id": "R-recon-B2",
+      "miner": true,
+      "passed": true,
+      "template": true
+    },
+    {
+      "category": "R",
+      "description": "B3_C1_CONTINUOUS_DISJOINT per-miner & per-template schemas complete",
+      "id": "R-schema-B3_C1_CONTINUOUS_DISJOINT",
+      "missing_miner": [],
+      "missing_template": [],
+      "passed": true
+    },
+    {
+      "category": "R",
+      "description": "B3_C1_CONTINUOUS_DISJOINT per-miner->network & per-template domain reconcile",
+      "id": "R-recon-B3_C1_CONTINUOUS_DISJOINT",
+      "miner": true,
+      "passed": true,
+      "template": true
+    },
+    {
+      "category": "R",
+      "description": "C2 per-miner & per-template schemas complete",
+      "id": "R-schema-C2",
+      "missing_miner": [],
+      "missing_template": [],
+      "passed": true
+    },
+    {
+      "category": "R",
+      "description": "C2 per-miner->network & per-template domain reconcile",
+      "id": "R-recon-C2",
+      "miner": true,
+      "passed": true,
+      "template": true
+    },
+    {
+      "accepted": 0,
+      "category": "R",
+      "description": "per-miner summary preserved even for zero-block run",
+      "id": "R-zeroblock",
+      "passed": true,
+      "rows": 60
+    },
+    {
+      "bytes": 1188000000,
+      "category": "S",
+      "description": "block-propagation bytes use configured block size",
+      "id": "S1",
+      "msgs": 1188,
+      "passed": true
+    },
+    {
+      "category": "S",
+      "description": "control-message categories have null bytes (not configured)",
+      "id": "S2",
+      "na": null,
+      "passed": true,
+      "tr": null
+    },
+    {
+      "category": "S",
+      "counts": {
+        "block_propagation": 1188,
+        "nonce_allocation": 16,
+        "registration": 100,
+        "template_announcement": 16,
+        "transaction_reconciliation": 12
+      },
+      "description": "control-message categories are counted separately (>=0)",
+      "id": "S3",
+      "passed": true
+    },
+    {
+      "b0_ops": 0,
+      "b3_ops": 12,
+      "category": "S",
+      "description": "abstract agreement ops present; unimplemented energy null; B0 no agreement",
+      "id": "S4",
+      "passed": true
+    },
+    {
+      "category": "S",
+      "description": "template refresh == exhausted rounds (legacy counter preserved)",
+      "exhausted": 3,
+      "id": "S5",
+      "passed": true,
+      "refresh": 3
+    },
+    {
+      "category": "T",
+      "description": "retention covers every scenario x miner-count group",
+      "id": "T1",
+      "missing": [],
+      "passed": true
+    },
+    {
+      "category": "T",
+      "description": "retention covers stratum 'delay_level'",
+      "id": "T-cov:delay_level",
+      "passed": true,
+      "present": true
+    },
+    {
+      "category": "T",
+      "description": "retention covers stratum 'mu_level'",
+      "id": "T-cov:mu_level",
+      "passed": true,
+      "present": true
+    },
+    {
+      "category": "T",
+      "description": "retention covers stratum 'inactive_level'",
+      "id": "T-cov:inactive_level",
+      "passed": true,
+      "present": true
+    },
+    {
+      "category": "T",
+      "description": "retention covers stratum 'idle_power_level'",
+      "id": "T-cov:idle_power_level",
+      "passed": true,
+      "present": true
+    },
+    {
+      "category": "T",
+      "description": "retention covers stratum 'dist:homogeneous'",
+      "id": "T-cov:dist:homogeneous",
+      "passed": true,
+      "present": true
+    },
+    {
+      "category": "T",
+      "description": "retention covers stratum 'dist:heterogeneous_equal'",
+      "id": "T-cov:dist:heterogeneous_equal",
+      "passed": true,
+      "present": true
+    },
+    {
+      "category": "T",
+      "description": "retention covers stratum 'dist:heterogeneous_weighted'",
+      "id": "T-cov:dist:heterogeneous_weighted",
+      "passed": true,
+      "present": true
+    },
+    {
+      "category": "T",
+      "description": "retention covers stratum 'dist:exploratory_high'",
+      "id": "T-cov:dist:exploratory_high",
+      "passed": true,
+      "present": true
+    },
+    {
+      "category": "T",
+      "description": "retention includes regime 'expected_zero_block_b1'",
+      "id": "T-regime:expected_zero_block_b1",
+      "passed": true,
+      "present": true
+    },
+    {
+      "category": "T",
+      "description": "retention includes regime 'expected_high_exhaustion'",
+      "id": "T-regime:expected_high_exhaustion",
+      "passed": true,
+      "present": true
+    },
+    {
+      "category": "T",
+      "description": "retention includes regime 'expected_legitimate_stale'",
+      "id": "T-regime:expected_legitimate_stale",
+      "passed": true,
+      "present": true
+    },
+    {
+      "category": "T",
+      "description": "retention includes regime 'expected_nonzero_idle_c2'",
+      "id": "T-regime:expected_nonzero_idle_c2",
+      "passed": true,
+      "present": true
+    },
+    {
+      "category": "T",
+      "description": "retention includes regime 'expected_zero_idle_c2'",
+      "id": "T-regime:expected_zero_idle_c2",
+      "passed": true,
+      "present": true
+    },
+    {
+      "category": "T",
+      "description": "retention selection is deterministic (reproducible checksum)",
+      "first": 61,
+      "id": "T-determinism",
+      "passed": true,
+      "rerun": 61
+    },
+    {
+      "category": "T",
+      "description": "no duplicate retained run ids",
+      "id": "T-nodup",
+      "n": 61,
+      "passed": true
+    },
+    {
+      "category": "U",
+      "description": "storage probe includes per-miner and per-template files for every probe",
+      "id": "U1",
+      "passed": true,
+      "probes": 18
+    },
+    {
+      "category": "U",
+      "description": "expanded projection replaces the prior summary-only estimate",
+      "gz_mb": 20.039,
+      "id": "U2",
+      "mb_expected": 617.82,
+      "mb_p95": 761.148,
+      "passed": true
+    },
+    {
+      "category": "U",
+      "description": "storage measured at N=100 and N=500 for all 9 configurations",
+      "id": "U3",
+      "n_probes": 18,
+      "passed": true
+    }
+  ],
+  "checks_failed": 0,
+  "checks_passed": 53,
+  "checks_total": 53,
+  "failed_checks": [],
+  "run_cap": 100,
+  "run_count": 88,
+  "under_cap": true
+}

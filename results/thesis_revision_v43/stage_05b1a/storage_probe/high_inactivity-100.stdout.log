@@ -1,0 +1,1 @@
+[run high_inactivity-100] scenario=B3_C1_CONTINUOUS_DISJOINT N=100 accepted=8 energy_kwh=5.894583333

@@ -1,0 +1,7 @@
+{
+  "output_schema_version": "5b1a.1",
+  "run_id": "high_delay-500",
+  "scenario": "B3_C1_CONTINUOUS_DISJOINT",
+  "seed": 1,
+  "status": "COMPLETED"
+}

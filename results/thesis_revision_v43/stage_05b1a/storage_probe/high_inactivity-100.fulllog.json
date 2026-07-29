@@ -1,0 +1,98 @@
+[
+  {
+    "block_index": 1,
+    "exhausted_generations": 0,
+    "propagation_messages": 69,
+    "round_distinct_evaluations": 0.0,
+    "round_duration_s": 1714.2857142857142,
+    "round_total_evaluations": 0.0,
+    "solutions_found": 2,
+    "t_start_s": 0.0,
+    "winner_id": 0,
+    "winner_time_s": 1714.2857142857142
+  },
+  {
+    "block_index": 2,
+    "exhausted_generations": 0,
+    "propagation_messages": 69,
+    "round_distinct_evaluations": 3.1953215716263172e+16,
+    "round_duration_s": 323.74078739881634,
+    "round_total_evaluations": 3.1953215716263172e+16,
+    "solutions_found": 1,
+    "t_start_s": 1714.2857142857142,
+    "winner_id": 21,
+    "winner_time_s": 323.74078739881634
+  },
+  {
+    "block_index": 3,
+    "exhausted_generations": 0,
+    "propagation_messages": 69,
+    "round_distinct_evaluations": 0.0,
+    "round_duration_s": 1714.2857142857142,
+    "round_total_evaluations": 0.0,
+    "solutions_found": 1,
+    "t_start_s": 2038.0265016845306,
+    "winner_id": 0,
+    "winner_time_s": 1714.2857142857142
+  },
+  {
+    "block_index": 4,
+    "exhausted_generations": 0,
+    "propagation_messages": 69,
+    "round_distinct_evaluations": 2583923878153030.0,
+    "round_duration_s": 26.179573233566668,
+    "round_total_evaluations": 2583923878153030.0,
+    "solutions_found": 4,
+    "t_start_s": 3752.312215970245,
+    "winner_id": 25,
+    "winner_time_s": 26.179573233566668
+  },
+  {
+    "block_index": 5,
+    "exhausted_generations": 0,
+    "propagation_messages": 69,
+    "round_distinct_evaluations": 2.965164944067424e+16,
+    "round_duration_s": 300.4219801486752,
+    "round_total_evaluations": 2.965164944067424e+16,
+    "solutions_found": 2,
+    "t_start_s": 3778.4917892038115,
+    "winner_id": 3,
+    "winner_time_s": 300.4219801486752
+  },
+  {
+    "block_index": 6,
+    "exhausted_generations": 1,
+    "propagation_messages": 69,
+    "round_distinct_evaluations": 5.022237735520754e+16,
+    "round_duration_s": 2223.124390630269,
+    "round_total_evaluations": 5.022237735520754e+16,
+    "solutions_found": 3,
+    "t_start_s": 4078.9137693524867,
+    "winner_id": 6,
+    "winner_time_s": 508.8386763445546
+  },
+  {
+    "block_index": 7,
+    "exhausted_generations": 0,
+    "propagation_messages": 69,
+    "round_distinct_evaluations": 4.278758722320712e+16,
+    "round_duration_s": 433.5115220183092,
+    "round_total_evaluations": 4.278758722320712e+16,
+    "solutions_found": 2,
+    "t_start_s": 6302.038159982756,
+    "winner_id": 76,
+    "winner_time_s": 433.5115220183092
+  },
+  {
+    "block_index": 8,
+    "exhausted_generations": 1,
+    "propagation_messages": 69,
+    "round_distinct_evaluations": 7.064641416042763e+16,
+    "round_duration_s": 2430.0548547155786,
+    "round_total_evaluations": 7.064641416042763e+16,
+    "solutions_found": 2,
+    "t_start_s": 6735.549682001065,
+    "winner_id": 24,
+    "winner_time_s": 715.7691404298646
+  }
+]
