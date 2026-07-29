@@ -1,0 +1,24 @@
+{
+  "accepted": 0,
+  "checks": {
+    "block_proposals": true,
+    "candidates": true,
+    "energy": true,
+    "inactive_ranges": true,
+    "parent_chain": true,
+    "per_miner_generation": true,
+    "stale_blocks": true,
+    "template_chronology": true
+  },
+  "config": {
+    "allocation_policy": "equal",
+    "hash_rate_distribution": "homogeneous",
+    "idle_power_ratio": 0.0,
+    "miner_count": 40,
+    "mu": 2.0,
+    "scenario_id": "B1",
+    "seed": 1
+  },
+  "stale": 0,
+  "status": "COMPLETED"
+}

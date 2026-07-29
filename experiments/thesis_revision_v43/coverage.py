@@ -75,9 +75,10 @@ def b2_coverage_exact(starts: List[int], lengths: List[int], S: int) -> Dict[str
 
 
 def b2_winner(pos, starts: List[int], rates, S: int):
-    """Earliest solution discovery: winner_time = min over (miner i, solution q) of
-    ((q - start_i) mod S) / rate_i. Returns (winner_time, winner_id). Ties broken
-    by lowest miner index (deterministic)."""
+    """Earliest solution discovery under the UNIFIED time convention: a solution at
+    circular offset d = (q - start_i) mod S is discovered at (d + 1) / rate_i.
+    winner_time = min over (miner i, solution q). Returns (winner_time, winner_id);
+    ties broken by lowest miner index."""
     best_t = math.inf
     best_id = None
     for i, (st, r) in enumerate(zip(starts, rates)):
@@ -85,7 +86,7 @@ def b2_winner(pos, starts: List[int], rates, S: int):
             continue
         for q in pos:
             d = (int(q) - int(st)) % S
-            tt = d / r
+            tt = (d + 1) / r
             if tt < best_t:
                 best_t = tt
                 best_id = i
@@ -93,15 +94,14 @@ def b2_winner(pos, starts: List[int], rates, S: int):
 
 
 def lengths_from_winner_time(winner_time: float, rates, S: int) -> List[int]:
-    """Integer candidates evaluated by each miner by winner_time (0-indexed arc:
-    the miner evaluates its start at t=0, so it covers floor(rate*winner_time)+1
-    candidates), capped at one full traversal S."""
+    """Candidates completed by each miner by winner_time under the unified
+    convention: completed = floor(rate * winner_time), capped at one traversal S."""
     out = []
     for r in rates:
         if r <= 0 or not math.isfinite(winner_time):
             out.append(0)
             continue
-        out.append(min(S, int(math.floor(r * winner_time)) + 1))
+        out.append(min(S, int(math.floor(r * winner_time))))
     return out
 
 
@@ -120,6 +120,60 @@ def exhaustive_coverage_reference(starts: List[int], lengths: List[int], S: int)
                 duplicate_candidate_evaluations=total - len(covered))
 
 
+def coverage_at_time(starts, rates, S, t) -> Dict[str, int]:
+    """Exact integer coverage of the circular domain by all miners' swept arcs at
+    time t. Each miner i covers min(S, floor(rate_i * t)) candidates from start_i.
+    Uses the unified convention (candidate d completes at (d+1)/rate) implicitly via
+    floor(rate*t). Returns exact total/distinct/duplicate integers."""
+    lengths = [min(int(S), int(math.floor(r * t))) for r in rates]
+    return b2_coverage_exact(starts, lengths, S)
+
+
+def b2_exhaustion_time(starts, rates, S):
+    """Earliest time t_ex at which the union of all swept circular arcs covers the
+    WHOLE domain S (union_length == S). Monotone binary search over time using the
+    exact circular interval-union; overlap never counts as new coverage; each miner
+    is capped at one full traversal. Returns (t_ex, counts_at_exhaustion). Miners
+    with rate <= 0 (inactive) contribute no path (pass their rate as 0)."""
+    active = [r for r in rates if r > 0]
+    if not active:
+        return math.inf, dict(total_candidate_evaluations=0,
+                              distinct_candidate_evaluations=0,
+                              duplicate_candidate_evaluations=0)
+    hi = float(S) / min(active)                    # slowest miner covers S alone by here
+    lo = 0.0
+    # ensure hi actually exhausts (guard float)
+    while coverage_at_time(starts, rates, S, hi)["distinct_candidate_evaluations"] < S:
+        hi *= 2.0
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if coverage_at_time(starts, rates, S, mid)["distinct_candidate_evaluations"] >= S:
+            hi = mid
+        else:
+            lo = mid
+    counts = coverage_at_time(starts, rates, S, hi)
+    if counts["distinct_candidate_evaluations"] < S:   # final nudge for float boundary
+        hi = math.nextafter(hi, math.inf)
+        counts = coverage_at_time(starts, rates, S, hi)
+    return hi, counts
+
+
+def exhaustion_time_reference_small(starts, rates, S):
+    """Brute-force reference (SMALL S): first-cover time of every position is
+    min_i ((q - start_i) mod S + 1)/rate_i; the domain is exhausted at the max over
+    positions. O(S*n) -- small domains only."""
+    worst = 0.0
+    for q in range(S):
+        first = math.inf
+        for st, r in zip(starts, rates):
+            if r <= 0:
+                continue
+            d = (q - int(st)) % S
+            first = min(first, (d + 1) / r)
+        worst = max(worst, first)
+    return worst
+
+
 def exhaustive_winner_reference(pos, starts: List[int], rates, S: int):
     """Brute-force winner (SMALL S) — identical rule to `b2_winner`, kept separate
     so tests compare two independent implementations."""
@@ -130,7 +184,7 @@ def exhaustive_winner_reference(pos, starts: List[int], rates, S: int):
             if r <= 0:
                 continue
             steps = (int(q) - int(st)) % S
-            t = steps / r
+            t = (steps + 1) / r                     # unified convention: (d+1)/rate
             if t < best:
                 best = t
                 best_id = i

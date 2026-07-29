@@ -1,0 +1,712 @@
+{
+  "all_reconciliations_pass": true,
+  "coverage": {
+    "b2_exhaustion": true,
+    "inactive": true,
+    "multi_solution": true,
+    "partial": true,
+    "stale_nonzero": true
+  },
+  "failed": [],
+  "reconciliation_families": [
+    "energy",
+    "candidates",
+    "per_miner_generation",
+    "template_chronology",
+    "parent_chain",
+    "block_proposals",
+    "stale_blocks",
+    "inactive_ranges"
+  ],
+  "results": [
+    {
+      "accepted": 13,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "allocation_policy": "equal",
+        "hash_rate_distribution": "homogeneous",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B0",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 7,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "allocation_policy": "equal",
+        "hash_rate_distribution": "heterogeneous_moderate",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B0",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 13,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "allocation_policy": "weighted",
+        "hash_rate_distribution": "heterogeneous_moderate",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B0",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 0,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "allocation_policy": "equal",
+        "hash_rate_distribution": "homogeneous",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B1",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 2,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "allocation_policy": "equal",
+        "hash_rate_distribution": "heterogeneous_moderate",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B1",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 2,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "allocation_policy": "weighted",
+        "hash_rate_distribution": "heterogeneous_moderate",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B1",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 7,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "allocation_policy": "equal",
+        "hash_rate_distribution": "homogeneous",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B2",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 7,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "allocation_policy": "equal",
+        "hash_rate_distribution": "heterogeneous_moderate",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B2",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 7,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "allocation_policy": "weighted",
+        "hash_rate_distribution": "heterogeneous_moderate",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B2",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 13,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "allocation_policy": "equal",
+        "hash_rate_distribution": "homogeneous",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 7,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "allocation_policy": "equal",
+        "hash_rate_distribution": "heterogeneous_moderate",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 13,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "allocation_policy": "weighted",
+        "hash_rate_distribution": "heterogeneous_moderate",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 13,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "allocation_policy": "equal",
+        "hash_rate_distribution": "homogeneous",
+        "idle_power_ratio": 0.1,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "C2",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 7,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "allocation_policy": "equal",
+        "hash_rate_distribution": "heterogeneous_moderate",
+        "idle_power_ratio": 0.1,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "C2",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 13,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "allocation_policy": "weighted",
+        "hash_rate_distribution": "heterogeneous_moderate",
+        "idle_power_ratio": 0.1,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "C2",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 16,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "miner_count": 40,
+        "mu": 3.0,
+        "propagation_delay_mean_s": 0.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 3
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 16,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "miner_count": 40,
+        "mu": 3.0,
+        "propagation_delay_mean_s": 0.42,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 3
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 16,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "miner_count": 40,
+        "mu": 3.0,
+        "propagation_delay_mean_s": 5.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 3
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 16,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "miner_count": 40,
+        "mu": 3.0,
+        "propagation_delay_mean_s": 30.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 3
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 16,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "miner_count": 40,
+        "mu": 3.0,
+        "propagation_delay_mean_s": 60.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 3
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 16,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "miner_count": 20,
+        "mu": 1.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 7
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 11,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "miner_count": 20,
+        "mu": 1.0,
+        "scenario_id": "B2",
+        "seed": 7
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 19,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "miner_count": 20,
+        "mu": 3.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 7
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 17,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "miner_count": 20,
+        "mu": 3.0,
+        "scenario_id": "B2",
+        "seed": 7
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 16,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "miner_count": 20,
+        "mu": 5.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 7
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 19,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "miner_count": 20,
+        "mu": 5.0,
+        "scenario_id": "B2",
+        "seed": 7
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 10,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "inactive_miner_fraction": 0.05,
+        "miner_count": 40,
+        "mu": 1.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 9,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "inactive_miner_fraction": 0.15,
+        "miner_count": 40,
+        "mu": 1.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 6,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "inactive_miner_fraction": 0.3,
+        "miner_count": 40,
+        "mu": 1.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 1
+      },
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 10024,
+      "checks": {
+        "block_proposals": true,
+        "candidates": true,
+        "energy": true,
+        "inactive_ranges": true,
+        "parent_chain": true,
+        "per_miner_generation": true,
+        "stale_blocks": true,
+        "template_chronology": true
+      },
+      "config": {
+        "miner_count": 20,
+        "mu": 4.0,
+        "network_hash_rate_hps": 2000.0,
+        "propagation_delay_mean_s": 60.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 5,
+        "target_block_interval_s": 1.0
+      },
+      "passed": true,
+      "stale": 25731
+    }
+  ],
+  "run_cap": 200,
+  "run_count": 30,
+  "under_cap": true
+}

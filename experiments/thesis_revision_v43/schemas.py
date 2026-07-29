@@ -32,7 +32,7 @@ def is_na(x) -> bool:
 # per-miner summary schema (Section 6) — preserved for EVERY run
 # ---------------------------------------------------------------------------
 PER_MINER_FIELDS = (
-    "run_id", "miner_id", "hash_rate_hps", "hash_rate_share", "allocation_policy",
+    "run_id", "miner_id", "hash_rate_hps", "hash_rate_hps_int", "hash_rate_share", "allocation_policy",
     "range_start", "range_end", "range_size", "search_start_position",
     "candidates_evaluated", "searched_count", "last_evaluated_position",
     "unsearched_count", "remaining_unsearched", "inactive_count", "active_time_s",
@@ -55,6 +55,21 @@ PER_TEMPLATE_FIELDS = (
     "end_time_s", "duration_s", "exhausted_time_s", "active_domain_completion_time_s",
     "partial_cutoff_time_s", "legitimate_competitor_count", "obsolete_event_rejection_count",
 )
+
+# ---------------------------------------------------------------------------
+# per-miner per-generation schema (Stage 5B1F, Section 8)
+# ---------------------------------------------------------------------------
+PER_MINER_GENERATION_FIELDS = (
+    "run_id", "template_generation_id", "miner_id", "template_id",
+    "assigned_range_start", "assigned_range_end", "assigned_range_size",
+    "search_start_position", "candidates_evaluated_this_generation",
+    "cumulative_candidates_evaluated", "last_evaluated_position",
+    "unsearched_candidates_this_generation", "inactive_candidates_this_generation",
+    "productive_search_time_s", "active_nonproductive_time_s", "idle_time_s",
+    "offline_time_s", "earliest_solution_position", "earliest_solution_time_s",
+    "stop_reason", "completed_range", "generated_block_id", "received_winner_time_s",
+)
+
 
 # ---------------------------------------------------------------------------
 # coordination schema (Section 10) — message categories kept separate

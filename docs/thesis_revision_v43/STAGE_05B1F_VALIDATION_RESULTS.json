@@ -1,0 +1,11 @@
+{
+  "run_count": 30,
+  "all_pass": true,
+  "coverage": {
+    "stale_nonzero": true,
+    "partial": true,
+    "b2_exhaustion": true,
+    "multi_solution": true,
+    "inactive": true
+  }
+}
