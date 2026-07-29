@@ -29,7 +29,7 @@ import numpy as np
 from experiments.thesis_revision_v43 import coverage as _cov
 from experiments.thesis_revision_v43.schemas import OUTPUT_SCHEMA_VERSION
 
-ENGINE_VERSION = "5b1a.1"
+ENGINE_VERSION = "5b1b.1"
 
 J_PER_KWH = 3_600_000.0
 HASHES_PER_TH = 1e12
@@ -166,6 +166,16 @@ def run_scenario(cfg: EngineConfig, emit_log: bool = False, emit_detail: bool = 
         if n_inactive > 0 else set()
     active_ids = [i for i in range(n) if i not in inactive]
     H_active = float(sum(rates[i] for i in active_ids)) or 1.0
+    # DISTINCT-progress (unique-frontier) rate for exhausted-generation timing:
+    # disjoint scenarios cover distinct candidates in parallel (rate = H_active);
+    # B1 (all miners on one ordered path) advances distinctly only at the fastest
+    # miner's rate. Using H_active for B1 would make exhausted sweeps N x too fast
+    # and inflate block production (5B1A bug). B2 uses H_active as an approximation
+    # (its zero-block is unmodeled; exhaustion is rare at mu>=2).
+    if cfg.scenario_id == "B1":
+        unique_rate = float(max((rates[i] for i in active_ids), default=1.0)) or 1.0
+    else:
+        unique_rate = H_active
 
     # range allocation (decoupled from rate) over the ASSIGNED domain S
     if DISJOINT[cfg.scenario_id]:
@@ -217,8 +227,11 @@ def run_scenario(cfg: EngineConfig, emit_log: bool = False, emit_detail: bool = 
             nonce_allocation_event_count += 1
             k = int(r_solk.binomial(S, p))
             if k > 0:
-                # unique solution positions
-                pos = np.unique(r_solpos.integers(0, S, size=k * 2))[:k]
+                # k solution positions. Draw EXACTLY k (not 2k-then-smallest-k: that
+                # biased min_pos ~2x low because np.unique sorts, inflating B1 block
+                # production). At full scale S~1e17 collisions are negligible; on tiny
+                # domains uniqueness may reduce the count slightly (acceptable).
+                pos = np.unique(r_solpos.integers(0, S, size=k))
                 if pos.size:
                     break
             exhausted_rounds += 1
@@ -245,7 +258,7 @@ def run_scenario(cfg: EngineConfig, emit_log: bool = False, emit_detail: bool = 
         winner_time, winner_id, round_searched, round_total, round_distinct = _discover(
             cfg, pos, ranges_all, rates, active_ids, S, r_starts, H_active)
         # generation durations: tgen exhausted generations (full-domain search) + 1 success
-        D_ex = S / H_active                        # exhausted-generation duration
+        D_ex = S / unique_rate                     # exhausted-generation duration (unique frontier)
         gen_success = winner_time
         round_dur = tgen * D_ex + gen_success
         if round_dur <= 0:

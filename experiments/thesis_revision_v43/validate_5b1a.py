@@ -122,9 +122,13 @@ def category_Q():
         accs = [r["accepted_blocks"] for r in runs]
         zero = sum(1 for a in accs if a == 0) / len(accs)
         empirical[N] = dict(zero_frac=zero, mean_blocks=sum(accs) / len(accs), max_blocks=max(accs))
-        p0 = row["zero_block_probability"]
-        check(f"Q-agree-{N}", "Q", f"B1 N={N} empirical zero-frac ~ analytical P0 (<=0.25)",
-              abs(zero - p0) <= 0.25, empirical=zero, analytical=p0, risk=row["zero_block_risk_category"])
+        # Stage 5B1B: exact P0 within the event-loop 99% Clopper-Pearson CI (no 0.25).
+        from experiments.thesis_revision_v43 import b1_exact as bx
+        p0 = bx.exact_zero_block(141e12, N, 10000.0, 600.0, 2.0)["expected_zero_block_probability_exact"]
+        lo99, hi99 = bx.clopper_pearson(int(round(zero * len(seeds))), len(seeds), 0.01)
+        check(f"Q-agree-{N}", "Q", f"B1 N={N}: exact P0 within event-loop 99% CI",
+              lo99 <= p0 <= hi99, empirical=zero, exact_p0=p0, ci99=[lo99, hi99],
+              risk=row["zero_block_risk_category"])
     # monotonicity in N (both analytical and empirical)
     an = [r["zero_block_probability"] for r in table]
     em = [empirical[r["miner_count"]]["zero_frac"] for r in table]

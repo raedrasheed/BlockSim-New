@@ -38,14 +38,16 @@ def test_b1_zero_block_probability():
 
 # 12
 def test_b1_seeded_zero_block_frequency_matches_reference():
-    table = {r["miner_count"]: r for r in zb.b1_table()}
-    seeds = [20260201 + i for i in range(12)]
+    # Stage 5B1B: no arbitrary tolerance. The EXACT P0 must lie inside the event-loop
+    # 99% Clopper-Pearson interval (validation seeds, disjoint from the frozen schedule).
+    from experiments.thesis_revision_v43 import b1_exact as bx
+    seeds = [20261001 + i for i in range(12)]
     for N in (100, 500):
-        accs = [run_scenario(EngineConfig("B1", seed=s, miner_count=N))["accepted_blocks"] for s in seeds]
-        zero = sum(1 for a in accs if a == 0) / len(accs)
-        # empirical tracks the closed-form P0 in magnitude (documented finite-solution gap)
-        assert abs(zero - table[N]["zero_block_probability"]) <= 0.25
-        assert zero > 0.5                                      # majority zero empirically too
+        zeros = sum(1 for s in seeds
+                    if run_scenario(EngineConfig("B1", seed=s, miner_count=N))["accepted_blocks"] == 0)
+        p0 = bx.exact_zero_block(141e12, N, 10000.0, 600.0, 2.0)["expected_zero_block_probability_exact"]
+        lo, hi = bx.clopper_pearson(zeros, len(seeds), 0.01)
+        assert lo <= p0 <= hi, (N, zeros, p0, lo, hi)
 
 
 # 13

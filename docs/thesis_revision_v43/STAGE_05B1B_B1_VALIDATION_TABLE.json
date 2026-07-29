@@ -1,0 +1,137 @@
+[
+  {
+    "miner_count": 100,
+    "exact_p_zero": 0.846481724890614,
+    "poisson_p_zero": 0.8464817248906141,
+    "poisson_absolute_error": 8.338078456369327e-19,
+    "poisson_relative_error": 9.850275807722616e-19,
+    "direct_reference_frequency": 0.84691,
+    "direct_reference_samples": 100000,
+    "event_loop_zero_count": 25,
+    "event_loop_sample_size": 30,
+    "event_loop_frequency": 0.8333333333333334,
+    "clopper_pearson_95": [
+      0.6527883011658562,
+      0.9435783035319285
+    ],
+    "clopper_pearson_99": [
+      0.5959729626842045,
+      0.9621782635102698
+    ],
+    "standardized_deviation": -0.19977651000265062,
+    "exact_within_event_loop_99ci": true,
+    "direct_within_event_loop_99ci": true,
+    "expected_unique_candidate_evaluations": 1.41e+16,
+    "expected_full_template_generations": 0,
+    "expected_partial_generation_candidates": 1.41e+16,
+    "passed": true
+  },
+  {
+    "miner_count": 200,
+    "exact_p_zero": 0.9200444146293233,
+    "poisson_p_zero": 0.9200444146293233,
+    "poisson_absolute_error": 4.531345619726769e-19,
+    "poisson_relative_error": 4.925137903861308e-19,
+    "direct_reference_frequency": 0.92055,
+    "direct_reference_samples": 100000,
+    "event_loop_zero_count": 27,
+    "event_loop_sample_size": 30,
+    "event_loop_frequency": 0.9,
+    "clopper_pearson_95": [
+      0.7347115495257919,
+      0.9788828629702774
+    ],
+    "clopper_pearson_99": [
+      0.6796857787144835,
+      0.9884121883334973
+    ],
+    "standardized_deviation": -0.40478574037694864,
+    "exact_within_event_loop_99ci": true,
+    "direct_within_event_loop_99ci": true,
+    "expected_unique_candidate_evaluations": 7050000000000000.0,
+    "expected_full_template_generations": 0,
+    "expected_partial_generation_candidates": 7050000000000000.0,
+    "passed": true
+  },
+  {
+    "miner_count": 300,
+    "exact_p_zero": 0.9459594689067654,
+    "poisson_p_zero": 0.9459594689067654,
+    "poisson_absolute_error": 3.1059872238861487e-19,
+    "poisson_relative_error": 3.283425269240872e-19,
+    "direct_reference_frequency": 0.94452,
+    "direct_reference_samples": 100000,
+    "event_loop_zero_count": 27,
+    "event_loop_sample_size": 30,
+    "event_loop_frequency": 0.9,
+    "clopper_pearson_95": [
+      0.7347115495257919,
+      0.9788828629702774
+    ],
+    "clopper_pearson_99": [
+      0.6796857787144835,
+      0.9884121883334973
+    ],
+    "standardized_deviation": -1.1133701159645781,
+    "exact_within_event_loop_99ci": true,
+    "direct_within_event_loop_99ci": true,
+    "expected_unique_candidate_evaluations": 4700000000000000.0,
+    "expected_full_template_generations": 0,
+    "expected_partial_generation_candidates": 4700000000000000.0,
+    "passed": true
+  },
+  {
+    "miner_count": 400,
+    "exact_p_zero": 0.9591894571091382,
+    "poisson_p_zero": 0.9591894571091382,
+    "poisson_absolute_error": 2.3620701760961834e-19,
+    "poisson_relative_error": 2.462568951930654e-19,
+    "direct_reference_frequency": 0.95978,
+    "direct_reference_samples": 100000,
+    "event_loop_zero_count": 27,
+    "event_loop_sample_size": 30,
+    "event_loop_frequency": 0.9,
+    "clopper_pearson_95": [
+      0.7347115495257919,
+      0.9788828629702774
+    ],
+    "clopper_pearson_99": [
+      0.6796857787144835,
+      0.9884121883334973
+    ],
+    "standardized_deviation": -1.6385760381025594,
+    "exact_within_event_loop_99ci": true,
+    "direct_within_event_loop_99ci": true,
+    "expected_unique_candidate_evaluations": 3525000000000000.0,
+    "expected_full_template_generations": 0,
+    "expected_partial_generation_candidates": 3525000000000000.0,
+    "passed": true
+  },
+  {
+    "miner_count": 500,
+    "exact_p_zero": 0.9672161004820059,
+    "poisson_p_zero": 0.9672161004820059,
+    "poisson_absolute_error": 1.905469071083542e-19,
+    "poisson_relative_error": 1.9700551615445232e-19,
+    "direct_reference_frequency": 0.96714,
+    "direct_reference_samples": 100000,
+    "event_loop_zero_count": 27,
+    "event_loop_sample_size": 30,
+    "event_loop_frequency": 0.9,
+    "clopper_pearson_95": [
+      0.7347115495257919,
+      0.9788828629702774
+    ],
+    "clopper_pearson_99": [
+      0.6796857787144835,
+      0.9884121883334973
+    ],
+    "standardized_deviation": -2.0674826665008563,
+    "exact_within_event_loop_99ci": true,
+    "direct_within_event_loop_99ci": true,
+    "expected_unique_candidate_evaluations": 2820000000000000.0,
+    "expected_full_template_generations": 0,
+    "expected_partial_generation_candidates": 2820000000000000.0,
+    "passed": true
+  }
+]
