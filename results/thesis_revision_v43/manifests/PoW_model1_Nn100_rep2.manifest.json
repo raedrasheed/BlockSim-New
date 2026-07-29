@@ -1,0 +1,40 @@
+{
+  "tag": "PoW_model1_Nn100_rep2",
+  "label": "PoW",
+  "model": 1,
+  "miners": 100,
+  "repeat": 2,
+  "git_commit": "2d3c243b36e904ca04bf391b0a4adc73c8cbe273",
+  "seed": "NONE (code sets no seed; non-deterministic)",
+  "timeout_s": 600,
+  "command": "python Main.py (copy of source; model=1 Nn=100)",
+  "inputsconfig_sha256": "e588e1fa98700128ee6be0a8c3674f2cfabfc676c56ec52f66d8dab647a4d583",
+  "start_utc": "2026-07-29T08:47:19.932805+00:00",
+  "end_utc": "2026-07-29T08:47:20.904730+00:00",
+  "wall_seconds": 0.972,
+  "return_code": 0,
+  "output_xlsx": "PoW_model1_Nn100_rep2__Bitcoin_20260729_084720_(Allverify)1day_1e-06M_0.003K_run0.xlsx",
+  "output_xlsx_sha256": "d171531c9402a90f722c9e5f38d958b949ba79a2d93f043042bcd80e109efd74",
+  "sim_output_row": [
+    "19",
+    "19",
+    "0",
+    "0",
+    "0",
+    "0",
+    "34133",
+    "1.397833734114402E+18",
+    "8.348173689849897",
+    "3.714937291983205"
+  ],
+  "input_config_row": [
+    "1",
+    "600",
+    "0.42",
+    "100",
+    "10000",
+    "141000000000000",
+    "21.5",
+    "0.445"
+  ]
+}

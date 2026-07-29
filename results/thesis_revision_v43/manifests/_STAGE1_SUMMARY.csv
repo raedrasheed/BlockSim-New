@@ -1,0 +1,13 @@
+tag,model,miners,repeat,rc,wall_s,seed,git,total_blocks,main_blocks,stale_blocks,stale_pct,energy_kwh,co2_kg,out_sha
+PoCol_model3_Nn100_rep1,3,100,1,0,4.784,NONE (code sets no seed; non-deterministic),2d3c243b36,52,25,27,51.92,0.246285381416142,0.1095969947301833,7916a5df7252
+PoCol_model3_Nn100_rep2,3,100,2,0,7.414,NONE (code sets no seed; non-deterministic),2d3c243b36,59,24,35,59.32,0.3244607472407885,0.1443850325221512,0752c8fdd608
+PoCol_model3_Nn100_rep3,3,100,3,0,18.675,NONE (code sets no seed; non-deterministic),2d3c243b36,142,44,98,69.01000000000001,0.7158863372262781,0.3185694200656932,409c647a38e5
+PoCol_model3_Nn200_rep1,3,200,1,0,126.705,NONE (code sets no seed; non-deterministic),2d3c243b36,194,51,143,73.70999999999999,0.4945287713171925,0.22006530323615,0d33ef7adceb
+PoCol_model3_Nn300_rep1,3,300,1,0,182.607,NONE (code sets no seed; non-deterministic),2d3c243b36,115,38,77,66.95999999999999,0.1896794288663066,0.08440734584550556,786c7ea0542d
+PoW_model1_Nn100_rep1,1,100,1,0,0.665,NONE (code sets no seed; non-deterministic),2d3c243b36,10,10,0,0,8.085066900592112,3.597854770763489,5db8fbbdccb4
+PoW_model1_Nn100_rep2,1,100,2,0,0.972,NONE (code sets no seed; non-deterministic),2d3c243b36,19,19,0,0,8.348173689849897,3.714937291983205,d171531c9402
+PoW_model1_Nn100_rep3,1,100,3,0,0.889,NONE (code sets no seed; non-deterministic),2d3c243b36,16,16,0,0,7.895826909784947,3.513642974854301,3fd0f84c68f8
+PoW_model1_Nn200_rep1,1,200,1,0,1.251,NONE (code sets no seed; non-deterministic),2d3c243b36,21,21,0,0,16.2640903637447,7.237520211866392,661853e1b10b
+PoW_model1_Nn300_rep1,1,300,1,0,1.449,NONE (code sets no seed; non-deterministic),2d3c243b36,20,20,0,0,25.24086090277001,11.23218310173264,0d5c5e36407a
+PoW_model1_Nn400_rep1,1,400,1,0,1.424,NONE (code sets no seed; non-deterministic),2d3c243b36,15,15,0,0,32.9915296006115,14.68123067227211,fbb1fe18b3fa
+PoW_model1_Nn500_rep1,1,500,1,0,1.625,NONE (code sets no seed; non-deterministic),2d3c243b36,11,11,0,0,30.8155311562677,13.71291136453912,e814914804ec

@@ -1,0 +1,40 @@
+{
+  "tag": "PoCol_model3_Nn100_rep3",
+  "label": "PoCol",
+  "model": 3,
+  "miners": 100,
+  "repeat": 3,
+  "git_commit": "2d3c243b36e904ca04bf391b0a4adc73c8cbe273",
+  "seed": "NONE (code sets no seed; non-deterministic)",
+  "timeout_s": 600,
+  "command": "python Main.py (copy of source; model=3 Nn=100)",
+  "inputsconfig_sha256": "9d80c3630fc50199afd34ebd1b9bf10bb22d67f7865a31f3435fa9ea77984f77",
+  "start_utc": "2026-07-29T08:47:29.384600+00:00",
+  "end_utc": "2026-07-29T08:47:48.059151+00:00",
+  "wall_seconds": 18.675,
+  "return_code": 0,
+  "output_xlsx": "PoCol_model3_Nn100_rep3__PoCol_20260729_084745_(Allverify)1day_1e-06M_0.01K_run0.xlsx",
+  "output_xlsx_sha256": "409c647a38e55e668a43d9d9c4b97d5d8fdf72cf26bdcba5e17008ae7cb3b35f",
+  "sim_output_row": [
+    "142",
+    "44",
+    "0",
+    "0",
+    "98",
+    "69.01000000000001",
+    "80935",
+    "1.198693401867252E+17",
+    "0.7158863372262781",
+    "0.3185694200656932"
+  ],
+  "input_config_row": [
+    "3",
+    "600",
+    "0.42",
+    "100",
+    "10000",
+    "141000000000000",
+    "21.5",
+    "0.445"
+  ]
+}

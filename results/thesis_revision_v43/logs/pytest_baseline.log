@@ -1,0 +1,16 @@
+============================= test session starts ==============================
+collecting ... collected 11 items
+
+tests/test_energy_models.py::test_pow_energy_depends_on_price_and_reward PASSED [  9%]
+tests/test_energy_models.py::test_pow_energy_changes_with_electricity_price PASSED [ 18%]
+tests/test_energy_models.py::test_pow_kappa_bounds_validation PASSED     [ 27%]
+tests/test_energy_models.py::test_pow_miner_allocation_sums_to_network PASSED [ 36%]
+tests/test_energy_models.py::test_pow_technical_cap_is_minimum PASSED    [ 45%]
+tests/test_energy_models.py::test_pos_energy_scales_with_validator_count PASSED [ 54%]
+tests/test_energy_models.py::test_pos_energy_independent_of_coin_price PASSED [ 63%]
+tests/test_energy_models.py::test_carbon_scales_with_gamma PASSED        [ 72%]
+tests/test_energy_models.py::test_communication_energy_is_counted PASSED [ 81%]
+tests/test_energy_models.py::test_communication_broadcast_accounting PASSED [ 90%]
+tests/test_energy_models.py::test_fixed_power_sanity_check_matches_E_equals_P_times_T PASSED [100%]
+
+============================== 11 passed in 0.07s ==============================

@@ -1,0 +1,33 @@
+chapter_section,artifact,quantity,thesis_value,apparent_source_file,generating_config,committed_raw_file,seed,status,notes
+Ch6 Table 6.x,Config table (#38),Total network hash rate,141e12 H/s,InputsConfig.py:24,"model=1/3, NetworkHashRate_Hps",n/a,n/a,TRACEABLE,Config constant used by both models
+Ch6 Table 6.x,Config table (#38),Miner efficiency,21.5 J/TH,InputsConfig.py:28,MinerEfficiency_J_per_TH,n/a,n/a,TRACEABLE,Config constant
+Ch6 Table 6.x,Config table (#38),Grid emission factor,0.445 kgCO2e/kWh,InputsConfig.py:14,GridEF_kgCO2e_per_kWh,n/a,n/a,TRACEABLE,Config constant
+Ch6 Table 6.x,Config table (#38),Target block interval,600 s,InputsConfig.py:80/159,Binterval,n/a,n/a,TRACEABLE,Config constant
+Ch6 Table 6.x,Config table (#38),Block propagation delay,0.42 s,InputsConfig.py:82/161,Bdelay,n/a,n/a,TRACEABLE,Config constant
+Ch6 Table 6.x,Config table (#38),Simulation time,10000 s,InputsConfig.py:107/205,simTime,n/a,n/a,TRACEABLE,Config constant
+Ch6 Table 6.x,Config table (#38),Miner populations,"100,200,300,400,500",InputsConfig.py:Nn,"manually edited per run",n/a,n/a,PARTIAL,Nn changed by hand per run; no automated sweep runner committed
+Ch7 Table 7.1,#39,PoW 100 total energy,7.9018 kWh,Models/Node.py stop_mining_and_account + /100,"model=1 Nn=100",NONE,NONE,UNTRACEABLE,Single unseeded run; Stage1 re-run gave 8.09/8.35/7.90 (non-det)
+Ch7 Table 7.1,#39,PoW 200 total energy,15.5580 kWh,Models/Node.py + /100,"model=1 Nn=200",NONE,NONE,UNTRACEABLE,Stage1 re-run gave 16.26
+Ch7 Table 7.1,#39,PoW 300 total energy,24.4860 kWh,Models/Node.py + /100,"model=1 Nn=300",NONE,NONE,UNTRACEABLE,Stage1 re-run gave 25.24
+Ch7 Table 7.1,#39,PoW 400 total energy,33.0783 kWh,Models/Node.py + /100,"model=1 Nn=400",NONE,NONE,UNTRACEABLE,Stage1 re-run gave 32.99
+Ch7 Table 7.1,#39,PoW 500 total energy,40.4078 kWh,Models/Node.py + /100,"model=1 Nn=500",NONE,NONE,UNTRACEABLE,Stage1 re-run gave 30.82 (fewer blocks; end-of-sim time unflushed)
+Ch7 Table 7.1,#39,PoW 100-500 main blocks,"18,14,16,27,19",Bitcoin BlockCommit,"model=1",NONE,NONE,UNTRACEABLE,Single unseeded run
+Ch7 Table 7.1,#39,PoW 100-500 stale rate,0.00%,Bitcoin fork model,"model=1",NONE,NONE,UNTRACEABLE,Reproduced qualitatively (0% in all Stage1 PoW runs)
+Ch7 Table 7.1,#39,PoCol 100 total energy,0.1308 kWh,Models/PoCol/Consensus.py:264 (/N),"model=3 Nn=100",NONE,NONE,UNTRACEABLE,Stage1 re-run gave 0.246/0.324/0.716 (huge run-to-run variance)
+Ch7 Table 7.1,#39,PoCol 200 total energy,0.3001 kWh,Models/PoCol/Consensus.py:264 (/N),"model=3 Nn=200",NONE,NONE,UNTRACEABLE,Stage1 re-run gave 0.495
+Ch7 Table 7.1,#39,PoCol 300 total energy,0.4695 kWh,Models/PoCol/Consensus.py:264 (/N),"model=3 Nn=300",NONE,NONE,UNTRACEABLE,See Stage1 heavy-run note
+Ch7 Table 7.1,#39,PoCol 400 total energy,0.4542 kWh,Models/PoCol/Consensus.py:264 (/N),"model=3 Nn=400",NONE,NONE,UNTRACEABLE,See Stage1 heavy-run note
+Ch7 Table 7.1,#39,PoCol 500 total energy,0.3350 kWh,Models/PoCol/Consensus.py:264 (/N),"model=3 Nn=500",NONE,NONE,UNTRACEABLE,See Stage1 heavy-run note
+Ch7 Table 7.1,#39,PoCol 100-500 stale rate,"35.71,68.14,78.40,82.75,85.67%",PoCol scheduler (no event cancel),"model=3",NONE,NONE,UNTRACEABLE,Stale explosion reproduced (Stage1 PoCol100 gave 52/59/69%)
+Ch7 Table 7.1,#39,PoCol/PoW energy per main block,"~0.0073-0.0083 kWh",derived,"model=3",NONE,NONE,UNTRACEABLE,Derived ratio; single run
+Ch7 Table 7.2,#40,PoCol/PoW TPS,"3.32..11.33 / 2.51..4.84",derived from block/tx counts,"model=1,3",NONE,NONE,UNTRACEABLE,Intervals not matched (M-2); single unseeded run
+Ch7 Table 7.2,#40,Approx 6-conf time,"957..3189 s / 2182..3959 s",derived,"model=1,3",NONE,NONE,UNTRACEABLE,Derived from mean interval; single run
+Ch7 Table 7.2,#40,PoW 400 CO2,14.720 kg,Node CO2 (energy*0.445),"model=1 Nn=400",NONE,NONE,UNTRACEABLE,Tracks inflated PoW energy
+Ch7 Table 7.2,#40,PoCol 400 CO2,0.202 kg,PoCol CO2,"model=3 Nn=400",NONE,NONE,UNTRACEABLE,Tracks /N energy
+Ch7 Fig 7.4,text,PoW/PoCol 100 energy + reduction,"7.90 / 0.131 kWh; 98.3%",C-1 + C-2 artifacts,"model=1,3 Nn=100",NONE,NONE,UNTRACEABLE,Reduction is artifact-driven (see audit C-1,C-2)
+Ch7 Fig 7.8,text,PoW 400 total CO2,~14.7 kg,Node CO2,"model=1 Nn=400",NONE,NONE,UNTRACEABLE,Same as Table 7.2
+Abstract,front matter,Energy reduction headline,"~98-99%",C-1 + C-2 artifacts,"model=1,3",NONE,NONE,UNTRACEABLE,Authorized for removal/replacement if unsupported (Decision 5)
+Abstract,front matter,TPS example,"11.33 vs 2.87 at 300",Table 7.2,"model=1,3 Nn=300",NONE,NONE,UNTRACEABLE,Copied from Table 7.2
+Abstract,front matter,Energy example,"0.454 vs 33.078 kWh at 400",Table 7.1,"model=1,3 Nn=400",NONE,NONE,UNTRACEABLE,Copied from Table 7.1
+Corroborating,committed workbook,Bitcoin 50 miners energy,3.9287 kWh,Models/Node.py + /100,"model=1 Nn=50",Bitcoin_20260122_143644...xlsx,NONE,TRACEABLE-COMMITTED,Not a thesis value; confirms /100 mechanism (~0.5x8.42)
+Corroborating,committed workbook,Bitcoin 1000 miners energy,83.8358 kWh,Models/Node.py + /100,"model=1 Nn=1000",Bitcoin_20260122_153749...xlsx,NONE,TRACEABLE-COMMITTED,Not a thesis value; = 0.996x(10x8.42) confirms /100 mechanism

@@ -1,0 +1,7 @@
+# Thesis revision v43 dependency lock
+# python 3.11.15
+pandas==3.0.5
+numpy==2.4.6
+xlsxwriter==3.2.9
+scipy==1.17.1
+pytest==9.1.1

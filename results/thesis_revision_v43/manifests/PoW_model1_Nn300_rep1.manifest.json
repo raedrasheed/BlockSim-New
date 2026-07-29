@@ -1,0 +1,39 @@
+{
+  "tag": "PoW_model1_Nn300_rep1",
+  "label": "PoW",
+  "model": 1,
+  "miners": 300,
+  "repeat": 1,
+  "git_commit": "2d3c243b36e904ca04bf391b0a4adc73c8cbe273",
+  "seed": "NONE (code sets no seed; non-deterministic)",
+  "command": "/usr/local/bin/python3 Main.py  (cwd=<copy of source>, InputsConfig model=1 Nn=300)",
+  "inputsconfig_sha256": "55cc38d86333f52045d0c200cda061abe082db54ff4e81ab1f33e769084a411d",
+  "start_utc": "2026-07-29T08:43:00.783524+00:00",
+  "end_utc": "2026-07-29T08:43:02.232873+00:00",
+  "wall_seconds": 1.449,
+  "return_code": 0,
+  "output_xlsx": "PoW_model1_Nn300_rep1__Bitcoin_20260729_084301_(Allverify)1day_1e-06M_0.003K_run0.xlsx",
+  "output_xlsx_sha256": "0d5c5e36407a0e9247e41f2c6bb55be4c15c097024d9a97254523c0c5813b63d",
+  "sim_output_row": [
+    "20",
+    "20",
+    "0",
+    "0",
+    "0",
+    "0",
+    "35984",
+    "4.226376709301024E+18",
+    "25.24086090277001",
+    "11.23218310173264"
+  ],
+  "input_config_row": [
+    "1",
+    "600",
+    "0.42",
+    "300",
+    "10000",
+    "141000000000000",
+    "21.5",
+    "0.445"
+  ]
+}
