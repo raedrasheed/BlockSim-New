@@ -1,0 +1,105 @@
+{
+  "stage": "5B1C",
+  "verdict": "READY_FOR_STAGE_5B2",
+  "remote_freeze_branch": "thesis-v43-stage5b2-freeze-1",
+  "resolved_commit_sha": "c0ff48e462b90870540caf7461831c9ef795a77f",
+  "expected_commit_sha": "c0ff48e462b90870540caf7461831c9ef795a77f",
+  "commit_matches_expected": true,
+  "tree_sha": "edd2389cb06ff509739a2a1c7dc3e3ac2c9c7aea",
+  "commit_parent": "65a16c876378d440487da51214a64d2922b28c4d",
+  "commit_timestamp_utc": "2026-07-29T15:58:27Z",
+  "clean_checkout": {
+    "command": "git worktree add --detach <scratch>/freeze-verify c0ff48e462b90870540caf7461831c9ef795a77f",
+    "head_sha": "c0ff48e462b90870540caf7461831c9ef795a77f",
+    "detached": true,
+    "clean": true,
+    "inputsconfig_unmodified": true
+  },
+  "checksums": {
+    "matrix_sha256": {
+      "expected": "306d82834395a6bb159dbacf713eaf2290a7ada52c1e9c451c031d09014edce5",
+      "match": true
+    },
+    "seed_schedule_sha256": {
+      "expected": "6122dbd0f455a1c4c9676ec6575f064c3a682b3c978705d6588af11489b13e10",
+      "match": true
+    },
+    "retention_list_sha256": {
+      "expected": "2283f2ff69bcabf423267b2984ef4acfce852b217b39e1efe8061e583bc1702e",
+      "match": true
+    },
+    "dependency_lock_sha256": {
+      "expected": "6e211ea7c031a3fab560843690e27e5a3c2aa2a8c363ab483369a2babc8157be",
+      "match": true
+    },
+    "thesis_docx_sha256": {
+      "expected": "2c3afdc5739109d0ea12ada96c3115d626a2188c1acbaeaa4b6020974884cbda",
+      "match": true
+    },
+    "thesis_pdf_sha256": {
+      "expected": "131412bb2ce17ed97b98dfbefc136c7b5b226b9fd7372e79a25e4b0dc057e9c4",
+      "match": true
+    },
+    "all_match": true
+  },
+  "sampling_audit": {
+    "k_in_range_0_to_S": true,
+    "positions_unique": true,
+    "no_oversample_then_truncate": true,
+    "minimum_unbiased": true,
+    "min_of_2_empirical_mean": 16.195,
+    "min_of_2_theoretical_S_over_3": 16.667,
+    "reproducible": true,
+    "count_distribution_binomial_at_scale": true,
+    "collisions_at_frozen_scale": 0,
+    "method": "with-replacement integers + np.unique dedup (collision-free output; exact without-replacement at frozen domain sizes S>=4.23e16)",
+    "verdict": "PASS"
+  },
+  "hash_taxonomy_audit": {
+    "physical_run_rows": 1890,
+    "scientific_semantics_groups": 63,
+    "group_size_frequency": {
+      "30": 63
+    },
+    "distinct_run_execution_hash": 1890,
+    "duplicate_run_execution_hash": 0,
+    "duplicate_same_seed_semantics": 0,
+    "seeds_excluded_from_semantics": true,
+    "seeds_included_in_run_execution": true,
+    "b3_c1_shared_run_count": 870,
+    "anomalous_groups": [],
+    "presentation_only_never_splits_run": true,
+    "verdict": "PASS"
+  },
+  "b1_analytical_audit": {
+    "uses_log1p_and_mpmath": true,
+    "exact_recomputation_matches_committed": true,
+    "poisson_labelled_approximation": true,
+    "no_0p25_tolerance": true,
+    "exact_within_event_loop_99ci_all_N": true,
+    "no_systematic_discrepancy": true,
+    "zero_block_metrics_null_not_zero_or_inf": true,
+    "zero_block_runs_kept_in_liveness": true,
+    "verdict": "PASS"
+  },
+  "test_suite": {
+    "command": "python3 -m pytest tests/ -q",
+    "passed": 268,
+    "failed": 0,
+    "skipped": 0,
+    "runtime_s": 18.31,
+    "python_version": "3.11.15",
+    "dependencies": {
+      "numpy": "2.4.6",
+      "scipy": "1.17.1",
+      "mpmath": "1.4.1",
+      "pandas": "3.0.5",
+      "pytest": "9.1.1"
+    }
+  },
+  "thesis_integrity": {
+    "docx_match": true,
+    "pdf_match": true
+  },
+  "no_scientific_modification": true
+}
