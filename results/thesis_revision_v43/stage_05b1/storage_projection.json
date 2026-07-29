@@ -1,0 +1,57 @@
+{
+  "probes": [
+    {
+      "accepted_blocks": 15,
+      "full_log_bytes": 7617,
+      "log_records": 15,
+      "miner_count": 100,
+      "scenario": "B3_C1_CONTINUOUS_DISJOINT",
+      "summary_bytes": 1585
+    },
+    {
+      "accepted_blocks": 17,
+      "full_log_bytes": 8407,
+      "log_records": 17,
+      "miner_count": 500,
+      "scenario": "B3_C1_CONTINUOUS_DISJOINT",
+      "summary_bytes": 1583
+    },
+    {
+      "accepted_blocks": 13,
+      "full_log_bytes": 7004,
+      "log_records": 13,
+      "miner_count": 500,
+      "scenario": "C2",
+      "summary_bytes": 1699
+    },
+    {
+      "accepted_blocks": 1,
+      "full_log_bytes": 2063,
+      "log_records": 1,
+      "miner_count": 500,
+      "scenario": "B1",
+      "summary_bytes": 1564
+    }
+  ],
+  "projection": {
+    "full_log_bytes": {
+      "max": 8407,
+      "median": 7617,
+      "min": 2063,
+      "p95_proxy": 8407
+    },
+    "full_log_retained": 41,
+    "matrix_runs": 1890,
+    "projected_total_bytes_expected": 3307947,
+    "projected_total_bytes_p95": 3555797,
+    "projected_total_mb_expected": 3.308,
+    "projected_total_mb_p95": 3.556,
+    "retention_policy": "all summaries + (1 per scenario/count and ~1% deterministic) full logs",
+    "summary_bytes": {
+      "max": 1699,
+      "median": 1585,
+      "min": 1564,
+      "p95_proxy": 1699
+    }
+  }
+}

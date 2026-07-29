@@ -1,0 +1,33 @@
+{
+  "naive_planned_rows": 2760,
+  "exact_duplicates_removed": 0,
+  "b3_c1_merged": 870,
+  "other_semantic_duplicates_removed": 0,
+  "final_stage5b2_run_count": 1890,
+  "validation_only_rows": 0,
+  "by_class": {
+    "CORE": 600,
+    "CORE_C2": 150,
+    "SENS_IDLE": 300,
+    "SENS_HETERO": 240,
+    "SENS_MU": 120,
+    "SENS_INACTIVE": 180,
+    "SENS_DELAY": 240,
+    "EXPLORATORY": 60
+  },
+  "by_scenario": {
+    "B0": 150,
+    "B1": 150,
+    "B2": 150,
+    "B3_C1_CONTINUOUS_DISJOINT": 870,
+    "C2": 570
+  },
+  "ceiling": 3500,
+  "under_ceiling": true,
+  "full_log_retained": 41,
+  "retention_sample_sha256": "b894c5e7070d8ec36e4b9db24921a517458026460969be7ebaa1b32875801cec",
+  "distinct_configuration_hashes": 1890,
+  "distinct_execution_semantics_hashes": 1890,
+  "distinct_analysis_group_hashes": 63,
+  "seed_schedule_sha256": "6122dbd0f455a1c4c9676ec6575f064c3a682b3c978705d6588af11489b13e10"
+}

@@ -1,0 +1,382 @@
+{
+  "all_passed": true,
+  "checks": [
+    {
+      "category": "A",
+      "description": "B3 disjoint winner time matches brute force",
+      "engine": 7.5,
+      "id": "A1",
+      "passed": true,
+      "reference": 7.5
+    },
+    {
+      "category": "A",
+      "description": "B3 disjoint owner matches brute force",
+      "engine": 2,
+      "id": "A2",
+      "passed": true,
+      "reference": 2
+    },
+    {
+      "category": "A",
+      "description": "B3 disjoint distinct == total (no overlap)",
+      "distinct": 90.0,
+      "id": "A3",
+      "passed": true,
+      "total": 90.0
+    },
+    {
+      "category": "A",
+      "description": "B1 winner time == min_pos / max_rate",
+      "engine": 8.5,
+      "id": "A4",
+      "passed": true,
+      "reference": 8.5
+    },
+    {
+      "category": "A",
+      "description": "B1 distinct coverage == fastest miner only (< total)",
+      "distinct": 17.0,
+      "id": "A5",
+      "one_miner": 17.0,
+      "passed": true,
+      "total": 102.0
+    },
+    {
+      "category": "A",
+      "description": "B2 winner reachable (finite time)",
+      "id": "A6",
+      "passed": true,
+      "winner_time": 5.0
+    },
+    {
+      "category": "A",
+      "description": "B2 linear-merge coverage approximates circular brute force (<=15%)",
+      "engine": 34.0,
+      "id": "A7",
+      "passed": true,
+      "reference": 34,
+      "rel_err": 0.0
+    },
+    {
+      "category": "A",
+      "description": "B2 distinct < total (real duplicate work under long search)",
+      "distinct": 34.0,
+      "id": "A8",
+      "passed": true,
+      "total": 40.0,
+      "winner_time": 5.0
+    },
+    {
+      "accepted": 4531,
+      "category": "A",
+      "description": "B1 small-domain end-to-end accepted>=1",
+      "domain": 1200,
+      "id": "A9-B1",
+      "passed": true
+    },
+    {
+      "accepted": 7903,
+      "category": "A",
+      "description": "B2 small-domain end-to-end accepted>=1",
+      "domain": 1200,
+      "id": "A9-B2",
+      "passed": true
+    },
+    {
+      "accepted": 10347,
+      "category": "A",
+      "description": "B3_C1_CONTINUOUS_DISJOINT small-domain end-to-end accepted>=1",
+      "domain": 1200,
+      "id": "A9-B3_C1_CONTINUOUS_DISJOINT",
+      "passed": true
+    },
+    {
+      "category": "B",
+      "description": "equal allocation independent of hash-rate distribution",
+      "id": "B1",
+      "passed": true,
+      "same": true
+    },
+    {
+      "category": "B",
+      "description": "weighted allocation depends on shares (differs from equal)",
+      "id": "B2",
+      "max_eq": 2000,
+      "max_wt": 4529,
+      "passed": true
+    },
+    {
+      "category": "B",
+      "description": "equal covers domain exactly",
+      "id": "B3",
+      "passed": true,
+      "total": 100000
+    },
+    {
+      "category": "B",
+      "description": "weighted covers domain exactly",
+      "id": "B4",
+      "passed": true,
+      "total": 100000
+    },
+    {
+      "category": "B",
+      "description": "continuous energy invariant A1 under equal allocation",
+      "energy": 8.420833333333333,
+      "id": "B5-equal",
+      "passed": true
+    },
+    {
+      "category": "B",
+      "description": "continuous energy invariant A1 under weighted allocation",
+      "energy": 8.420833333333333,
+      "id": "B5-weighted",
+      "passed": true
+    },
+    {
+      "accepted": 3,
+      "category": "C",
+      "description": "B1 executes in loop (accepted blocks >= 1)",
+      "id": "C1",
+      "passed": true
+    },
+    {
+      "accepted": 13,
+      "category": "C",
+      "description": "B2 executes in loop (accepted blocks >= 1)",
+      "id": "C2",
+      "passed": true
+    },
+    {
+      "b1": 0.99,
+      "b2": 0.3599023385293972,
+      "b3": 0.0,
+      "category": "C",
+      "description": "duplicate-rate ordering B3(0) < B2 < B1",
+      "id": "C3",
+      "passed": true
+    },
+    {
+      "category": "C",
+      "description": "B1 candidate reconciliation total == distinct + duplicate",
+      "distinct": 1.6680675411258616e+16,
+      "dup": 1.6513868657146028e+18,
+      "id": "C4-B1",
+      "passed": true,
+      "total": 1.6680675411258614e+18
+    },
+    {
+      "category": "C",
+      "description": "B2 candidate reconciliation total == distinct + duplicate",
+      "distinct": 7.718515546989513e+17,
+      "dup": 4.339824940080045e+17,
+      "id": "C4-B2",
+      "passed": true,
+      "total": 1.205834048706956e+18
+    },
+    {
+      "category": "C",
+      "description": "B3 candidate reconciliation total == distinct + duplicate",
+      "distinct": 1.199185747478556e+18,
+      "dup": 0.0,
+      "id": "C4-B3",
+      "passed": true,
+      "total": 1.199185747478556e+18
+    },
+    {
+      "category": "C",
+      "description": "B1/B2 not labelled classical PoW (interpretive honesty)",
+      "id": "C5",
+      "note": "labels are B1/B2",
+      "passed": true
+    },
+    {
+      "category": "D",
+      "description": "C2 idle energy emerges in-loop (het-equal saves)",
+      "id": "D1",
+      "idle_kwh": 0.09178537241357648,
+      "idle_s": 57231.39445311716,
+      "passed": true
+    },
+    {
+      "category": "D",
+      "description": "C2 homogeneous equal-range idle == 0 (no forced saving)",
+      "energy": 8.420833333333333,
+      "id": "D2",
+      "idle_s": 0.0,
+      "passed": true
+    },
+    {
+      "category": "D",
+      "description": "C2 heterogeneous weighted saves less than equal",
+      "equal_idle_s": 57231.39445311716,
+      "id": "D3",
+      "passed": true,
+      "weighted_idle_s": 5.184119800105691e-11
+    },
+    {
+      "active": 7.50297960919757,
+      "category": "D",
+      "coord": 0.0,
+      "description": "C2 het-equal energy reconciliation total == active+idle+coord",
+      "id": "D4-het-equal",
+      "idle": 0.09178537241357648,
+      "passed": true,
+      "total": 7.594764981611146
+    },
+    {
+      "active": 8.420833333333333,
+      "category": "D",
+      "coord": 0.0,
+      "description": "C2 het-weighted energy reconciliation total == active+idle+coord",
+      "id": "D4-het-weighted",
+      "idle": 3.719410216394867e-17,
+      "passed": true,
+      "total": 8.420833333333333
+    },
+    {
+      "active": 8.420833333333333,
+      "category": "D",
+      "coord": 0.0,
+      "description": "C2 hom energy reconciliation total == active+idle+coord",
+      "id": "D4-hom",
+      "idle": 0.0,
+      "passed": true,
+      "total": 8.420833333333333
+    },
+    {
+      "b3_active": 1000000.0,
+      "c2_active": 942768.6055468828,
+      "c2_idle": 57231.39445311716,
+      "category": "D",
+      "description": "C2 in-loop time reconciliation: B3_active - C2_active == C2_idle",
+      "id": "D5",
+      "passed": true
+    },
+    {
+      "category": "D",
+      "description": "C2 state-transition reasons recorded",
+      "enter": "range_exhausted_no_solution",
+      "id": "D6",
+      "leave": "new_template_generation_or_accepted_block",
+      "passed": true
+    },
+    {
+      "bytes": 1485000000,
+      "category": "E",
+      "description": "block-propagation bytes == messages * 1MB",
+      "id": "E1",
+      "msgs": 1485,
+      "passed": true
+    },
+    {
+      "category": "E",
+      "description": "template refresh count == exhausted rounds",
+      "exhausted": 32,
+      "id": "E2",
+      "passed": true,
+      "refresh": 32
+    },
+    {
+      "category": "E",
+      "description": "unimplemented agreement energy is null (not zero)",
+      "id": "E3",
+      "passed": true,
+      "value": null
+    },
+    {
+      "category": "E",
+      "description": "coordination lower bound explicit and zero",
+      "id": "E4",
+      "lb": 0.0,
+      "passed": true
+    },
+    {
+      "b0_ops": 0,
+      "b3_ops": 15,
+      "category": "E",
+      "description": "common-template scenario has agreement ops; B0 (independent) has none",
+      "id": "E5",
+      "passed": true
+    },
+    {
+      "accepted": 15,
+      "category": "E",
+      "description": "events reconciliation: agreement ops == accepted blocks",
+      "id": "E6",
+      "ops": 15,
+      "passed": true
+    },
+    {
+      "category": "F",
+      "description": "20 sequential runs == 20 concurrent runs (bit-for-bit outcomes)",
+      "id": "F1",
+      "mismatches": 0,
+      "n": 20,
+      "passed": true
+    },
+    {
+      "category": "F",
+      "description": "named streams reproducible and independent",
+      "id": "F2",
+      "n_streams": 8,
+      "passed": true
+    },
+    {
+      "accepted": 14,
+      "category": "G",
+      "description": "B0 N=500 executes; energy invariant A1 holds",
+      "energy": 8.420833333333333,
+      "id": "G-B0",
+      "passed": true
+    },
+    {
+      "accepted": 1,
+      "category": "G",
+      "description": "B1 N=500 executes; energy invariant A1 holds",
+      "energy": 8.420833333333333,
+      "id": "G-B1",
+      "passed": true
+    },
+    {
+      "accepted": 14,
+      "category": "G",
+      "description": "B2 N=500 executes; energy invariant A1 holds",
+      "energy": 8.420833333333333,
+      "id": "G-B2",
+      "passed": true
+    },
+    {
+      "accepted": 14,
+      "category": "G",
+      "description": "B3_C1_CONTINUOUS_DISJOINT N=500 executes; energy invariant A1 holds",
+      "energy": 8.420833333333333,
+      "id": "G-B3_C1_CONTINUOUS_DISJOINT",
+      "passed": true
+    },
+    {
+      "accepted": 12,
+      "category": "G",
+      "description": "C2 N=500 executes; energy <= invariant (idle saves)",
+      "energy": 6.8131551227624065,
+      "id": "G-C2",
+      "passed": true
+    }
+  ],
+  "checks_failed": 0,
+  "checks_passed": 45,
+  "checks_total": 45,
+  "failed_checks": [],
+  "run_cap": 200,
+  "run_count": 42,
+  "storage": {
+    "max_bytes": 1702,
+    "mean_bytes": 1602,
+    "median_bytes": 1584,
+    "min_bytes": 1559,
+    "p95_bytes": 1699,
+    "persisted_runs": 42
+  },
+  "under_cap": true
+}

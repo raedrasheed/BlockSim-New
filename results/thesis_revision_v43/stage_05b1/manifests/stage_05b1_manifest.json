@@ -1,0 +1,34 @@
+{
+  "artifact_sha256": {
+    "docs/thesis_revision_v43/STAGE_05B1_FINAL_MATRIX.csv": "35e82969f51bc244391731ee3647ecc8cb51c81cf54de7d160ad3a0f0b5f7892",
+    "experiments/thesis_revision_v43/build_matrix_5b1.py": "bf2d141ce13d9b301d32c3fe1ac114d09e131af91003486622832aa63931c2d8",
+    "experiments/thesis_revision_v43/hashing.py": "8a8bc70d038f5966fd1e692b5c0433ab09334081d02ea1ca3b06604515cab664",
+    "experiments/thesis_revision_v43/run_utils.py": "9f74fe4d7be14f2ed421dfa5c8d66c5a530462ee927ef4abc0ae0a654c18564f",
+    "experiments/thesis_revision_v43/scenario_engine.py": "c8816cda95ee21cc5d84733828966c633fc5c74391dd4aa2217488675582bcc4",
+    "experiments/thesis_revision_v43/storage_projection_5b1.py": "4f18a484188fe6740eab070c76f9875f431b0cb83c863be9c50df033c1f1ee7a",
+    "experiments/thesis_revision_v43/validate_5b1.py": "974445719d1aa0e7e87515d6ad681f1fb2e043cccee0ecb46befa2287e611006"
+  },
+  "branch": "claude/thesis-scientific-revision-v43",
+  "ceiling": 3500,
+  "date": "2026-07-29",
+  "final_stage5b2_run_count": 1890,
+  "full_matrix_executed": false,
+  "stage": "5B1",
+  "stage_docs": [
+    "STAGE_05B1_COORDINATION_INSTRUMENTATION.md",
+    "STAGE_05B1_ENGINE_REPORT.md",
+    "STAGE_05B1_FINAL_MATRIX.csv",
+    "STAGE_05B1_MATRIX_CHANGELOG.md",
+    "STAGE_05B1_PARALLEL_REPRODUCIBILITY.md",
+    "STAGE_05B1_PREREGISTRATION_AMENDMENT.md",
+    "STAGE_05B1_RANGE_ALLOCATION.md",
+    "STAGE_05B1_SCENARIO_SEMANTICS.md",
+    "STAGE_05B1_SEMANTIC_DUPLICATION_AUDIT.md",
+    "STAGE_05B1_STORAGE_PROJECTION.md",
+    "STAGE_05B1_VALIDATION_REPORT.md"
+  ],
+  "thesis_docx_sha256": "2c3afdc5739109d0ea12ada96c3115d626a2188c1acbaeaa4b6020974884cbda",
+  "thesis_pdf_sha256": "131412bb2ce17ed97b98dfbefc136c7b5b226b9fd7372e79a25e4b0dc057e9c4",
+  "validation_cap": 200,
+  "validation_runs": 42
+}
