@@ -49,7 +49,10 @@ def test_template_domain_reconciliation():
     rec = schemas.reconcile_per_template(r["per_template"])
     assert rec["passed"], rec
     for t in r["per_template"]:
-        assert t["assigned_domain_size"] == t["searched_domain_size"] + t["unsearched_domain_size"]
+        # Section 4: searched + unsearched + inactive == assigned (exact integers)
+        assert t["assigned_domain_size"] == (t["searched_domain_size"]
+                                             + t["unsearched_domain_size"]
+                                             + t["inactive_domain_size"])
 
 
 # 20

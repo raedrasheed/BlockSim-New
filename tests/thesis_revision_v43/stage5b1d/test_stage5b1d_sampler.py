@@ -146,8 +146,8 @@ def test_no_sorted_oversample_truncation():
 
 # 16
 def test_no_with_replacement_unique_dedup():
-    eng = inspect.getsource(__import__(
-        "experiments.thesis_revision_v43.scenario_engine", fromlist=["run_scenario"]).run_scenario)
+    import experiments.thesis_revision_v43.scenario_engine as se
+    eng = inspect.getsource(se)                    # whole engine module
     # the engine must NOT sample positions via np.unique(integers(...))
     assert "np.unique(r_solpos.integers" not in eng
     assert "sample_without_replacement" in eng

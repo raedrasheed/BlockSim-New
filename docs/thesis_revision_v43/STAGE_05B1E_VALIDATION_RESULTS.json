@@ -1,0 +1,12 @@
+{
+  "run_count": 54,
+  "all_pass": true,
+  "coverage": {
+    "inactive_only_gen": true,
+    "partial_gen": true,
+    "early_winner": true,
+    "nonzero_idle": true,
+    "zero_idle": true,
+    "no_active_solution": true
+  }
+}

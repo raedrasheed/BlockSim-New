@@ -33,11 +33,13 @@ def is_na(x) -> bool:
 # ---------------------------------------------------------------------------
 PER_MINER_FIELDS = (
     "run_id", "miner_id", "hash_rate_hps", "hash_rate_share", "allocation_policy",
-    "range_start", "range_end", "range_size", "searched_count", "unsearched_count",
-    "inactive_count", "active_time_s", "idle_time_s", "offline_time_s",
+    "range_start", "range_end", "range_size", "search_start_position",
+    "candidates_evaluated", "searched_count", "last_evaluated_position",
+    "unsearched_count", "remaining_unsearched", "inactive_count", "active_time_s",
+    "idle_time_s", "offline_time_s", "productive_search_time_s",
     "active_energy_kwh", "idle_energy_kwh", "template_generations_participated",
-    "range_exhaustion_count", "idle_entry_count", "final_state",
-    "state_transition_reason_counts",
+    "range_exhaustion_count", "idle_entry_count", "final_state", "completion_status",
+    "stop_reason", "state_transition_reason_counts",
 )
 
 # ---------------------------------------------------------------------------
@@ -46,9 +48,12 @@ PER_MINER_FIELDS = (
 PER_TEMPLATE_FIELDS = (
     "run_id", "round_id", "template_generation_id", "parent_block_id", "template_id",
     "target", "mu", "assigned_domain_size", "searched_domain_size",
-    "unsearched_domain_size", "inactive_domain_size", "solution_count", "finder_count",
-    "accepted_block_id", "exhausted", "refresh_cause", "start_time_s", "end_time_s",
-    "legitimate_competitor_count", "obsolete_event_rejection_count",
+    "unsearched_domain_size", "inactive_domain_size", "total_template_solution_count",
+    "active_range_solution_count", "inactive_range_solution_count",
+    "discoverable_finder_count", "solution_count", "finder_count",
+    "accepted_block_id", "exhausted", "status", "refresh_cause", "start_time_s",
+    "end_time_s", "duration_s", "exhausted_time_s", "active_domain_completion_time_s",
+    "partial_cutoff_time_s", "legitimate_competitor_count", "obsolete_event_rejection_count",
 )
 
 # ---------------------------------------------------------------------------
@@ -98,9 +103,10 @@ def reconcile_per_miner(per_miner: list, run: dict, abs_tol: float = 1e-9) -> di
 
 
 def reconcile_per_template(per_template: list) -> dict:
-    """Each template: assigned == searched + unsearched (exact integers)."""
+    """Each template: assigned == searched + unsearched + inactive (exact integers,
+    Section 4)."""
     bad = [t["template_generation_id"] for t in per_template
-           if t["assigned_domain_size"] != t["searched_domain_size"] + t["unsearched_domain_size"]]
-    inactive_ok = all(t["inactive_domain_size"] <= t["unsearched_domain_size"] for t in per_template)
-    return dict(bad_templates=bad, inactive_within_unsearched=inactive_ok,
-                passed=(not bad and inactive_ok))
+           if t["assigned_domain_size"] != (t["searched_domain_size"]
+                                            + t["unsearched_domain_size"]
+                                            + t["inactive_domain_size"])]
+    return dict(bad_templates=bad, passed=(not bad))

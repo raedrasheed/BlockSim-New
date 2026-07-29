@@ -23,9 +23,11 @@ def test_engine_template_solution_reconciliation():
     for t in r["per_template"]:
         # solution_count is the number of distinct positions in that generation
         assert t["solution_count"] >= 0
-        assert t["assigned_domain_size"] == t["searched_domain_size"] + t["unsearched_domain_size"]
-    # engine version reflects the sampler correction
-    assert r["engine_version"] == ENGINE_VERSION == "5b1d.1"
+        # Section 4: searched + unsearched + inactive == assigned (exact integers)
+        assert t["assigned_domain_size"] == (t["searched_domain_size"]
+                                             + t["unsearched_domain_size"]
+                                             + t["inactive_domain_size"])
+    assert r["engine_version"] == ENGINE_VERSION       # tracks the current engine
 
 
 # 19

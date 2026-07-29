@@ -30,7 +30,7 @@ from experiments.thesis_revision_v43 import coverage as _cov
 from experiments.thesis_revision_v43 import exact_sampling as _exact
 from experiments.thesis_revision_v43.schemas import OUTPUT_SCHEMA_VERSION
 
-ENGINE_VERSION = "5b1d.1"
+ENGINE_VERSION = "5b1e.1"
 
 J_PER_KWH = 3_600_000.0
 HASHES_PER_TH = 1e12
@@ -96,14 +96,29 @@ def allocate_equal(S: int, n: int) -> List[Tuple[int, int]]:
 
 def allocate_weighted(S: int, shares: List[float]) -> List[Tuple[int, int]]:
     """Largest-remainder apportionment: S_i ~ S*w_i, Sum S_i = S exactly,
-    deterministic tie-break by index. DEPENDS on hash-rate shares."""
+    deterministic tie-break by index. DEPENDS on hash-rate shares. Robust to
+    float share-sum rounding (deficit of EITHER sign): a positive deficit adds 1
+    to the largest fractional remainders; a negative deficit (floors overshoot S
+    because sum(shares) rounded above 1) removes 1 from the smallest remainders
+    among positive floors, so Sum S_i == S exactly for any float shares."""
     n = len(shares)
     raw = [S * w for w in shares]
     floors = [int(math.floor(x)) for x in raw]
-    deficit = S - sum(floors)
-    order = sorted(range(n), key=lambda i: (-(raw[i] - floors[i]), i))
-    for k in range(deficit):
-        floors[order[k]] += 1
+    rem = [raw[i] - floors[i] for i in range(n)]
+    diff = S - sum(floors)
+    if diff > 0:
+        order = sorted(range(n), key=lambda i: (-rem[i], i))   # largest remainder first
+        for k in range(diff):
+            floors[order[k % n]] += 1
+    elif diff < 0:
+        order = sorted(range(n), key=lambda i: (rem[i], i))    # smallest remainder first
+        need, k = -diff, 0
+        while need > 0:
+            i = order[k % n]
+            if floors[i] > 0:
+                floors[i] -= 1
+                need -= 1
+            k += 1
     out = []
     start = 0
     for L in floors:
@@ -151,9 +166,69 @@ def _shares(cfg: EngineConfig) -> np.ndarray:
     return x / x.sum()
 
 
+
+import bisect
+
+STATUS_FOUND = "FOUND_ACTIVE_SOLUTION"
+STATUS_EXHAUSTED = "ACTIVE_DOMAIN_EXHAUSTED"
+STATUS_NO_ACTIVE = "NO_ACTIVE_MINERS"
+STATUS_PARTIAL = "PARTIAL_AT_CUTOFF"
+
+
+class _Accum:
+    """Shared per-run accumulators. Candidate counts are Python ints (exact, no
+    float cast); times/energy are floats."""
+    def __init__(self, n):
+        self.active_t = np.zeros(n)              # active-power time (energy)
+        self.idle_t = np.zeros(n)
+        self.offline_t = np.zeros(n)
+        self.productive_t = np.zeros(n)          # time actually spent evaluating candidates
+        self.searched_cum = [0] * n              # cumulative candidates evaluated (int)
+        self.last_pos = [None] * n
+        self.stop_reason = [None] * n
+        self.m_gen = np.zeros(n, dtype=np.int64)
+        self.m_exhaust = np.zeros(n, dtype=np.int64)
+        self.m_idle = np.zeros(n, dtype=np.int64)
+        self.total_evals = 0                     # int
+        self.distinct_evals = 0                  # int
+        self.duplicate_evals = 0                 # int
+        self.total_sol = 0                       # int: solutions across all templates
+        self.active_sol = 0
+        self.inactive_sol = 0
+        self.accepted = 0
+        self.exhausted = 0
+        self.legit = 0
+        self.partials = 0
+        self.template_refresh = 0
+        self.nonce_alloc = 0
+        self.gen_counter = 0
+        self.completion_times = []
+        self.per_template = None
+        self.block_log = None
+        self.last_block_id = "genesis"
+        self.coord = {c: dict(message_count=0, bytes=0 if c == "block_propagation" else None)
+                      for c in ("block_propagation", "transaction_reconciliation",
+                                "template_announcement", "nonce_allocation", "registration")}
+
+
+def _owner_fn(ranges_all, n):
+    nonempty = [(ranges_all[i][0], ranges_all[i][1], i) for i in range(n)
+                if ranges_all[i][1] >= ranges_all[i][0]]
+    starts = [a for a, b, i in nonempty]
+
+    def owner(q):
+        j = bisect.bisect_right(starts, q) - 1
+        if 0 <= j < len(nonempty):
+            a, b, i = nonempty[j]
+            if a <= q <= b:
+                return i
+        return None
+    return owner
+
+
 def run_scenario(cfg: EngineConfig, emit_log: bool = False, emit_detail: bool = False) -> dict:
     n = cfg.miner_count
-    S = cfg.domain_size()
+    S = int(cfg.domain_size())
     p = cfg.p()
     eff_j_per_hash = cfg.efficiency_j_per_th / HASHES_PER_TH
     shares = _shares(cfg)
@@ -161,362 +236,452 @@ def run_scenario(cfg: EngineConfig, emit_log: bool = False, emit_detail: bool = 
     active_power_w = rates * eff_j_per_hash
     idle_power_w = cfg.idle_power_ratio * active_power_w
 
-    # inactive miners (deterministic selection)
     n_inactive = int(round(cfg.inactive_miner_fraction * n))
     inactive = set(rng(cfg.seed, "inactive_selection").choice(n, n_inactive, replace=False).tolist()) \
         if n_inactive > 0 else set()
     active_ids = [i for i in range(n) if i not in inactive]
-    H_active = float(sum(rates[i] for i in active_ids)) or 1.0
-    # DISTINCT-progress (unique-frontier) rate for exhausted-generation timing:
-    # disjoint scenarios cover distinct candidates in parallel (rate = H_active);
-    # B1 (all miners on one ordered path) advances distinctly only at the fastest
-    # miner's rate. Using H_active for B1 would make exhausted sweeps N x too fast
-    # and inflate block production (5B1A bug). B2 uses H_active as an approximation
-    # (its zero-block is unmodeled; exhaustion is rare at mu>=2).
-    if cfg.scenario_id == "B1":
-        unique_rate = float(max((rates[i] for i in active_ids), default=1.0)) or 1.0
-    else:
-        unique_rate = H_active
 
-    # range allocation (decoupled from rate) over the ASSIGNED domain S
     if DISJOINT[cfg.scenario_id]:
-        if cfg.allocation_policy == "weighted":
-            ranges_all = allocate_weighted(S, list(shares))
-        else:
-            ranges_all = allocate_equal(S, n)
+        ranges_all = (allocate_weighted(S, list(shares)) if cfg.allocation_policy == "weighted"
+                      else allocate_equal(S, n))
     else:
-        ranges_all = [(0, S - 1)] * n     # common non-partitioned domain
+        ranges_all = [(0, S - 1)] * n
 
-    # per-miner accumulators
-    active_t = np.zeros(n); idle_t = np.zeros(n); offline_t = np.zeros(n)
-    searched = np.zeros(n, dtype=np.int64)
-    m_generations = np.zeros(n, dtype=np.int64)       # template generations participated
-    m_range_exhaust = np.zeros(n, dtype=np.int64)     # times this miner finished its range with no solution
-    m_idle_entries = np.zeros(n, dtype=np.int64)      # in-loop idle entries
-    inactive_count = sum((ranges_all[i][1] - ranges_all[i][0] + 1) for i in inactive) if DISJOINT[cfg.scenario_id] else 0
+    acc = _Accum(n)
+    acc.per_template = [] if emit_detail else None
+    acc.block_log = [] if emit_log else None
+    BIG = cfg.simulation_duration_s
 
-    # coordination counters — per message category (Section 10). Only block
-    # propagation is simulated; the other categories are declared with count 0 and
-    # bytes null (not simulated) so nothing is fabricated.
-    coord_cat = {c: dict(message_count=0, bytes=0 if c == "block_propagation" else None)
-                 for c in ("block_propagation", "transaction_reconciliation",
-                           "template_announcement", "nonce_allocation", "registration")}
-    template_refresh_count = 0
-    nonce_allocation_event_count = 0
+    if DISJOINT[cfg.scenario_id]:
+        _sim_disjoint(cfg, n, S, p, rates, active_ids, inactive, ranges_all, BIG,
+                      emit_log, emit_detail, acc)
+    else:
+        _sim_frontier(cfg, n, S, p, rates, active_ids, inactive, BIG,
+                      emit_log, emit_detail, acc)
 
-    per_template = [] if emit_detail else None
-    gen_counter = 0
-    last_block_id = "genesis"
+    return _build_result(cfg, n, S, p, rates, shares, ranges_all, active_ids, inactive,
+                         active_power_w, idle_power_w, BIG, acc, emit_log, emit_detail)
 
-    total_evals = 0.0; distinct_evals = 0.0; duplicate_evals = 0.0
-    accepted = 0; exhausted_rounds = 0; legit_stales = 0
-    r_solpos = rng(cfg.seed, "solution_positions")
+
+# ---------------------------------------------------------------------------
+# Exact disjoint-range simulation (B0, B3/C1, C2)
+# ---------------------------------------------------------------------------
+def _sim_disjoint(cfg, n, S, p, rates, active_ids, inactive, ranges_all, BIG,
+                  emit_log, emit_detail, acc):
+    scen = cfg.scenario_id
+    is_c2 = IDLE[scen]
+    owner = _owner_fn(ranges_all, n)
+    active_set = set(active_ids)
+    S_i = [ranges_all[i][1] - ranges_all[i][0] + 1 for i in range(n)]
+    inactive_count = sum(S_i[i] for i in inactive)
+    # exhausted-generation duration = slowest ACTIVE assigned range (Section 2)
+    D_ex = max((S_i[i] / rates[i] for i in active_ids), default=cfg.target_block_interval_s)
     r_solk = rng(cfg.seed, "solution_count")
-    r_starts = rng(cfg.seed, "miner_starts")
+    r_solpos = rng(cfg.seed, "solution_positions")
     r_delay = rng(cfg.seed, "propagation_delay")
-    completion_times = []          # per-round per-miner nominal completion (for dispersion)
-    block_log = [] if emit_log else None
 
     t = 0.0
-    BIG = cfg.simulation_duration_s
-    active_dom = S - inactive_count if DISJOINT[cfg.scenario_id] else S
     while t < BIG:
-        # ---- one accepted block = possibly several exhausted template generations ----
-        tgen = 0
-        round_start = t
-        while True:
-            nonce_allocation_event_count += 1
-            k = int(r_solk.binomial(S, p))
-            if k > 0:
-                # EXACT uniform sampling without replacement: exactly k distinct
-                # positions (Floyd's algorithm). Replaces np.unique(integers(...,k)),
-                # which could return < k on a collision. Hard invariant below.
-                pos = _exact.sample_without_replacement(r_solpos, S, k)
-                if pos.size != k or np.unique(pos).size != k:
-                    raise RuntimeError(
-                        f"solution-position sampler invariant violated: k={k}, "
-                        f"len={pos.size}, distinct={np.unique(pos).size}")
-                break
-            exhausted_rounds += 1
-            tgen += 1
-            template_refresh_count += 1
-            gen_counter += 1
-            for i in active_ids:
-                m_range_exhaust[i] += 1
-            if emit_detail:
-                per_template.append(dict(
-                    run_id=None, round_id=accepted, template_generation_id=gen_counter,
-                    parent_block_id=last_block_id, template_id=f"tmpl-{gen_counter}",
-                    target=p, mu=cfg.mu, assigned_domain_size=S,
-                    searched_domain_size=active_dom, unsearched_domain_size=S - active_dom,
-                    inactive_domain_size=inactive_count, solution_count=0, finder_count=0,
-                    accepted_block_id=None, exhausted=True, refresh_cause="no_solution_in_domain",
-                    start_time_s=round_start, end_time_s=round_start,
-                    legitimate_competitor_count=0, obsolete_event_rejection_count=0))
-            if tgen > MAX_REFRESH:
-                pos = np.array([], dtype=np.int64)
-                break
-
-        # ---- discovery time per solution, per scenario ----
-        winner_time, winner_id, round_searched, round_total, round_distinct = _discover(
-            cfg, pos, ranges_all, rates, active_ids, S, r_starts, H_active)
-        # generation durations: tgen exhausted generations (full-domain search) + 1 success
-        D_ex = S / unique_rate                     # exhausted-generation duration (unique frontier)
-        gen_success = winner_time
-        round_dur = tgen * D_ex + gen_success
-        if round_dur <= 0:
-            round_dur = cfg.target_block_interval_s
-        cap = BIG - t
-        # ZERO-BLOCK FIX: a block is accepted only if the round COMPLETES within the
-        # horizon. If not, miners spend the remaining time searching (energy still
-        # accrues) but NO block is accepted -> honest zero-block outcome (esp. B1).
-        completed = round_dur <= cap + 1e-9
-        if not completed:
-            scale = (cap / round_dur) if round_dur > 0 else 0.0
-            D_ex *= scale; gen_success *= scale; round_dur = cap
-        # ---- per-miner active/idle (per template generation) ----
-        for i in range(n):
-            if i in inactive:
-                offline_t[i] += round_dur
-                continue
-            m_generations[i] += (tgen + 1)
-            L_i = ranges_all[i][1] - ranges_all[i][0] + 1 if DISJOINT[cfg.scenario_id] else S
-            tau_i = L_i / max(rates[i], 1e-12)     # nominal completion (decoupled from rate)
-            completion_times.append(tau_i)
-            if IDLE[cfg.scenario_id]:
-                a = tgen * min(tau_i, D_ex) + min(tau_i, gen_success)
-                idl = tgen * max(0.0, D_ex - tau_i) + max(0.0, gen_success - tau_i)
-                active_t[i] += a
-                idle_t[i] += idl
-                if idl > 0:
-                    m_idle_entries[i] += 1
-            else:
-                active_t[i] += round_dur            # continuous: refresh, always hashing
-        total_evals += round_total
-        distinct_evals += round_distinct
-        duplicate_evals += (round_total - round_distinct)
-        gen_counter += 1
-        searched_dom = int(min(S, round(round_distinct)))
-
-        if completed:
-            accepted += 1
-            block_id = f"blk-{accepted}"
-            msgs = len(active_ids) - 1 if active_ids else 0
-            coord_cat["block_propagation"]["message_count"] += max(msgs, 0)
-            coord_cat["block_propagation"]["bytes"] += max(msgs, 0) * cfg.block_size_bytes
-            legit = 0
-            if len(pos) >= 2 and active_ids:
-                second = float(np.partition(pos, 1)[1]) / max(rates[winner_id], 1e-12) if winner_id is not None else 0.0
-                delay = float(r_delay.exponential(max(cfg.propagation_delay_mean_s, 1e-12)))
-                if 0 < (second - winner_time) < delay:
-                    legit_stales += 1
-                    legit = 1
-            if emit_detail:
-                per_template.append(dict(
-                    run_id=None, round_id=accepted, template_generation_id=gen_counter,
-                    parent_block_id=last_block_id, template_id=f"tmpl-{gen_counter}",
-                    target=p, mu=cfg.mu, assigned_domain_size=S,
-                    searched_domain_size=searched_dom, unsearched_domain_size=S - searched_dom,
-                    inactive_domain_size=inactive_count, solution_count=int(len(pos)),
-                    finder_count=1 + legit, accepted_block_id=block_id, exhausted=False,
-                    refresh_cause="accepted_block", start_time_s=round_start,
-                    end_time_s=round_start + round_dur, legitimate_competitor_count=legit,
-                    obsolete_event_rejection_count=0))
-            last_block_id = block_id
-            if emit_log:
-                block_log.append(dict(
-                    block_index=accepted, t_start_s=round_start, round_duration_s=round_dur,
-                    winner_id=(int(winner_id) if winner_id is not None else None),
-                    winner_time_s=winner_time, solutions_found=int(len(pos)),
-                    exhausted_generations=tgen, round_total_evaluations=round_total,
-                    round_distinct_evaluations=round_distinct, propagation_messages=max(msgs, 0)))
+        acc.gen_counter += 1
+        acc.nonce_alloc += 1
+        remaining = BIG - t
+        k = int(r_solk.binomial(S, p))
+        if k > 0:
+            pos = _exact.sample_without_replacement(r_solpos, S, k)
+            if pos.size != k or np.unique(pos).size != k:
+                raise RuntimeError(f"sampler invariant: k={k} len={pos.size}")
         else:
-            # incomplete final generation: horizon reached, NO accepted block
-            if emit_detail:
-                per_template.append(dict(
-                    run_id=None, round_id=accepted, template_generation_id=gen_counter,
-                    parent_block_id=last_block_id, template_id=f"tmpl-{gen_counter}",
-                    target=p, mu=cfg.mu, assigned_domain_size=S,
-                    searched_domain_size=searched_dom, unsearched_domain_size=S - searched_dom,
-                    inactive_domain_size=inactive_count, solution_count=int(len(pos)),
-                    finder_count=0, accepted_block_id=None, exhausted=False,
-                    refresh_cause="horizon_reached", start_time_s=round_start,
-                    end_time_s=round_start + round_dur, legitimate_competitor_count=0,
-                    obsolete_event_rejection_count=0))
-        t += round_dur
+            pos = np.empty(0, dtype=np.int64)
+        acc.total_sol += k
 
-    # ---- energy ----
-    active_energy_kwh = float((active_power_w * active_t).sum()) / J_PER_KWH
-    idle_energy_kwh = float((idle_power_w * idle_t).sum()) / J_PER_KWH
-    coordination_energy_kwh = 0.0                  # excluded lower bound (idealized)
+        act_sols = []              # (discovery_time, owner, q)
+        n_inact_sol = 0
+        for q in pos.tolist():
+            ow = owner(q)
+            if ow is None:
+                continue
+            if ow in active_set:
+                act_sols.append(((q - ranges_all[ow][0] + 1) / rates[ow], ow, q))
+            else:
+                n_inact_sol += 1
+        acc.active_sol += len(act_sols)
+        acc.inactive_sol += n_inact_sol
+
+        if not active_ids:
+            status, t_end, winner, q_win = STATUS_NO_ACTIVE, D_ex, None, None
+        elif act_sols:
+            act_sols.sort()
+            t_end, winner, q_win = act_sols[0]
+            status = STATUS_FOUND
+        else:
+            status, t_end, winner, q_win = STATUS_EXHAUSTED, D_ex, None, None
+
+        completed = t_end <= remaining + 1e-9
+        eff_end = t_end if completed else remaining
+        final_status = status if completed else STATUS_PARTIAL
+
+        gen_searched = 0
+        for i in active_ids:
+            acc.m_gen[i] += 1
+            if status == STATUS_FOUND and i == winner and completed:
+                c_i = q_win - ranges_all[i][0] + 1                      # exact integer
+            else:
+                c_i = min(S_i[i], int(math.floor(rates[i] * eff_end)))
+            acc.searched_cum[i] += c_i
+            gen_searched += c_i
+            acc.last_pos[i] = int(ranges_all[i][0] + c_i - 1) if c_i > 0 else None
+            prod_time = c_i / rates[i]
+            acc.productive_t[i] += prod_time
+            acc.completion_times.append(S_i[i] / rates[i])
+            if is_c2:
+                acc.active_t[i] += prod_time
+                idl = eff_end - prod_time
+                if idl > 1e-12:
+                    acc.idle_t[i] += idl
+                    acc.m_idle[i] += 1
+            else:
+                acc.active_t[i] += eff_end                              # continuous power
+            # stop reason (Section 4)
+            if status == STATUS_FOUND and i == winner and completed:
+                acc.stop_reason[i] = "solution_found"
+            elif not completed:
+                acc.stop_reason[i] = "simulation_cutoff"
+            elif c_i >= S_i[i]:
+                acc.stop_reason[i] = "range_exhausted"
+                acc.m_exhaust[i] += 1
+            else:
+                acc.stop_reason[i] = "template_refreshed"
+        for i in inactive:
+            acc.offline_t[i] += eff_end
+            acc.stop_reason[i] = "inactive"
+
+        # disjoint -> distinct == total, duplicate == 0 (exact integers)
+        acc.total_evals += gen_searched
+        acc.distinct_evals += gen_searched
+
+        legit = 0
+        block_id = None
+        if completed and status == STATUS_FOUND:
+            acc.accepted += 1
+            block_id = f"blk-{acc.accepted}"
+            msgs = max(len(active_ids) - 1, 0)
+            acc.coord["block_propagation"]["message_count"] += msgs
+            acc.coord["block_propagation"]["bytes"] += msgs * cfg.block_size_bytes
+            if len(act_sols) >= 2:
+                second_dt = act_sols[1][0]
+                delay = float(r_delay.exponential(max(cfg.propagation_delay_mean_s, 1e-12)))
+                if 0 < (second_dt - t_end) < delay:
+                    acc.legit += 1
+                    legit = 1
+            acc.last_block_id = block_id
+            refresh_cause = "accepted_block"
+        elif completed:
+            acc.exhausted += 1
+            acc.template_refresh += 1
+            refresh_cause = "active_domain_exhausted" if status == STATUS_EXHAUSTED else "no_active_miners"
+        else:
+            acc.partials += 1
+            refresh_cause = "simulation_cutoff"
+
+        if emit_detail:
+            active_completion = D_ex if status != STATUS_FOUND else None
+            acc.per_template.append(dict(
+                run_id=None, round_id=acc.accepted, template_generation_id=acc.gen_counter,
+                parent_block_id=acc.last_block_id, template_id=f"tmpl-{acc.gen_counter}",
+                target=p, mu=cfg.mu, assigned_domain_size=S,
+                searched_domain_size=gen_searched, inactive_domain_size=inactive_count,
+                unsearched_domain_size=S - gen_searched - inactive_count,
+                total_template_solution_count=k, active_range_solution_count=len(act_sols),
+                inactive_range_solution_count=n_inact_sol, discoverable_finder_count=len(act_sols),
+                solution_count=k, finder_count=(1 + legit if block_id else 0),
+                accepted_block_id=block_id, exhausted=(status != STATUS_FOUND),
+                status=final_status, refresh_cause=refresh_cause,
+                start_time_s=t, end_time_s=t + eff_end, duration_s=eff_end,
+                exhausted_time_s=(eff_end if status == STATUS_EXHAUSTED else 0.0),
+                active_domain_completion_time_s=active_completion,
+                partial_cutoff_time_s=(eff_end if not completed else None),
+                legitimate_competitor_count=legit, obsolete_event_rejection_count=0))
+        if emit_log and block_id:
+            acc.block_log.append(dict(
+                block_index=acc.accepted, t_start_s=t, duration_s=eff_end,
+                winner_id=int(winner), winner_time_s=t_end, solutions_found=k,
+                active_solutions=len(act_sols), inactive_solutions=n_inact_sol,
+                propagation_messages=max(len(active_ids) - 1, 0)))
+        t += eff_end
+        if not completed:
+            break
+
+
+# ---------------------------------------------------------------------------
+# Frontier simulation (B1 common-from-zero, B2 seeded random starts)
+# ---------------------------------------------------------------------------
+def _sim_frontier(cfg, n, S, p, rates, active_ids, inactive, BIG, emit_log, emit_detail, acc):
+    scen = cfg.scenario_id
+    unique_rate = (float(max((rates[i] for i in active_ids), default=1.0)) if scen == "B1"
+                   else float(sum(rates[i] for i in active_ids)) or 1.0)
+    D_ex = S / (unique_rate or 1.0)
+    r_solk = rng(cfg.seed, "solution_count")
+    r_solpos = rng(cfg.seed, "solution_positions")
+    r_starts = rng(cfg.seed, "miner_starts")
+    r_delay = rng(cfg.seed, "propagation_delay")
+    max_rate = float(max((rates[i] for i in active_ids), default=1.0))
+
+    t = 0.0
+    while t < BIG:
+        acc.gen_counter += 1
+        acc.nonce_alloc += 1
+        remaining = BIG - t
+        k = int(r_solk.binomial(S, p))
+        if k > 0:
+            pos = _exact.sample_without_replacement(r_solpos, S, k)
+        else:
+            pos = np.empty(0, dtype=np.int64)
+        acc.total_sol += k
+
+        rates_list = [float(rates[i]) for i in active_ids]
+        starts_list = ([int(r_starts.integers(0, S)) for _ in active_ids]
+                       if scen == "B2" else None)
+        if not active_ids:
+            status, t_end, winner = STATUS_NO_ACTIVE, D_ex, None
+        elif k == 0:
+            status, t_end, winner = STATUS_EXHAUSTED, D_ex, None
+        elif scen == "B1":
+            winner = active_ids[int(np.argmax([rates[i] for i in active_ids]))]
+            t_end = float(pos.min() + 1) / max_rate
+            status = STATUS_FOUND
+        else:  # B2
+            wt, widx = _cov.b2_winner(pos, starts_list, rates_list, S)
+            if widx is None or not math.isfinite(wt):
+                status, t_end, winner = STATUS_EXHAUSTED, D_ex, None
+            else:
+                winner, t_end, status = active_ids[widx], wt, STATUS_FOUND
+
+        completed = t_end <= remaining + 1e-9
+        eff_end = t_end if completed else remaining
+        final_status = status if completed else STATUS_PARTIAL
+
+        # per-miner integer candidate counts
+        gen_total = 0
+        for i in active_ids:
+            acc.m_gen[i] += 1
+            c_i = min(S, int(math.floor(rates[i] * eff_end)))
+            acc.searched_cum[i] += c_i
+            gen_total += c_i
+            acc.last_pos[i] = int(c_i - 1) if c_i > 0 else None
+            acc.productive_t[i] += c_i / rates[i]
+            acc.active_t[i] += eff_end                    # continuous power
+            acc.completion_times.append(S / rates[i])
+            acc.stop_reason[i] = ("solution_found" if (status == STATUS_FOUND and i == winner and completed)
+                                  else "simulation_cutoff" if not completed
+                                  else "template_refreshed" if status == STATUS_FOUND
+                                  else "range_exhausted")
+            if status == STATUS_EXHAUSTED and completed:
+                acc.m_exhaust[i] += 1
+        for i in inactive:
+            acc.offline_t[i] += eff_end
+            acc.stop_reason[i] = "inactive"
+
+        # distinct coverage (uniform across status): B1 miners all start at 0 so they
+        # overlap (distinct = fastest coverage); B2 uses the exact circular union.
+        if not active_ids:
+            gen_distinct = 0
+        elif scen == "B1":
+            gen_distinct = min(S, int(math.floor(max_rate * eff_end)))
+        else:  # B2 exact circular union over the swept arcs
+            lengths = _cov.lengths_from_winner_time(eff_end, rates_list, S)
+            covx = _cov.b2_coverage_exact(starts_list, lengths, S)
+            gen_total = int(covx["total_candidate_evaluations"])
+            gen_distinct = int(covx["distinct_candidate_evaluations"])
+
+        acc.total_evals += gen_total
+        acc.distinct_evals += gen_distinct
+        acc.duplicate_evals += (gen_total - gen_distinct)
+
+        legit = 0
+        block_id = None
+        if completed and status == STATUS_FOUND:
+            acc.accepted += 1
+            block_id = f"blk-{acc.accepted}"
+            msgs = max(len(active_ids) - 1, 0)
+            acc.coord["block_propagation"]["message_count"] += msgs
+            acc.coord["block_propagation"]["bytes"] += msgs * cfg.block_size_bytes
+            if len(pos) >= 2:
+                second = float(np.partition(pos, 1)[1] + 1) / max_rate
+                delay = float(r_delay.exponential(max(cfg.propagation_delay_mean_s, 1e-12)))
+                if 0 < (second - t_end) < delay:
+                    acc.legit += 1
+                    legit = 1
+            acc.last_block_id = block_id
+            refresh_cause = "accepted_block"
+        elif completed:
+            acc.exhausted += 1
+            acc.template_refresh += 1
+            refresh_cause = "active_domain_exhausted"
+        else:
+            acc.partials += 1
+            refresh_cause = "simulation_cutoff"
+
+        if emit_detail:
+            acc.per_template.append(dict(
+                run_id=None, round_id=acc.accepted, template_generation_id=acc.gen_counter,
+                parent_block_id=acc.last_block_id, template_id=f"tmpl-{acc.gen_counter}",
+                target=p, mu=cfg.mu, assigned_domain_size=S,
+                searched_domain_size=min(S, gen_distinct), inactive_domain_size=0,
+                unsearched_domain_size=S - min(S, gen_distinct),
+                total_template_solution_count=k, active_range_solution_count=k,
+                inactive_range_solution_count=0, discoverable_finder_count=k,
+                solution_count=k, finder_count=(1 + legit if block_id else 0),
+                accepted_block_id=block_id, exhausted=(status != STATUS_FOUND),
+                status=final_status, refresh_cause=refresh_cause,
+                start_time_s=t, end_time_s=t + eff_end, duration_s=eff_end,
+                exhausted_time_s=(eff_end if status == STATUS_EXHAUSTED else 0.0),
+                active_domain_completion_time_s=(D_ex if status == STATUS_EXHAUSTED else None),
+                partial_cutoff_time_s=(eff_end if not completed else None),
+                legitimate_competitor_count=legit, obsolete_event_rejection_count=0))
+        if emit_log and block_id:
+            acc.block_log.append(dict(
+                block_index=acc.accepted, t_start_s=t, duration_s=eff_end,
+                winner_id=int(winner), winner_time_s=t_end, solutions_found=k,
+                propagation_messages=max(len(active_ids) - 1, 0)))
+        t += eff_end
+        if not completed:
+            break
+
+
+# ---------------------------------------------------------------------------
+# Result construction
+# ---------------------------------------------------------------------------
+def _build_result(cfg, n, S, p, rates, shares, ranges_all, active_ids, inactive,
+                  active_power_w, idle_power_w, BIG, acc, emit_log, emit_detail):
+    scen = cfg.scenario_id
+    active_energy_kwh = float((active_power_w * acc.active_t).sum()) / J_PER_KWH
+    idle_energy_kwh = float((idle_power_w * acc.idle_t).sum()) / J_PER_KWH
+    coordination_energy_kwh = 0.0
     total_energy_kwh = active_energy_kwh + idle_energy_kwh + coordination_energy_kwh
 
-    dup_rate = (duplicate_evals / total_evals) if total_evals else 0.0
-    comp = np.array(completion_times) if completion_times else np.array([0.0])
+    # candidate-count reconciliation is EXACT integer arithmetic
+    assert acc.total_evals == acc.distinct_evals + acc.duplicate_evals
+    dup_rate = (acc.duplicate_evals / acc.total_evals) if acc.total_evals else 0.0
+    comp = np.array(acc.completion_times) if acc.completion_times else np.array([0.0])
+    inactive_count = sum((ranges_all[i][1] - ranges_all[i][0] + 1) for i in inactive) \
+        if DISJOINT[scen] else 0
 
-    # ---- coordination category counters (Section 10): block propagation is truly
-    # simulated (count + bytes); other categories are counted abstractly, bytes null.
-    n_generations = gen_counter
-    scen = cfg.scenario_id
-    coord_cat["nonce_allocation"]["message_count"] = n_generations if DISJOINT[scen] else 0
-    coord_cat["template_announcement"]["message_count"] = n_generations if COMMON_TEMPLATE[scen] else 0
-    coord_cat["transaction_reconciliation"]["message_count"] = accepted if AGREEMENT[scen] else 0
-    coord_cat["registration"]["message_count"] = len(active_ids) if COMMON_TEMPLATE[scen] else 0
+    n_gen = acc.gen_counter
+    acc.coord["nonce_allocation"]["message_count"] = n_gen if DISJOINT[scen] else 0
+    acc.coord["template_announcement"]["message_count"] = n_gen if COMMON_TEMPLATE[scen] else 0
+    acc.coord["transaction_reconciliation"]["message_count"] = acc.accepted if AGREEMENT[scen] else 0
+    acc.coord["registration"]["message_count"] = len(active_ids) if COMMON_TEMPLATE[scen] else 0
     cat_flat = {}
-    for c, v in coord_cat.items():
+    for c, v in acc.coord.items():
         cat_flat[f"{c}_message_count"] = v["message_count"]
-        cat_flat[f"{c}_bytes"] = v["bytes"]                    # null for all but block_propagation
+        cat_flat[f"{c}_bytes"] = v["bytes"]
 
-    # ---- NA-aware block metrics (Section 4): undefined => null + reason ----
-    has_blocks = accepted > 0
+    has_blocks = acc.accepted > 0
     block_na = None if has_blocks else "no_accepted_blocks"
+    non_productive_active = float((acc.active_t - acc.productive_t).clip(min=0).sum())
 
     result = dict(
         output_schema_version=OUTPUT_SCHEMA_VERSION, engine_version=ENGINE_VERSION,
-        scenario_id=cfg.scenario_id, seed=cfg.seed, miners=n, domain_size=S, p=p, mu=cfg.mu,
+        scenario_id=scen, seed=cfg.seed, miners=n, domain_size=S, p=p, mu=cfg.mu,
         allocation_policy=cfg.allocation_policy, hash_rate_distribution=cfg.hash_rate_distribution,
         idle_power_ratio=cfg.idle_power_ratio, inactive_fraction=cfg.inactive_miner_fraction,
-        # primary outcomes
         total_energy_kwh=total_energy_kwh, active_energy_kwh=active_energy_kwh,
         idle_energy_kwh=idle_energy_kwh, coordination_energy_kwh=coordination_energy_kwh,
-        accepted_blocks=accepted,
-        block_metrics_defined=has_blocks,
-        effective_block_interval_s=((BIG / accepted) if has_blocks else None),
+        accepted_blocks=acc.accepted, block_metrics_defined=has_blocks,
+        effective_block_interval_s=((BIG / acc.accepted) if has_blocks else None),
         effective_block_interval_na_reason=block_na,
-        energy_per_accepted_block_kwh=((total_energy_kwh / accepted) if has_blocks else None),
+        energy_per_accepted_block_kwh=((total_energy_kwh / acc.accepted) if has_blocks else None),
         energy_per_accepted_block_na_reason=block_na,
-        # throughput numerator is genuinely zero when no blocks -> 0.0 is a real value
-        throughput_blocks_per_s=(accepted / BIG if BIG else 0.0),
-        # transactions are not modelled -> per-transaction metrics are NA by design
+        throughput_blocks_per_s=(acc.accepted / BIG if BIG else 0.0),
         energy_per_transaction_kwh=None,
         energy_per_transaction_na_reason="no_committed_transactions",
-        confirmation_time_proxy_s=((BIG / accepted) if has_blocks else None),
+        confirmation_time_proxy_s=((BIG / acc.accepted) if has_blocks else None),
         confirmation_time_proxy_na_reason=block_na,
-        legitimate_stale_rate=((legit_stales / accepted) if has_blocks else None),
+        legitimate_stale_rate=((acc.legit / acc.accepted) if has_blocks else None),
         legitimate_stale_rate_na_reason=(None if has_blocks else "no_valid_proposals"),
-        legitimate_stale_count=legit_stales,
-        duplicate_evaluation_rate=dup_rate, exhausted_rounds=exhausted_rounds,
-        # domain / coverage
-        total_candidate_evaluations=total_evals, distinct_candidate_identities=distinct_evals,
-        duplicate_evaluations=duplicate_evals,
+        legitimate_stale_count=acc.legit,
+        duplicate_evaluation_rate=dup_rate, exhausted_rounds=acc.exhausted,
+        partial_generations=acc.partials,
+        # EXACT integer candidate counts (Python ints)
+        total_candidate_evaluations=acc.total_evals,
+        distinct_candidate_identities=acc.distinct_evals,
+        duplicate_evaluations=acc.duplicate_evals,
+        # solution accounting (Section 1.6)
+        total_template_solution_count=acc.total_sol,
+        active_range_solution_count=acc.active_sol,
+        inactive_range_solution_count=acc.inactive_sol,
+        discoverable_finder_count=acc.active_sol,
         # time
-        total_active_time_s=float(active_t.sum()), total_idle_time_s=float(idle_t.sum()),
-        total_offline_time_s=float(offline_t.sum()),
+        total_active_time_s=float(acc.active_t.sum()), total_idle_time_s=float(acc.idle_t.sum()),
+        total_offline_time_s=float(acc.offline_t.sum()),
+        total_productive_search_time_s=float(acc.productive_t.sum()),
+        non_productive_active_time_s=non_productive_active,
         completion_time_mean_s=float(comp.mean()), completion_time_std_s=float(comp.std()),
-        # coordination (legacy flat keys kept for back-compat) + categorized keys
-        coord_block_propagation_message_count=coord_cat["block_propagation"]["message_count"],
-        coord_block_propagation_bytes=coord_cat["block_propagation"]["bytes"],
-        coord_simulated_message_count=coord_cat["block_propagation"]["message_count"],
-        coord_simulated_message_bytes=coord_cat["block_propagation"]["bytes"],
-        coord_template_refresh_count=template_refresh_count,      # == exhausted_rounds
-        coord_nonce_allocation_event_count=nonce_allocation_event_count,
-        template_generations=n_generations,
+        template_generations=n_gen,
+        coord_block_propagation_message_count=acc.coord["block_propagation"]["message_count"],
+        coord_block_propagation_bytes=acc.coord["block_propagation"]["bytes"],
+        coord_simulated_message_count=acc.coord["block_propagation"]["message_count"],
+        coord_simulated_message_bytes=acc.coord["block_propagation"]["bytes"],
+        coord_template_refresh_count=acc.template_refresh,
+        coord_nonce_allocation_event_count=acc.nonce_alloc,
         **cat_flat,
-        # abstract (unimplemented) protocol activity: counts only, never bytes.
-        abstract_template_agreement_operations=(accepted if AGREEMENT[cfg.scenario_id] else 0),
-        abstract_transaction_reconciliation_operations=(accepted if AGREEMENT[cfg.scenario_id] else 0),
-        unimplemented_agreement_energy_kwh=None,             # NOT measured (null, not zero)
-        coordination_energy_lower_bound_kwh=0.0,             # explicit idealized lower bound
-        inactive_domain=inactive_count, common_template=COMMON_TEMPLATE[cfg.scenario_id],
-        idle_policy=IDLE[cfg.scenario_id],
-        # in-loop idle state-transition reasons (section 10.6)
-        idle_enter_reason=("range_exhausted_no_solution" if IDLE[cfg.scenario_id] else None),
-        idle_leave_reason=("new_template_generation_or_accepted_block" if IDLE[cfg.scenario_id] else None),
+        abstract_template_agreement_operations=(acc.accepted if AGREEMENT[scen] else 0),
+        abstract_transaction_reconciliation_operations=(acc.accepted if AGREEMENT[scen] else 0),
+        unimplemented_agreement_energy_kwh=None,
+        coordination_energy_lower_bound_kwh=0.0,
+        inactive_domain=inactive_count, common_template=COMMON_TEMPLATE[scen],
+        idle_policy=IDLE[scen],
+        idle_enter_reason=("range_exhausted_no_solution" if IDLE[scen] else None),
+        idle_leave_reason=("new_template_generation_or_accepted_block" if IDLE[scen] else None),
     )
     if emit_log:
-        result["block_log"] = block_log
+        result["block_log"] = acc.block_log
     if emit_detail:
-        result["per_miner"] = _build_per_miner(
-            cfg, n, rates, shares, ranges_all, inactive, active_power_w, idle_power_w,
-            active_t, idle_t, offline_t, m_generations, m_range_exhaust, m_idle_entries)
-        result["per_template"] = per_template
+        result["per_miner"] = _build_per_miner(cfg, n, rates, shares, ranges_all, inactive,
+                                               active_power_w, idle_power_w, acc, S)
+        result["per_template"] = acc.per_template
     return result
 
 
 def _build_per_miner(cfg, n, rates, shares, ranges_all, inactive, active_power_w,
-                     idle_power_w, active_t, idle_t, offline_t, m_generations,
-                     m_range_exhaust, m_idle_entries):
-    """Per-miner summary rows (Section 6). Sums reconcile to the network totals by
-    construction (built from the same accumulators)."""
+                     idle_power_w, acc, S):
     disjoint = DISJOINT[cfg.scenario_id]
     out = []
     for i in range(n):
         a, b = ranges_all[i]
-        L_i = (b - a + 1) if disjoint else int(cfg.domain_size())
+        L_i = (b - a + 1) if disjoint else int(S)
         is_inactive = i in inactive
-        searched = 0 if is_inactive else L_i           # active miner covers its range each generation
-        state = "offline" if is_inactive else ("idled" if m_idle_entries[i] > 0 else "active")
+        searched = 0 if is_inactive else int(acc.searched_cum[i])
+        inactive_cand = L_i if (is_inactive and disjoint) else 0
+        # generation-level remaining is per-template; the cumulative here reflects total work
+        remaining_unsearched = (0 if is_inactive else max(0, L_i - (searched % L_i if L_i else 0))) \
+            if disjoint else None
+        state = "offline" if is_inactive else ("idled" if acc.m_idle[i] > 0 else "active")
         reasons = {}
-        if m_range_exhaust[i]:
-            reasons["range_exhausted_no_solution"] = int(m_range_exhaust[i])
-        if m_idle_entries[i]:
-            reasons["entered_idle"] = int(m_idle_entries[i])
+        if acc.m_exhaust[i]:
+            reasons["range_exhausted"] = int(acc.m_exhaust[i])
+        if acc.m_idle[i]:
+            reasons["entered_idle"] = int(acc.m_idle[i])
         out.append(dict(
             run_id=None, miner_id=i, hash_rate_hps=float(rates[i]),
             hash_rate_share=float(shares[i]), allocation_policy=cfg.allocation_policy,
             range_start=int(a), range_end=int(b), range_size=int(L_i) if disjoint else None,
-            searched_count=int(searched) if disjoint else None,
-            unsearched_count=int(L_i - searched) if disjoint else None,
-            inactive_count=(L_i if (is_inactive and disjoint) else 0),
-            active_time_s=float(active_t[i]), idle_time_s=float(idle_t[i]),
-            offline_time_s=float(offline_t[i]),
-            active_energy_kwh=float(active_power_w[i] * active_t[i]) / J_PER_KWH,
-            idle_energy_kwh=float(idle_power_w[i] * idle_t[i]) / J_PER_KWH,
-            template_generations_participated=int(m_generations[i]),
-            range_exhaustion_count=int(m_range_exhaust[i]),
-            idle_entry_count=int(m_idle_entries[i]), final_state=state,
+            search_start_position=int(a) if disjoint else 0,
+            candidates_evaluated=searched,
+            searched_count=searched,
+            last_evaluated_position=acc.last_pos[i],
+            unsearched_count=(int(L_i - min(searched, L_i)) if disjoint else None),
+            remaining_unsearched=remaining_unsearched,
+            inactive_count=inactive_cand,
+            active_time_s=float(acc.active_t[i]), idle_time_s=float(acc.idle_t[i]),
+            offline_time_s=float(acc.offline_t[i]),
+            productive_search_time_s=float(acc.productive_t[i]),
+            active_energy_kwh=float(active_power_w[i] * acc.active_t[i]) / J_PER_KWH,
+            idle_energy_kwh=float(idle_power_w[i] * acc.idle_t[i]) / J_PER_KWH,
+            template_generations_participated=int(acc.m_gen[i]),
+            range_exhaustion_count=int(acc.m_exhaust[i]),
+            idle_entry_count=int(acc.m_idle[i]), final_state=state,
+            completion_status=(acc.stop_reason[i] or "inactive"),
+            stop_reason=(acc.stop_reason[i] or "inactive"),
             state_transition_reason_counts=reasons))
     return out
-
-
-def _discover(cfg, pos, ranges_all, rates, active_ids, S, r_starts, H_active):
-    """Return (winner_time, winner_id, per_round_searched, round_total, round_distinct)."""
-    scen = cfg.scenario_id
-    if len(pos) == 0:
-        # exhausted with no winner in this generation: nominal full-domain search time
-        return S / H_active, (active_ids[0] if active_ids else None), None, 0.0, 0.0
-    if DISJOINT[scen]:
-        # B0 (independent templates) and B3/C1/C2 (disjoint ranges) both achieve
-        # full-parallel, non-redundant coverage -> same discovery physics here.
-        # position lies in exactly one miner's range
-        best_t = math.inf; best_id = None
-        starts = {i: ranges_all[i][0] for i in range(len(rates))}
-        for q in pos:
-            owner = None
-            for i in active_ids:
-                a, b = ranges_all[i]
-                if a <= q <= b:
-                    owner = i; break
-            if owner is None:
-                continue
-            tt = (q - starts[owner]) / max(rates[owner], 1e-12)
-            if tt < best_t:
-                best_t = tt; best_id = owner
-        if best_id is None:
-            return S / H_active, (active_ids[0] if active_ids else None), None, 0.0, 0.0
-        total = best_t * float(sum(rates[i] for i in active_ids))     # continuous parallel search
-        distinct = total                                             # disjoint -> no duplicates
-        return best_t, best_id, None, total, distinct
-    if scen == "B1":
-        # all from 0; fastest miner reaches lowest position first
-        rmax = max(rates[i] for i in active_ids); wid = active_ids[int(np.argmax([rates[i] for i in active_ids]))]
-        winner_time = float(pos.min()) / rmax
-        total = winner_time * float(sum(rates[i] for i in active_ids))
-        distinct = winner_time * rmax                # only the fastest miner's coverage is distinct
-        return winner_time, wid, None, total, distinct
-    if scen == "B2":
-        # random starts, single forward traversal; EXACT circular interval-union
-        # coverage (coverage.py). Integer candidate counts, no domain enumeration.
-        starts_list = [int(r_starts.integers(0, S)) for _ in active_ids]
-        rates_list = [float(rates[i]) for i in active_ids]
-        winner_time, widx = _cov.b2_winner(pos, starts_list, rates_list, S)
-        if widx is None or not math.isfinite(winner_time):
-            return S / H_active, (active_ids[0] if active_ids else None), None, 0.0, 0.0
-        best_id = active_ids[widx]
-        lengths = _cov.lengths_from_winner_time(winner_time, rates_list, S)
-        cov = _cov.b2_coverage_exact(starts_list, lengths, S)
-        return (winner_time, best_id, None,
-                float(cov["total_candidate_evaluations"]),
-                float(cov["distinct_candidate_evaluations"]))
-    # fallback
-    return S / H_active, active_ids[0], None, 0.0, 0.0

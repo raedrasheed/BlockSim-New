@@ -1,0 +1,23 @@
+{
+  "accepted": 13,
+  "checks": {
+    "block": true,
+    "candidate": true,
+    "domain": true,
+    "energy": true,
+    "inactive_range": true,
+    "time": true
+  },
+  "energy": 7.157708333333333,
+  "scenario": {
+    "allocation_policy": "equal",
+    "hash_rate_distribution": "homogeneous",
+    "idle_power_ratio": 0.1,
+    "inactive_miner_fraction": 0.15,
+    "miner_count": 100,
+    "mu": 2.0,
+    "scenario_id": "C2",
+    "seed": 1
+  },
+  "status": "COMPLETED"
+}

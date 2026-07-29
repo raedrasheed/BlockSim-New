@@ -1,0 +1,84 @@
+{
+  "homogeneous_full_participation_equivalence": {
+    "all_energy_equal": true,
+    "all_blocks_equal": true,
+    "b0_no_duplicates": true,
+    "b0_no_agreement_ops": true,
+    "samples": [
+      {
+        "N": 100,
+        "seed": 1,
+        "energy_equal": true,
+        "blocks_equal": true,
+        "b0_dup": 0,
+        "b0_agreement_ops": 0
+      },
+      {
+        "N": 100,
+        "seed": 2,
+        "energy_equal": true,
+        "blocks_equal": true,
+        "b0_dup": 0,
+        "b0_agreement_ops": 0
+      },
+      {
+        "N": 100,
+        "seed": 3,
+        "energy_equal": true,
+        "blocks_equal": true,
+        "b0_dup": 0,
+        "b0_agreement_ops": 0
+      },
+      {
+        "N": 300,
+        "seed": 1,
+        "energy_equal": true,
+        "blocks_equal": true,
+        "b0_dup": 0,
+        "b0_agreement_ops": 0
+      },
+      {
+        "N": 300,
+        "seed": 2,
+        "energy_equal": true,
+        "blocks_equal": true,
+        "b0_dup": 0,
+        "b0_agreement_ops": 0
+      },
+      {
+        "N": 300,
+        "seed": 3,
+        "energy_equal": true,
+        "blocks_equal": true,
+        "b0_dup": 0,
+        "b0_agreement_ops": 0
+      },
+      {
+        "N": 500,
+        "seed": 1,
+        "energy_equal": true,
+        "blocks_equal": true,
+        "b0_dup": 0,
+        "b0_agreement_ops": 0
+      },
+      {
+        "N": 500,
+        "seed": 2,
+        "energy_equal": true,
+        "blocks_equal": true,
+        "b0_dup": 0,
+        "b0_agreement_ops": 0
+      },
+      {
+        "N": 500,
+        "seed": 3,
+        "energy_equal": true,
+        "blocks_equal": true,
+        "b0_dup": 0,
+        "b0_agreement_ops": 0
+      }
+    ]
+  },
+  "boundary_note": "Under the current disjoint-partition abstraction, B0 equals B3 only for homogeneous full participation. With inactive miners the partitioned domain leaves inactive ranges unsearched (energy scales with active fraction), which a true per-miner independent-template model would not; B0 is therefore run only under homogeneous full participation in the frozen matrix.",
+  "b0_inactive30_energy": 5.894583333333333
+}
