@@ -1,0 +1,14 @@
+{
+  "regime": "thesis",
+  "S": "169200000000000000",
+  "p": "1.182033096926713948e-17",
+  "mu": 2.0,
+  "binom_P0": "0.135335283236612690294291655296",
+  "pois_P0": "0.135335283236612691893999494972",
+  "true_abs_diff": "1.5997078e-18",
+  "lecam_bound_Sp2": "2.3640662e-17",
+  "inequality_holds": true,
+  "float64_noise_floor": "3.005e-17",
+  "leading_order": "1.5997078e-18",
+  "convention": "d_TV(sum Bernoulli(p_i), Poisson(sum p_i)) <= sum p_i^2 (Le Cam); homogeneous sum p_i^2 = S p^2 = mu p"
+}

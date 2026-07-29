@@ -1,0 +1,30 @@
+{
+  "scenario_id": "B1",
+  "seed": 20260202,
+  "miners": 100,
+  "domain_size": 10000,
+  "config_hash": "0fe08d22c8d1caed",
+  "total_candidate_evaluations": 10000,
+  "distinct_candidate_identities": 100,
+  "duplicate_evaluations": 9900,
+  "duplicate_rate": 0.99,
+  "overlap_headers": 100,
+  "unsearched_candidates": 9900,
+  "active_energy_kwh": 5.972222222222228e-14,
+  "idle_energy_kwh": 0.0,
+  "coordination_energy_kwh": 0.0,
+  "total_energy_kwh": 5.972222222222228e-14,
+  "total_active_time_s": 10000.0,
+  "total_idle_time_s": 0.0,
+  "finders": 0,
+  "idle_policy": false,
+  "common_template": true,
+  "tag": "B1_N100_s20260202",
+  "exec_model": "direct_coverage_model",
+  "git": "9e8040b7a62b5d11774ebeb8d7917531e7af549d",
+  "reconciliations": {
+    "B_candidate": true,
+    "A_energy": true,
+    "F_time": true
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "scenario_id": "C2",
+  "seed": 20260201,
+  "miners": 500,
+  "domain_size": 50000,
+  "config_hash": "5af0510cb870f9c3",
+  "total_candidate_evaluations": 49758,
+  "distinct_candidate_identities": 49758,
+  "duplicate_evaluations": 0,
+  "duplicate_rate": 0.0,
+  "overlap_headers": 0,
+  "unsearched_candidates": 242,
+  "active_energy_kwh": 2.9716642338504783e-13,
+  "idle_energy_kwh": 1.444687726062874e-16,
+  "coordination_energy_kwh": 0.0,
+  "total_energy_kwh": 2.9731089215765413e-13,
+  "total_active_time_s": 49688.40690482345,
+  "total_idle_time_s": 311.59309517654304,
+  "finders": 3,
+  "idle_policy": true,
+  "common_template": true,
+  "tag": "C2het_weighted_N500_s20260201",
+  "exec_model": "direct_coverage_model",
+  "git": "9e8040b7a62b5d11774ebeb8d7917531e7af549d",
+  "reconciliations": {
+    "B_candidate": true,
+    "A_energy": "True",
+    "F_time": "True"
+  }
+}

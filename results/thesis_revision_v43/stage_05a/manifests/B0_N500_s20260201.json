@@ -1,0 +1,19 @@
+{
+  "tag": "B0_N500_s20260201",
+  "exec_model": "bitcoin_independent_pow",
+  "model": 1,
+  "miners": 500,
+  "seed": 20260201,
+  "git": "9e8040b7a62b5d11774ebeb8d7917531e7af549d",
+  "start_utc": "2026-07-29T11:07:40.649635+00:00",
+  "wall_s": 1.7,
+  "rc": 0,
+  "total_blocks": "15",
+  "main_blocks": "15",
+  "stale_blocks": "0",
+  "stale_pct": "0",
+  "total_energy_kwh": "8.420833333333418",
+  "out_xlsx_sha256": "15a9c9180cb11fc40e2954193f9ae801434aca673fc473cba9c6319577eddba7",
+  "diag": null,
+  "reconciliations": {}
+}

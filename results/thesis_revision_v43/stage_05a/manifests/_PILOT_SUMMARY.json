@@ -1,0 +1,15 @@
+{
+  "pilot_runs": 72,
+  "git": "9e8040b7a62b5d11774ebeb8d7917531e7af549d",
+  "seeds": [
+    20260201,
+    20260202,
+    20260203
+  ],
+  "reconciliations_total": 198,
+  "reconciliations_passed": 198,
+  "all_reconciliations_pass": true,
+  "fullsim_runs": 36,
+  "direct_runs": 36,
+  "max_wall_s": 3.05
+}
