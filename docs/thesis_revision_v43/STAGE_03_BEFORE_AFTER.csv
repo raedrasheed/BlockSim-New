@@ -1,0 +1,6 @@
+miners,old_stale_pct_thesis,corrected_legit_stale_pct,mean_legit_stales,obsolete_rejections,obsolete_rejection_rate,mean_accepted_blocks,mean_exhausted_rounds,mean_template_refreshes,mean_queue_peak,mean_scheduled_events,mean_runtime_s,seeds,explanation
+100,35.71,0.0,0,19.4,0.5449,16.2,2.4,2.4,106,35.6,1.1,5,Old stale rate was obsolete finder events (loser miners credited with blocks they could not find); corrected value is legitimate propagation competition only.
+200,68.14,0.0,0,23.667,0.568,18,3.333,3.333,207.667,41.667,1.62,3,Old stale rate was obsolete finder events (loser miners credited with blocks they could not find); corrected value is legitimate propagation competition only.
+300,78.4,0.0,0,15,0.4737,16.667,3.333,3.333,306,31.667,2.06,3,Old stale rate was obsolete finder events (loser miners credited with blocks they could not find); corrected value is legitimate propagation competition only.
+400,82.75,0.0,0,26.333,0.603,17.333,2.667,2.667,408.667,43.667,2.73,3,Old stale rate was obsolete finder events (loser miners credited with blocks they could not find); corrected value is legitimate propagation competition only.
+500,85.67,0.0,0,22.2,0.5904,15.4,3.2,3.2,518.8,37.6,2.89,5,Old stale rate was obsolete finder events (loser miners credited with blocks they could not find); corrected value is legitimate propagation competition only.

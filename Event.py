@@ -12,11 +12,15 @@ class Event(object):
         :param float time: the simulation time in which the event will be executed at
         :param obj block: the event content "block" to be generated or received
     """
-    def __init__(self, type, node, time, block):
+    def __init__(self, type, node, time, block, meta=None):
         self.type = type
         self.node = node
         self.time = float(time)
         self.block = block
+
+        # Stage 3: optional immutable event-identity metadata (EventIdentity).
+        # Default None keeps all non-PoCol models unaffected.
+        self.meta = meta
 
         # tie-breaker sequence number assigned by Queue.add_event
         self._seq = 0

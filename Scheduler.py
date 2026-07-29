@@ -24,20 +24,30 @@ if p.model == MODEL_APPENDABLE:
 class Scheduler:
 
     @staticmethod
-    def create_block_event(miner, eventTime):
-        """Schedule a block creation event for a miner."""
+    def create_block_event(miner, eventTime, parent_id=None, depth=None, meta=None):
+        """Schedule a block creation event for a miner.
+
+        Stage 3: optional explicit ``parent_id``/``depth`` let the PoCol
+        finder-based scheduler stamp a block onto a specific round parent (rather
+        than the miner's possibly-stale local tip), and ``meta`` attaches the
+        immutable EventIdentity. All defaults preserve the original behaviour for
+        the Bitcoin/base models.
+        """
         if eventTime is None:
-            return
+            return None
         if eventTime <= p.simTime:
             block = Block()
             block.miner = miner.id
-            block.depth = len(miner.blockchain)
+            block.depth = depth if depth is not None else len(miner.blockchain)
             block.id = random.randrange(100000000000)
-            block.previous = miner.last_block().id
+            block.previous = parent_id if parent_id is not None else miner.last_block().id
             block.timestamp = float(eventTime)
+            block.meta = meta
 
-            event = Event("create_block", block.miner, float(eventTime), block)
+            event = Event("create_block", block.miner, float(eventTime), block, meta=meta)
             Queue.add_event(event)
+            return block
+        return None
 
     @staticmethod
     def receive_block_event(recipient, block, blockDelay):

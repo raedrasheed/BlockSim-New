@@ -1,0 +1,20 @@
+{
+  "tag": "PoW_N100_seed1",
+  "protocol": "PoW",
+  "model": 1,
+  "miners": 100,
+  "seed": 1,
+  "git": "65e3d7edc2bd3e7330432d77b49b5192d1d1c9a3",
+  "start_utc": "2026-07-29T09:50:18.553427+00:00",
+  "wall_s": 1.07,
+  "rc": 0,
+  "python": "3.11.15",
+  "out_xlsx": "PoW_N100_seed1__Bitcoin_20260729_095019_(Allverify)1day_1e-06M_0.003K_run0.xlsx",
+  "out_xlsx_sha256": "f3c3911cd53e988f9f87e5cc0a3e570549406dcc085d4d27a299ee2e0b5ae54b",
+  "sim_total_blocks": "13",
+  "sim_main_blocks": "13",
+  "sim_stale_blocks": "0",
+  "sim_stale_pct": "0",
+  "sim_total_energy_kwh": "8.420833333333343",
+  "diag": null
+}

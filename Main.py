@@ -1,5 +1,6 @@
 # Main.py (fixed + PoCol-ready)
 
+import random
 from datetime import datetime
 from InputsConfig import InputsConfig as p
 from Event import Event, Queue
@@ -116,6 +117,14 @@ def main():
     for run_idx in range(p.Runs):
         clock = 0
 
+        # Stage 3: optional deterministic seeding for reproducible runs
+        # (default None -> unseeded, i.e. original behaviour). Applies to both the
+        # PoW and PoCol thesis paths. PoCol.Consensus.configure re-seeds with the
+        # same value, so results are stable for a given RandomSeed.
+        _seed = getattr(p, "RandomSeed", None)
+        if _seed is not None:
+            random.seed(int(_seed) + run_idx)
+
         # 1) create pending transactions (safe)
         _create_pending_transactions()
 
@@ -171,6 +180,10 @@ def main():
                 p.Bsize / 1000000, p.Tn / 1000, run_idx
             )
             Statistics.print_to_excel(fname)
+
+            # Stage 3: dump PoCol round/event diagnostics next to the workbook.
+            if p.model == 3 and hasattr(Consensus, "dump_diagnostics"):
+                Consensus.dump_diagnostics(fname + ".diag.json")
 
             # reset for next run
             if hasattr(Statistics, "reset"):
