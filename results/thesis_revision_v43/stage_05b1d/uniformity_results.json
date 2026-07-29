@@ -1,0 +1,72 @@
+{
+  "acceptance": "chi-square p > 0.001 (uniformity not rejected); order-statistic frequency error < 0.01",
+  "all_passed": true,
+  "order_statistics": [
+    {
+      "S": 10,
+      "k": 3,
+      "max_max_freq_error": 0.0013000000000000234,
+      "max_min_freq_error": 0.0005399999999999849,
+      "n_trials": 200000,
+      "passed": true
+    },
+    {
+      "S": 8,
+      "k": 4,
+      "max_max_freq_error": 0.00160785714285714,
+      "max_min_freq_error": 0.0009778571428571414,
+      "n_trials": 200000,
+      "passed": true
+    }
+  ],
+  "subset_uniformity": [
+    {
+      "S": 5,
+      "chi_square": 13.4441,
+      "critical_99_9": 27.877164871256568,
+      "dof": 9,
+      "k": 2,
+      "max_abs_freq_deviation": 0.0019649999999999945,
+      "n_trials": 200000,
+      "num_subsets": 10,
+      "p_value": 0.14351908499392088,
+      "passed": true
+    },
+    {
+      "S": 6,
+      "chi_square": 9.276133333333332,
+      "critical_99_9": 43.82019596451753,
+      "dof": 19,
+      "k": 3,
+      "max_abs_freq_deviation": 0.0007166666666666641,
+      "n_trials": 300000,
+      "num_subsets": 20,
+      "p_value": 0.9686064503533747,
+      "passed": true
+    },
+    {
+      "S": 10,
+      "chi_square": 12.985800000000001,
+      "critical_99_9": 27.877164871256568,
+      "dof": 9,
+      "k": 1,
+      "max_abs_freq_deviation": 0.0020899999999999946,
+      "n_trials": 100000,
+      "num_subsets": 10,
+      "p_value": 0.16324985054654947,
+      "passed": true
+    },
+    {
+      "S": 10,
+      "chi_square": 12.9858,
+      "critical_99_9": 27.877164871256568,
+      "dof": 9,
+      "k": 9,
+      "max_abs_freq_deviation": 0.0020899999999999946,
+      "n_trials": 100000,
+      "num_subsets": 10,
+      "p_value": 0.16324985054654925,
+      "passed": true
+    }
+  ]
+}

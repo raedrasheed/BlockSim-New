@@ -63,11 +63,12 @@ def test_dependency_lock_checksum_reproducible():
 
 # 26
 def test_freeze_inputs_complete():
+    from experiments.thesis_revision_v43.scenario_engine import ENGINE_VERSION
     m = fi.build_freeze_inputs(test_result="checked")
     for key in fi.REQUIRED_KEYS:
         assert key in m, key
     assert m["intended_freeze_tag"] == "thesis-v43-stage5b2-freeze-1"
-    assert m["scenario_engine_version"] == "5b1b.1"
+    assert m["scenario_engine_version"] == ENGINE_VERSION      # tracks the current engine
 
 
 # 27

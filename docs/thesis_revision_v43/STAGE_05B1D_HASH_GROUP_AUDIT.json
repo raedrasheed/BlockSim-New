@@ -1,0 +1,14 @@
+{
+  "rows": 1890,
+  "distinct_scientific_semantics": 63,
+  "distinct_run_execution": 1890,
+  "distinct_interpretation": 12,
+  "distinct_analysis_group": 63,
+  "semantics_group_size_distribution": {
+    "30": 63
+  },
+  "groups_not_30": [],
+  "duplicate_run_execution_hashes": [],
+  "duplicate_same_seed_semantics": [],
+  "b3_c1_dual_rows": 870
+}

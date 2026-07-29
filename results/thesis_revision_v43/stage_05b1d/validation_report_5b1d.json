@@ -1,0 +1,85 @@
+{
+  "acceptance": "exact P_zero within event-loop 99% CI for every N; Binomial count == distinct position count",
+  "all_passed": true,
+  "b1": [
+    {
+      "clopper_pearson_99": [
+        0.5959729626842045,
+        0.9621782635102698
+      ],
+      "direct_reference_frequency": 0.84691,
+      "event_loop_frequency": 0.8333333333333334,
+      "event_loop_sample_size": 30,
+      "event_loop_zero_count": 25,
+      "exact_p_zero": 0.846481724890614,
+      "exact_within_99ci": true,
+      "miner_count": 100,
+      "poisson_p_zero": 0.8464817248906141
+    },
+    {
+      "clopper_pearson_99": [
+        0.6796857787144835,
+        0.9884121883334973
+      ],
+      "direct_reference_frequency": 0.92055,
+      "event_loop_frequency": 0.9,
+      "event_loop_sample_size": 30,
+      "event_loop_zero_count": 27,
+      "exact_p_zero": 0.9200444146293233,
+      "exact_within_99ci": true,
+      "miner_count": 200,
+      "poisson_p_zero": 0.9200444146293233
+    },
+    {
+      "clopper_pearson_99": [
+        0.6796857787144835,
+        0.9884121883334973
+      ],
+      "direct_reference_frequency": 0.94452,
+      "event_loop_frequency": 0.9,
+      "event_loop_sample_size": 30,
+      "event_loop_zero_count": 27,
+      "exact_p_zero": 0.9459594689067654,
+      "exact_within_99ci": true,
+      "miner_count": 300,
+      "poisson_p_zero": 0.9459594689067654
+    },
+    {
+      "clopper_pearson_99": [
+        0.6796857787144835,
+        0.9884121883334973
+      ],
+      "direct_reference_frequency": 0.95978,
+      "event_loop_frequency": 0.9,
+      "event_loop_sample_size": 30,
+      "event_loop_zero_count": 27,
+      "exact_p_zero": 0.9591894571091382,
+      "exact_within_99ci": true,
+      "miner_count": 400,
+      "poisson_p_zero": 0.9591894571091382
+    },
+    {
+      "clopper_pearson_99": [
+        0.6796857787144835,
+        0.9884121883334973
+      ],
+      "direct_reference_frequency": 0.96714,
+      "event_loop_frequency": 0.9,
+      "event_loop_sample_size": 30,
+      "event_loop_zero_count": 27,
+      "exact_p_zero": 0.9672161004820059,
+      "exact_within_99ci": true,
+      "miner_count": 500,
+      "poisson_p_zero": 0.9672161004820059
+    }
+  ],
+  "b1_all_within_99ci": true,
+  "binomial_to_position_reconciliation": true,
+  "cap": 150,
+  "event_loop_runs": 150,
+  "scenario_sanity": {
+    "b2_total_reconciles": true,
+    "b3_energy_invariant": true,
+    "c2_energy_reconciles": true
+  }
+}

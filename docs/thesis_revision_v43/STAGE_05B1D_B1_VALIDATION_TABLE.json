@@ -1,0 +1,72 @@
+[
+  {
+    "miner_count": 100,
+    "exact_p_zero": 0.846481724890614,
+    "poisson_p_zero": 0.8464817248906141,
+    "direct_reference_frequency": 0.84691,
+    "event_loop_zero_count": 25,
+    "event_loop_sample_size": 30,
+    "event_loop_frequency": 0.8333333333333334,
+    "clopper_pearson_99": [
+      0.5959729626842045,
+      0.9621782635102698
+    ],
+    "exact_within_99ci": true
+  },
+  {
+    "miner_count": 200,
+    "exact_p_zero": 0.9200444146293233,
+    "poisson_p_zero": 0.9200444146293233,
+    "direct_reference_frequency": 0.92055,
+    "event_loop_zero_count": 27,
+    "event_loop_sample_size": 30,
+    "event_loop_frequency": 0.9,
+    "clopper_pearson_99": [
+      0.6796857787144835,
+      0.9884121883334973
+    ],
+    "exact_within_99ci": true
+  },
+  {
+    "miner_count": 300,
+    "exact_p_zero": 0.9459594689067654,
+    "poisson_p_zero": 0.9459594689067654,
+    "direct_reference_frequency": 0.94452,
+    "event_loop_zero_count": 27,
+    "event_loop_sample_size": 30,
+    "event_loop_frequency": 0.9,
+    "clopper_pearson_99": [
+      0.6796857787144835,
+      0.9884121883334973
+    ],
+    "exact_within_99ci": true
+  },
+  {
+    "miner_count": 400,
+    "exact_p_zero": 0.9591894571091382,
+    "poisson_p_zero": 0.9591894571091382,
+    "direct_reference_frequency": 0.95978,
+    "event_loop_zero_count": 27,
+    "event_loop_sample_size": 30,
+    "event_loop_frequency": 0.9,
+    "clopper_pearson_99": [
+      0.6796857787144835,
+      0.9884121883334973
+    ],
+    "exact_within_99ci": true
+  },
+  {
+    "miner_count": 500,
+    "exact_p_zero": 0.9672161004820059,
+    "poisson_p_zero": 0.9672161004820059,
+    "direct_reference_frequency": 0.96714,
+    "event_loop_zero_count": 27,
+    "event_loop_sample_size": 30,
+    "event_loop_frequency": 0.9,
+    "clopper_pearson_99": [
+      0.6796857787144835,
+      0.9884121883334973
+    ],
+    "exact_within_99ci": true
+  }
+]

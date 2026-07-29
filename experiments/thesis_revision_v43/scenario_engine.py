@@ -27,9 +27,10 @@ from typing import List, Dict, Optional, Tuple
 import numpy as np
 
 from experiments.thesis_revision_v43 import coverage as _cov
+from experiments.thesis_revision_v43 import exact_sampling as _exact
 from experiments.thesis_revision_v43.schemas import OUTPUT_SCHEMA_VERSION
 
-ENGINE_VERSION = "5b1b.1"
+ENGINE_VERSION = "5b1d.1"
 
 J_PER_KWH = 3_600_000.0
 HASHES_PER_TH = 1e12
@@ -227,13 +228,15 @@ def run_scenario(cfg: EngineConfig, emit_log: bool = False, emit_detail: bool = 
             nonce_allocation_event_count += 1
             k = int(r_solk.binomial(S, p))
             if k > 0:
-                # k solution positions. Draw EXACTLY k (not 2k-then-smallest-k: that
-                # biased min_pos ~2x low because np.unique sorts, inflating B1 block
-                # production). At full scale S~1e17 collisions are negligible; on tiny
-                # domains uniqueness may reduce the count slightly (acceptable).
-                pos = np.unique(r_solpos.integers(0, S, size=k))
-                if pos.size:
-                    break
+                # EXACT uniform sampling without replacement: exactly k distinct
+                # positions (Floyd's algorithm). Replaces np.unique(integers(...,k)),
+                # which could return < k on a collision. Hard invariant below.
+                pos = _exact.sample_without_replacement(r_solpos, S, k)
+                if pos.size != k or np.unique(pos).size != k:
+                    raise RuntimeError(
+                        f"solution-position sampler invariant violated: k={k}, "
+                        f"len={pos.size}, distinct={np.unique(pos).size}")
+                break
             exhausted_rounds += 1
             tgen += 1
             template_refresh_count += 1

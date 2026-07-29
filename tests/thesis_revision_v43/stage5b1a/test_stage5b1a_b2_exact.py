@@ -99,7 +99,12 @@ def test_b2_total_equals_distinct_plus_duplicate():
         d = cov.b2_coverage_exact(starts, lengths, S)
         assert d["total_candidate_evaluations"] == \
             d["distinct_candidate_evaluations"] + d["duplicate_candidate_evaluations"]
-    # and end-to-end through the engine at full scale
+    # and end-to-end through the engine at full scale. The identity total ==
+    # distinct + duplicate is EXACT in integer space (asserted above); at engine
+    # scale the counts are ~1e18 floats, so compare with a relative tolerance
+    # (float64 loses integer exactness above 2^53).
+    import math
     r = run_scenario(EngineConfig("B2", seed=1, miner_count=100))
-    assert abs(r["total_candidate_evaluations"]
-               - (r["distinct_candidate_identities"] + r["duplicate_evaluations"])) < 1e-6
+    assert math.isclose(r["total_candidate_evaluations"],
+                        r["distinct_candidate_identities"] + r["duplicate_evaluations"],
+                        rel_tol=1e-12)

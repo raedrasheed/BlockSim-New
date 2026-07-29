@@ -1,0 +1,27 @@
+{
+  "stage": "5B1D",
+  "scenario_engine_version": "5b1d.1",
+  "output_schema_version": "5b1a.1",
+  "final_stage5b2_run_count": 1890,
+  "ceiling": 3500,
+  "under_ceiling": true,
+  "hash_audit": {
+    "rows": 1890,
+    "distinct_scientific_semantics": 63,
+    "distinct_run_execution": 1890,
+    "distinct_interpretation": 12,
+    "distinct_analysis_group": 63,
+    "semantics_group_size_distribution": {
+      "30": 63
+    },
+    "groups_not_30": [],
+    "duplicate_run_execution_hashes": [],
+    "duplicate_same_seed_semantics": [],
+    "b3_c1_dual_rows": 870
+  },
+  "full_log_retained": 61,
+  "matrix_sha256": "ab47f289b5f13f34b5af65e4c7cea0ee71d7b1e64d40ee04c3d50b4323e1efae",
+  "seed_schedule_sha256": "6122dbd0f455a1c4c9676ec6575f064c3a682b3c978705d6588af11489b13e10",
+  "retention_checksum_sha256": "2283f2ff69bcabf423267b2984ef4acfce852b217b39e1efe8061e583bc1702e",
+  "dependency_lock_sha256": "6e211ea7c031a3fab560843690e27e5a3c2aa2a8c363ab483369a2babc8157be"
+}
