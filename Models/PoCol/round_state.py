@@ -192,6 +192,7 @@ class Solution:
     miner_id: int
     nonce_pos: int
     finder_time_s: float     # time (from round start) at which this miner reaches nonce_pos
+    range_solution_count: int = 1   # number of solutions in this miner's range (>=1)
 
 
 def draw_round_solutions(rng, p: float, S: int,
@@ -220,3 +221,46 @@ def draw_round_solutions(rng, p: float, S: int,
         sols.append(Solution(miner_id=mid, nonce_pos=pos, finder_time_s=finder_time))
     sols.sort(key=lambda s: s.finder_time_s)
     return sols
+
+
+def draw_round_solutions_exact(np_rng, p, ranges, rates_hps, method="binomial"):
+    """EXACT per-range finite-domain draw (Stage 4).
+
+    For each miner i with range size S_i, the number of successful candidate
+    headers is K_i ~ Binomial(S_i, p) (independent across disjoint ranges), so
+    the global count K = sum_i K_i ~ Binomial(sum S_i, p) and per-miner success
+    depends on S_i, not miner identity. Only the EARLIEST discovery per miner is
+    returned (section 4.6); `range_solution_count` records the multiplicity.
+
+    `method="binomial"` (default, exact) or "poisson" (labelled approximation,
+    for diagnostics only). `np_rng` is a numpy Generator (reproducible).
+    Empty list == finite-domain exhaustion.
+    """
+    sols = []
+    for (mid, a, b) in ranges:
+        S_i = int(b) - int(a) + 1
+        if S_i <= 0:
+            continue
+        if method == "poisson":
+            k_i = int(np_rng.poisson(S_i * p))
+        else:
+            k_i = int(np_rng.binomial(S_i, p))
+        if k_i <= 0:
+            continue
+        # earliest of k_i uniform positions in [a, b] == first-success index of
+        # an ordered Bernoulli(p) search of the range (min-position identity).
+        positions = np_rng.integers(int(a), int(b) + 1, size=k_i)
+        earliest = int(positions.min())
+        rate = max(float(rates_hps.get(mid, 0.0)), 1e-12)
+        finder_time = (earliest - int(a)) / rate
+        sols.append(Solution(miner_id=mid, nonce_pos=earliest,
+                             finder_time_s=finder_time, range_solution_count=k_i))
+    sols.sort(key=lambda s: s.finder_time_s)
+    return sols
+
+
+def binomial_solution_count(np_rng, p, S, method="binomial"):
+    """Total solution count in a domain of size S (exact Binomial by default)."""
+    if method == "poisson":
+        return int(np_rng.poisson(S * p))
+    return int(np_rng.binomial(int(S), p))

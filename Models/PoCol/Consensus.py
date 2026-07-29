@@ -4,6 +4,7 @@ import math
 import random
 import hashlib
 import json
+import numpy as np
 from collections import Counter
 
 from InputsConfig import InputsConfig as p
@@ -36,6 +37,7 @@ class Consensus(BaseConsensus):
     target = 0
     target_version = 0
     nonce_space = 0
+    solution_sampler = "binomial"     # exact per-range Binomial (Stage 4); "poisson" = diagnostic
     MAX_REFRESH = 10000
 
     # ---- identity counters ----
@@ -90,6 +92,7 @@ class Consensus(BaseConsensus):
         # domain size S -> expected solutions mu = p*S. Default factor 2 (S=2HB, mu=2).
         factor = float(getattr(p, "PoCol_DomainFactor", 2.0))
         Consensus.nonce_space = max(int(Consensus.h_total_hps * Consensus.interval_s * factor), 1)
+        Consensus.solution_sampler = str(getattr(p, "PoCol_SolutionSampler", "binomial"))
         # reset identity + state
         Consensus._event_seq = 0
         Consensus._round_seq = 0
@@ -143,6 +146,13 @@ class Consensus(BaseConsensus):
         return random.Random(seed)
 
     @staticmethod
+    def _np_round_rng(parent_id, round_id, tgen):
+        """Deterministic numpy Generator for exact per-range Binomial draws."""
+        key = f"np:{Consensus.base_seed}:{parent_id}:{round_id}:{tgen}".encode()
+        seed = int.from_bytes(hashlib.sha256(key).digest()[:8], "big")
+        return np.random.default_rng(seed)
+
+    @staticmethod
     def _node_by_id(mid):
         for n in p.NODES:
             if n.id == mid:
@@ -179,8 +189,10 @@ class Consensus(BaseConsensus):
             Consensus._template_seq += 1
             template_id = Consensus._template_seq
             ranges = Consensus._partition_ranges(S, rates)
-            rng = Consensus._round_rng(parent_id, round_id, tgen)
-            sols = rs.draw_round_solutions(rng, Consensus.p_success, S, ranges, rates)
+            np_rng = Consensus._np_round_rng(parent_id, round_id, tgen)
+            sols = rs.draw_round_solutions_exact(
+                np_rng, Consensus.p_success, ranges, rates,
+                method=Consensus.solution_sampler)
             if sols:
                 break
             # ---- finite-domain exhaustion (category G) ----

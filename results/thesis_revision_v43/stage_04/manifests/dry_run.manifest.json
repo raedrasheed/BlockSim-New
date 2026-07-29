@@ -1,0 +1,20 @@
+{
+  "commit": "96cfa2a6bddc3f0ec252652b7e31f2cb23a1b04e",
+  "checks": {
+    "1_all_scenarios_execute": true,
+    "3_b0_independent_zero_duplicates": true,
+    "4_b1_measurable_duplicates": true,
+    "5_b2_reduces_overlap_vs_b1": true,
+    "6_b3_disjoint_zero_overlap": true,
+    "7_c1_no_artificial_saving": true,
+    "9_duplicate_reconciliation": true,
+    "8_c2_saving_equals_idle_durations": true,
+    "8b_c2_zero_idle_lower_bound": true,
+    "stale_increases_with_delay": true,
+    "zero_delay_no_stale": true
+  },
+  "all_pass": true,
+  "scenario_rows": 54,
+  "c2_rows": 3,
+  "stale_rows": 6
+}
