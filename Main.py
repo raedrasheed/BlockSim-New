@@ -130,6 +130,12 @@ def main():
             BlockCommit.handle_event(next_event)
             Queue.remove_event(next_event)
 
+        # 3b) Stage 2: flush any still-open ACTIVE mining interval up to the
+        #     simulation cutoff (idempotent; never accounts beyond simTime).
+        #     Thesis energy path only (PoW=model 1, PoCol=model 3).
+        if p.model in (1, 3) and hasattr(Node, "finalize_energy"):
+            Node.finalize_energy(p.simTime)
+
         # 4) AppendableBlock-only post-processing
         if p.model == 4:
             BlockCommit.process_gateway_transaction_pools()

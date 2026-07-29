@@ -1,0 +1,26 @@
+{
+  "tag": "PoCol_model3_Nn200",
+  "model": 3,
+  "miners": 200,
+  "git": "424dbf1b2c25ba6f06884dbe47b1661926604eea",
+  "seed": "NONE",
+  "start_utc": "2026-07-29T09:11:27.338943+00:00",
+  "wall_s": 76.55,
+  "rc": 0,
+  "out": "PoCol_model3_Nn200__PoCol_20260729_091239_(Allverify)1day_1e-06M_0.01K_run0.xlsx",
+  "out_sha256": "21b527caabf3a8be71d56ed06423e2f7712ec5fbfe1c2b0002f6debc4fb5570a",
+  "sim_output_row": [
+    "133",
+    "36",
+    "0",
+    "0",
+    "97",
+    "72.93000000000001",
+    "66640",
+    "1.41E+18",
+    "8.420833333333311",
+    "3.747270833333344"
+  ],
+  "python": "3.11.15",
+  "note": "Stage2 corrected wall-clock energy model"
+}

@@ -229,140 +229,24 @@ class Consensus(BaseConsensus):
         return float(Consensus.active_winner_time + Consensus._loser_lag())
 
     # ----------------------------
-    # Energy logic (your requirement)
+    # Energy logic (Stage 2 scientific revision)
     # ----------------------------
     @staticmethod
     def apply_energy_for_created_block(block):
         """
-        Call this ONLY when a create_block event is actually accepted (blockPrev matches miner.last_block()).
-        We charge each miner energy based on:
-            time_share = block_time / N_miners
-        where block_time = active_winner_time for this parent round.
+        DEPRECATED no-op (Stage 2 scientific revision).
+
+        This method previously charged each miner ``block_time / N_miners``
+        of energy per created block -- an unphysical division by the miner
+        count that produced the artifactual ~98-99%% "energy saving".
+
+        PoCol energy is now accounted on a wall-clock basis, identical to
+        the PoW path, via ``Node.start_mining`` / ``Node.stop_mining_and_account``
+        (E = P_active * t_active) with an idempotent end-of-simulation flush.
+        This method is retained only for backward compatibility and MUST NOT
+        be used to determine energy. It intentionally does nothing.
         """
-        if block is None:
-            return
-
-        # Deduplicate by block.id (so we never double-count energy for the same created block)
-        block_id = getattr(block, "id", None)
-        if block_id is None or block_id in Consensus._energy_applied_block_ids:
-            return
-
-        parent_id = getattr(block, "previous", None)
-        if parent_id is None:
-            return
-
-        # Ensure round state matches this parent
-        if Consensus.active_parent_id != parent_id:
-            Consensus._init_round(parent_id)
-
-        miners = Consensus._miners()
-        if not miners:
-            return
-
-        block_time = float(Consensus.active_winner_time)
-        N = max(1, len(miners))
-        time_share = block_time / float(N)  # <<< 핵 requirement: divide by #miners
-
-        winner_id = Consensus.active_winner_id
-
-        # Apply per-miner energy
-        total_energy_kwh = 0.0
-        total_co2_kg = 0.0
-        for m in miners:
-            # PoCol Node has add_energy_for_round(); if not, we do best-effort.
-            if hasattr(m, "add_energy_for_round") and callable(getattr(m, "add_energy_for_round")):
-                before_kwh = float(getattr(m, "energy_kwh", 0.0))
-                before_co2 = float(getattr(m, "co2_kg", 0.0))
-                before_hashes = float(getattr(m, "hashes", 0.0))
-
-                m.add_energy_for_round(
-                    parent_id=parent_id,
-                    block_id=block_id,
-                    winner_id=winner_id,
-                    block_time_s=block_time,
-                    time_share_s=time_share,
-                )
-
-                after_kwh = float(getattr(m, "energy_kwh", 0.0))
-                after_co2 = float(getattr(m, "co2_kg", 0.0))
-                after_hashes = float(getattr(m, "hashes", 0.0))
-
-                d_kwh = max(0.0, after_kwh - before_kwh)
-                d_co2 = max(0.0, after_co2 - before_co2)
-                d_hashes = max(0.0, after_hashes - before_hashes)
-
-                total_energy_kwh += d_kwh
-                total_co2_kg += d_co2
-
-                # Log per-miner per-created-block energy share
-                try:
-                    t_s = float(getattr(block, "timestamp", 0.0))
-                except Exception:
-                    t_s = 0.0
-                Consensus._append_energy_log_row(
-                    {
-                        "t": t_s,
-                        "miner_id": int(getattr(m, "id", 0)),
-                        "dt": float(time_share),
-                        "hashes": float(d_hashes),
-                        "energy_kwh": float(d_kwh),
-                        "co2_kg": float(d_co2),
-                        "reason": "PoColRoundShareWinner" if int(getattr(m, "id", -1)) == int(winner_id) else "PoColRoundShare",
-                        "parent_id": parent_id,
-                        "block_id": block_id,
-                    }
-                )
-            else:
-                # fallback: try minimal fields
-                power_w = 0.0
-                if hasattr(m, "get_power_w") and callable(getattr(m, "get_power_w")):
-                    power_w = float(m.get_power_w())
-
-                energy_j = power_w * time_share
-                energy_kwh = energy_j / 3_600_000.0
-                co2_kg = energy_kwh * Consensus._grid_kg_per_kwh()
-
-                try:
-                    hps = float(Consensus._miner_hashrate_hps(m))
-                except Exception:
-                    hps = 0.0
-                hashes = hps * float(max(time_share, 0.0))
-
-                m.energy_kwh = float(getattr(m, "energy_kwh", 0.0)) + energy_kwh
-                m.co2_kg = float(getattr(m, "co2_kg", 0.0)) + co2_kg
-                m.hashes = float(getattr(m, "hashes", 0.0)) + hashes
-
-                total_energy_kwh += energy_kwh
-                total_co2_kg += co2_kg
-
-                try:
-                    t_s = float(getattr(block, "timestamp", 0.0))
-                except Exception:
-                    t_s = 0.0
-                Consensus._append_energy_log_row(
-                    {
-                        "t": t_s,
-                        "miner_id": int(getattr(m, "id", 0)),
-                        "dt": float(time_share),
-                        "hashes": float(hashes),
-                        "energy_kwh": float(energy_kwh),
-                        "co2_kg": float(co2_kg),
-                        "reason": "PoColRoundShareWinner" if int(getattr(m, "id", -1)) == int(winner_id) else "PoColRoundShare",
-                        "parent_id": parent_id,
-                        "block_id": block_id,
-                    }
-                )
-
-        # Attach round totals to block (optional: makes Stats export easier)
-        try:
-            block.pocol_block_time_s = block_time
-            block.pocol_total_energy_kwh = total_energy_kwh
-            block.pocol_total_co2_kg = total_co2_kg
-            block.pocol_winner_id = winner_id
-        except Exception:
-            pass
-
-        Consensus._energy_applied_block_ids.add(block_id)
+        return None
 
     # ----------------------------
     # Fork resolution (same style as Bitcoin model)

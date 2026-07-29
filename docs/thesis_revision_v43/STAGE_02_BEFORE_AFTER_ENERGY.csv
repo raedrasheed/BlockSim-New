@@ -1,0 +1,11 @@
+protocol,miners,old_thesis_table71_kwh,corrected_stage2_kwh,invariant_kwh,stale_pct_stage2,old_direction,reason,code_path
+PoW,100,7.9018,8.420833,8.420833,0,inflated ~x0.9,PoW /100 normalization: total hashrate scaled as N/100,Models/Node.py:hash_rate_hps (was net*hp/100 -> net*hp/sum)
+PoW,200,15.5580,8.420833,8.420833,0,inflated ~x1.8,PoW /100 normalization: total hashrate scaled as N/100,Models/Node.py:hash_rate_hps (was net*hp/100 -> net*hp/sum)
+PoW,300,24.4860,8.420833,8.420833,0,inflated ~x2.9,PoW /100 normalization: total hashrate scaled as N/100,Models/Node.py:hash_rate_hps (was net*hp/100 -> net*hp/sum)
+PoW,400,33.0783,8.420833,8.420833,0,inflated ~x3.9,PoW /100 normalization: total hashrate scaled as N/100,Models/Node.py:hash_rate_hps (was net*hp/100 -> net*hp/sum)
+PoW,500,40.4078,8.420833,8.420833,0,inflated ~x4.8,PoW /100 normalization: total hashrate scaled as N/100,Models/Node.py:hash_rate_hps (was net*hp/100 -> net*hp/sum)
+PoCol,100,0.1308,8.420833,8.420833,62.69,deflated ~x0.016,PoCol block_time/N division: energy scaled as 1/N,Models/PoCol/Consensus.py apply_energy_for_created_block (block_time/N removed) + wall-clock via Node.start/stop_mining
+PoCol,200,0.3001,8.420833,8.420833,72.93000000000001,deflated ~x0.036,PoCol block_time/N division: energy scaled as 1/N,Models/PoCol/Consensus.py apply_energy_for_created_block (block_time/N removed) + wall-clock via Node.start/stop_mining
+PoCol,300,0.4695,not_completed_cap,8.420833,NA,deflated ~x0.056,"PoCol full-sim run exceeded time cap (Stage 3 perf); invariant proven for N=100,200 and by module test","see PoCol N=100,200"
+PoCol,400,0.4542,not_completed_cap,8.420833,NA,deflated ~x0.054,"PoCol full-sim run exceeded time cap (Stage 3 perf); invariant proven for N=100,200 and by module test","see PoCol N=100,200"
+PoCol,500,0.3350,not_completed_cap,8.420833,NA,deflated ~x0.040,"PoCol full-sim run exceeded time cap (Stage 3 perf); invariant proven for N=100,200 and by module test","see PoCol N=100,200"

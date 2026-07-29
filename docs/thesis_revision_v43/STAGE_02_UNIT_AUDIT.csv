@@ -1,0 +1,23 @@
+variable,description,unit,formula,dimensional_check,location
+network_hash_rate_hps,fixed aggregate network hash rate,H/s,config constant,H/s,InputsConfig.NetworkHashRate_Hps
+hash_rate_hps,per-miner hash rate,H/s,net_hps * (hashPower_i / sum hashPower),H/s,Models/Node.py:hash_rate_hps
+efficiency_j_per_th,hardware efficiency,J/TH,config constant,J/TH,InputsConfig.MinerEfficiency_J_per_TH
+efficiency_j_per_hash,efficiency per hash,J/hash,efficiency_j_per_th / 1e12,J/hash = (J/TH)/(hash/TH),wallclock_energy.efficiency_j_per_hash
+active_power_w,per-miner active mining power,W,hash_rate_hps * efficiency_j_per_hash,W = (H/s)*(J/H) = J/s,wallclock_energy.active_power_w
+network_active_power_w,total network active power,W,net_hps * efficiency_j_per_hash,W,wallclock_energy.network_active_power_w
+idle_power_w,per-miner idle power,W,IdlePowerW or IdlePowerRatio*active_power_w (default 0),W,Models/Node.py:idle_power_w
+active_time_s,accumulated active duration,s,sum of closed ACTIVE intervals,s,MinerEnergyState.active_time_s
+idle_time_s,accumulated idle duration,s,sum of closed IDLE intervals,s,MinerEnergyState.idle_time_s
+offline_time_s,accumulated offline duration,s,sum of closed OFFLINE intervals,s,MinerEnergyState.offline_time_s
+active_energy_j,active energy,J,active_power_w * active_time_s,J = W*s,MinerEnergyState.active_energy_j
+idle_energy_j,idle energy,J,idle_power_w * idle_time_s,J = W*s,MinerEnergyState.idle_energy_j
+coordination_energy_j,coordination/comm energy (separate),J,externally supplied; never invented (default 0),J,MinerEnergyState.coordination_energy_j
+energy_j,total miner energy,J,active_energy_j + idle_energy_j + coordination_energy_j,J,MinerEnergyState.energy_j
+energy_kwh,total miner energy,kWh,energy_j / 3.6e6,kWh = J / (J/kWh),MinerEnergyState.energy_kwh
+total_hashes,hash count over active time,hashes,hash_rate_hps * active_time_s,hashes = (H/s)*s,MinerEnergyState.total_hashes
+hash_based_active_energy_j,cross-check active energy from hashes,J,total_hashes * efficiency_j_per_hash,J = hash * (J/hash),MinerEnergyState.hash_based_active_energy_j
+co2_kg,carbon footprint,kgCO2e,energy_kwh * GridEF_kgCO2e_per_kWh,kg = kWh*(kg/kWh),Models/Node.py:_kwh_to_co2
+J_PER_KWH,joules per kWh,J/kWh,3600000,J/kWh,wallclock_energy.J_PER_KWH
+HASHES_PER_TH,hashes per terahash,hash/TH,1e12,hash/TH,wallclock_energy.HASHES_PER_TH
+INVARIANT_power,fixed network power,W,141e12 * 21.5/1e12 = 3031.5,W,test_fixed_network_power_invariant
+INVARIANT_energy,continuous 10000 s energy,kWh,3031.5 * 10000 / 3.6e6 = 8.420833...,kWh,test_continuous_energy_10000_seconds

@@ -1,0 +1,26 @@
+{
+  "tag": "PoW_model1_Nn500",
+  "model": 1,
+  "miners": 500,
+  "git": "424dbf1b2c25ba6f06884dbe47b1661926604eea",
+  "seed": "NONE",
+  "start_utc": "2026-07-29T09:11:17.210176+00:00",
+  "wall_s": 2.21,
+  "rc": 0,
+  "out": "PoW_model1_Nn500__Bitcoin_20260729_091118_(Allverify)1day_1e-06M_0.003K_run0.xlsx",
+  "out_sha256": "44c6b4d6f63931aed0980a118224c97a908cd6de0d1739dfd90a4864366c71c3",
+  "sim_output_row": [
+    "15",
+    "15",
+    "0",
+    "0",
+    "0",
+    "0",
+    "26712",
+    "1.41E+18",
+    "8.420833333333418",
+    "3.747270833333308"
+  ],
+  "python": "3.11.15",
+  "note": "Stage2 corrected wall-clock energy model"
+}

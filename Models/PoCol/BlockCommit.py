@@ -38,6 +38,11 @@ class BlockCommit(BaseBlockCommit):
 
         # miner still mining on top of its last block?
         if blockPrev == miner.last_block().id:
+            # Stage 2: close this miner's open ACTIVE interval and account its
+            # wall-clock energy up to the block-find time (E = P_active * dt).
+            # This replaces the previous block_time/N energy division.
+            miner.stop_mining_and_account(eventTime, reason="mined_block", block_id=event.block.id)
+
             # Count created block
             Statistics.totalBlocks += 1
 
@@ -47,9 +52,6 @@ class BlockCommit(BaseBlockCommit):
                     event.block.timestamp = eventTime
             except Exception:
                 pass
-
-            # >>> Apply PoCol energy for this successfully created block
-            c.apply_energy_for_created_block(event.block)
 
             # Add transactions if enabled
             if p.hasTrans:
@@ -84,6 +86,11 @@ class BlockCommit(BaseBlockCommit):
         node = p.NODES[event.node]  # recipient
         lastBlockId = node.last_block().id
 
+        # Stage 2: receiving a block ends the recipient's current ACTIVE interval
+        # (it will restart mining via generate_next_block). Wall-clock energy is
+        # accounted up to now. Does not change acceptance/stale/round logic.
+        node.stop_mining_and_account(currentTime, reason="received_block", block_id=event.block.id)
+
         # Case 1: received block extends recipient's tip
         if blockPrev == lastBlockId:
             node.blockchain.append(event.block)
@@ -108,6 +115,12 @@ class BlockCommit(BaseBlockCommit):
     @staticmethod
     def generate_next_block(node, currentTime):
         if getattr(node, "hashPower", 0) > 0:
+            # Stage 2: open an ACTIVE interval for this miner on its current tip.
+            # Energy accrues as wall-clock active time until the miner next
+            # stops (mines or receives a block). c.Protocol / scheduling and
+            # winner selection are unchanged.
+            node.start_mining(node.last_block().id, currentTime)
+
             blockTime = currentTime + c.Protocol(node)
             Scheduler.create_block_event(node, blockTime)
 
