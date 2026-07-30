@@ -1,0 +1,58 @@
+{
+  "stage": "5B2",
+  "source_commit": "45361674e6278971d430a79531f7aaac5cae3281",
+  "freeze_branch": "thesis-v43-stage5b2-freeze-6",
+  "matrix_sha256": "9cb7297e7418a96fbaeb7f06c162bc8bdea1c1e049002a40344cab16cf5f6fcb",
+  "engine_version": "5b1g.2",
+  "output_schema_version": "5b1g.2",
+  "completion": {
+    "planned": 1890,
+    "completed_valid": 1890,
+    "failed_terminal": 0,
+    "invalidated_current": 0,
+    "not_started": 0
+  },
+  "aggregation": {
+    "bundles": 1890,
+    "aggregated": 1890,
+    "qc_fail": 0,
+    "groups": 63,
+    "each_group_30": true,
+    "scenario_counts": {
+      "B0": 150,
+      "B1": 150,
+      "B2": 150,
+      "B3_C1_CONTINUOUS_DISJOINT": 870,
+      "C2": 570
+    },
+    "stats": {
+      "pmg_rows": 12069400,
+      "stale_records": 26200,
+      "delivery_records": 7722695,
+      "partial_generation_runs": 1890,
+      "zero_block_runs": 142
+    },
+    "committed_output_files": 578
+  },
+  "group_crosschecks": {
+    "all_runs_present": true,
+    "groups_63": true,
+    "each_group_30": true,
+    "unique_run_execution": true,
+    "no_same_seed_dup": true,
+    "b3c1_shared": true,
+    "delay_only_primary_invariant": true,
+    "energy_anchor": true,
+    "zero_block_runs_present": true,
+    "no_removal": true
+  },
+  "per_run_manifest": "results/thesis_revision_v43/stage_05b2/manifests/results_manifest.json",
+  "bundle_manifest": "results/thesis_revision_v43/stage_05b2/manifests/bundle_manifest.json",
+  "output_index": "results/thesis_revision_v43/stage_05b2/manifests/output_index.csv",
+  "execution_ledger": "results/thesis_revision_v43/stage_05b2/logs/execution_ledger.jsonl",
+  "checksum_manifest": "docs/thesis_revision_v43/STAGE_05B2_CHECKSUM_MANIFEST.sha256",
+  "checksum_manifest_sha256": "65d14e7a387577270b13f96e1907a504e1a9f1cf9790e265b7abf34ac1692c24",
+  "results_manifest_sha256": "928ce2773235289eccbd897d027dcae9bded210d0c325bf9c7332cedbd9c1a26",
+  "thesis_docx_sha256": "2c3afdc5739109d0ea12ada96c3115d626a2188c1acbaeaa4b6020974884cbda",
+  "thesis_pdf_sha256": "131412bb2ce17ed97b98dfbefc136c7b5b226b9fd7372e79a25e4b0dc057e9c4"
+}

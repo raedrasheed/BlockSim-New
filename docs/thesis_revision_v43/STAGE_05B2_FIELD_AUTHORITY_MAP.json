@@ -1,0 +1,59 @@
+{
+  "stage": "5B2",
+  "purpose": "Canonical (authoritative) analytical fields for Stage 6. Deprecated / non-authoritative fields may remain in raw output for compatibility but MUST NOT enter Stage 6 tables, statistical tests, or claims.",
+  "source_commit": "45361674e6278971d430a79531f7aaac5cae3281",
+  "engine_version": "5b1g.2",
+  "output_schema_version": "5b1g.2",
+  "authoritative": {
+    "finder_miners": ["distinct_potential_finder_miner_count"],
+    "solution_positions": [
+      "total_template_solution_position_count",
+      "active_range_solution_position_count",
+      "inactive_range_solution_position_count"
+    ],
+    "stale_diagnostic": [
+      "single_height_stale_block_count",
+      "single_height_stales_per_accepted_block",
+      "single_height_stale_fraction_of_valid_proposals",
+      "actual_stale_producer_miner_count",
+      "actual_competitor_miner_count",
+      "actual_proposal_miner_count"
+    ],
+    "candidate_accounting": [
+      "total_candidate_evaluations",
+      "distinct_candidate_identities",
+      "duplicate_evaluations"
+    ],
+    "post_winner_diagnostic": [
+      "post_winner_candidate_evaluations",
+      "post_winner_active_time_s",
+      "stale_producer_postwinner_candidate_evaluations",
+      "stale_producer_postwinner_active_time_s"
+    ],
+    "per_miner_domain_reconciliation_source": "per_miner_generation"
+  },
+  "non_authoritative": {
+    "discoverable_finder_count": "Do NOT use for miner counts; use distinct_potential_finder_miner_count.",
+    "per_miner.unsearched_count": "Do NOT use for final-generation reconciliation; use per_miner_generation.",
+    "per_miner.remaining_unsearched": "Do NOT use for final-generation reconciliation; use per_miner_generation.",
+    "deprecated_stale_aliases": {
+      "note": "Use the canonical single_height_ fields when they exist.",
+      "aliases": {
+        "legitimate_stale_block_count": "single_height_stale_block_count",
+        "stale_blocks": "single_height_stale_block_count",
+        "legitimate_stale_count": "single_height_stale_block_count",
+        "stales_per_accepted_block": "single_height_stales_per_accepted_block",
+        "legitimate_stale_rate": "single_height_stales_per_accepted_block",
+        "stale_fraction_of_all_valid_blocks": "single_height_stale_fraction_of_valid_proposals",
+        "stale_race_candidate_evaluations": "post_winner_candidate_evaluations",
+        "stale_race_active_time_s": "post_winner_active_time_s"
+      }
+    }
+  },
+  "notes": [
+    "post_winner_* covers EVERY active non-winning miner; stale_producer_postwinner_* is the producer-only subset.",
+    "Legacy stale_race_candidate_evaluations / stale_race_active_time_s are defined to EQUAL the complete post_winner_* totals, not the producer subset.",
+    "B3 and C1 interpretations share ONE physical run; do not treat them as independent replications.",
+    "Post-winner diagnostic work and single-height stale diagnostics are secondary; they never enter primary energy, primary candidate counts, accepted-block counts, or canonical block interval."
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "bundles": 1890,
+  "aggregated": 1890,
+  "qc_fail": 0,
+  "groups": 63,
+  "each_group_30": true,
+  "scenario_counts": {
+    "B0": 150,
+    "B1": 150,
+    "B2": 150,
+    "B3_C1_CONTINUOUS_DISJOINT": 870,
+    "C2": 570
+  },
+  "stats": {
+    "pmg_rows": 12069400,
+    "stale_records": 26200,
+    "delivery_records": 7722695,
+    "partial_generation_runs": 1890,
+    "zero_block_runs": 142
+  },
+  "committed_output_files": 578
+}

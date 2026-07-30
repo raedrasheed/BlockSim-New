@@ -1,0 +1,42 @@
+{
+  "stage": "5B2",
+  "checkout": {
+    "repository": "raedrasheed/BlockSim-New",
+    "freeze_branch": "thesis-v43-stage5b2-freeze-6",
+    "commit_sha_40": "45361674e6278971d430a79531f7aaac5cae3281",
+    "git_tree_sha": "52c79e000e60f887075bde155a04503f35a64fe5",
+    "commit_parent": "e7f046bb5c3873b9fe176aba20ce95d4df79773c",
+    "checkout_command": "git worktree add --detach /home/user/blocksim-stage5b2-exec 45361674e6278971d430a79531f7aaac5cae3281",
+    "detached_head": true,
+    "worktree_clean": true,
+    "utc_checkout_time": "2026-07-30T05:55:55Z"
+  },
+  "environment": {
+    "python_version": "3.11.15",
+    "python_implementation": "CPython",
+    "os": "Linux",
+    "os_release": "6.18.5",
+    "kernel": "6.18.5",
+    "platform": "Linux-6.18.5-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "cpu_model": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+    "logical_cores": 4,
+    "physical_cores": 4,
+    "mem_total_gb": 15.7,
+    "dependencies": {
+      "numpy": "2.4.6",
+      "scipy": "1.17.1",
+      "mpmath": "1.4.1",
+      "pandas": "3.0.5",
+      "pyarrow": "NOT INSTALLED"
+    }
+  },
+  "format_note": "pyarrow is absent from the frozen dependency environment, so Parquet is not used (installing it would alter the frozen environment). Large tables are stored as gzip-compressed JSONL partitioned by scenario and scientific-semantics group (< 90 MB/file); ledgers and indexes are CSV; manifests are JSON \u2014 all listed as acceptable formats in the Stage-5B2 spec.",
+  "pre_execution_test_gate": {
+    "command": "python3 -m pytest tests/ -q",
+    "expected": "444 passed, 0 failed, 0 skipped",
+    "result": "444 passed, 0 failed, 0 skipped (1456.46s)",
+    "utc_start": "2026-07-30T05:57:10Z",
+    "utc_end": "2026-07-30T06:21:28Z"
+  }
+}

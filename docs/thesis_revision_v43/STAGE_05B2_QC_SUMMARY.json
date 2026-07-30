@@ -1,0 +1,43 @@
+{
+  "per_run_qc": {
+    "runs": 1890,
+    "all_passed": true,
+    "qc_failures": 0,
+    "families": [
+      "A.identity",
+      "B.energy",
+      "C.candidates",
+      "D.b2_exactness",
+      "E.disjoint",
+      "F.chronology_provenance",
+      "G.solution_finder_taxonomy",
+      "H.stale_race_diagnostic",
+      "I.na_policy",
+      "J.numerical_validity"
+    ]
+  },
+  "final_revalidation_at_aggregation": {
+    "bundles_revalidated": 1890,
+    "qc_failures": 0
+  },
+  "group_crosschecks": {
+    "all_runs_present": true,
+    "groups_63": true,
+    "each_group_30": true,
+    "unique_run_execution": true,
+    "no_same_seed_dup": true,
+    "b3c1_shared": true,
+    "delay_only_primary_invariant": true,
+    "energy_anchor": true,
+    "zero_block_runs_present": true,
+    "no_removal": true
+  },
+  "group_crosschecks_all_pass": true,
+  "data_integrity_tests": "10 passed",
+  "final_run_reconciliation": {
+    "COMPLETED_VALID": 1890
+  },
+  "planned": 1890,
+  "completed_valid": 1890,
+  "failed_terminal": 0
+}

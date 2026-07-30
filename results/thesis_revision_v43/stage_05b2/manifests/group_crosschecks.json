@@ -1,0 +1,21 @@
+{
+  "passed": true,
+  "checks": {
+    "all_runs_present": true,
+    "groups_63": true,
+    "each_group_30": true,
+    "unique_run_execution": true,
+    "no_same_seed_dup": true,
+    "b3c1_shared": true,
+    "delay_only_primary_invariant": true,
+    "energy_anchor": true,
+    "zero_block_runs_present": true,
+    "no_removal": true
+  },
+  "n_groups": 63,
+  "n_summaries": 1890,
+  "n_zero_block": 142,
+  "n_b3c1_dual": 870,
+  "delay_violations": [],
+  "energy_anchor_violations": []
+}

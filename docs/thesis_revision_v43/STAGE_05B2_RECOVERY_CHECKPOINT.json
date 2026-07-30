@@ -1,0 +1,11 @@
+{
+  "utc": "2026-07-30T07:11:44Z",
+  "completed_valid": 1890,
+  "remaining": 0,
+  "failed_terminal": 0,
+  "interrupted_historical": 1,
+  "output_size_bytes": 795235155,
+  "free_disk_bytes": 29123485696,
+  "last_completed_run_id": "S5B2-01885",
+  "ledger_sha256": "be5c98d0412185ee9c865a64fe64096fcb45e952794e425c86b575b9b1b5aa2a"
+}
