@@ -1,0 +1,21 @@
+{
+  "run_count": 34,
+  "all_pass": true,
+  "coverage": {
+    "stale_nonzero": true,
+    "multi_stale_producer_height": true,
+    "three_stale_producer_height": true,
+    "partial": true,
+    "b2_exhaustion": true,
+    "multi_position_per_miner": true,
+    "inactive": true,
+    "zero_delay_no_stale": true,
+    "delay_levels": [
+      0.0,
+      0.42,
+      5.0,
+      30.0,
+      60.0
+    ]
+  }
+}

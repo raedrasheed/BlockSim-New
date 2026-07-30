@@ -83,3 +83,22 @@ claims** (reward and Sybil mechanisms are not implemented).
 - Reused runs across hypotheses carry one `run_id`; Stage 6 will not count a
   physical simulation twice as independent data.
 - Confirmatory hypotheses (H1–H8) and outcomes are frozen here **before** Stage 5B.
+
+---
+
+## 5. Amendments (post-freeze, transparently recorded)
+
+The frozen text above is **not** rewritten. Amendments are recorded here and in their
+own dated documents.
+
+- **Amendment 5B1G (H7).** H7 (propagation delay) is reclassified from a
+  **confirmatory** hypothesis to a **secondary diagnostic sensitivity**, and
+  "legitimate stale rate" moves from Primary to Secondary outcomes (renamed
+  `single_height_stales_per_accepted_block`). Rationale: the stale model is a
+  single-height stale-race **diagnostic** (no fork resolution; energy/evaluations not
+  integrated into primary metrics), so it cannot support a confirmatory claim. Under
+  the corrected model each non-winning miner may produce at most one stale per height
+  while multiple distinct miners may stale at the same height
+  (`stale_block_count ∈ 0..N_active-1`; no global one-stale cap). H1–H6, H8, seeds,
+  and matrix membership are unchanged. See
+  `STAGE_05B1G_PREREGISTRATION_AMENDMENT.md`.

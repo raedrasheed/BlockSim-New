@@ -1,0 +1,26 @@
+{
+  "accepted": 7,
+  "checks": {
+    "b2_exhaustion": true,
+    "block_proposals": true,
+    "candidates": true,
+    "delay_stream": true,
+    "energy": true,
+    "parent_chain": true,
+    "per_miner_generation": true,
+    "solution_positions": true,
+    "stale_diagnostic": true,
+    "template_chronology": true
+  },
+  "config": {
+    "allocation_policy": "weighted",
+    "hash_rate_distribution": "heterogeneous_moderate",
+    "idle_power_ratio": 0.0,
+    "miner_count": 40,
+    "mu": 2.0,
+    "scenario_id": "B2",
+    "seed": 1
+  },
+  "stale_block_count": 0,
+  "status": "COMPLETED"
+}

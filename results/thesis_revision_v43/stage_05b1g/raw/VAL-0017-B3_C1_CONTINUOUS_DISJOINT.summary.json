@@ -1,0 +1,24 @@
+{
+  "accepted": 16,
+  "checks": {
+    "b2_exhaustion": true,
+    "block_proposals": true,
+    "candidates": true,
+    "delay_stream": true,
+    "energy": true,
+    "parent_chain": true,
+    "per_miner_generation": true,
+    "solution_positions": true,
+    "stale_diagnostic": true,
+    "template_chronology": true
+  },
+  "config": {
+    "miner_count": 40,
+    "mu": 3.0,
+    "propagation_delay_mean_s": 5.0,
+    "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+    "seed": 3
+  },
+  "stale_block_count": 0,
+  "status": "COMPLETED"
+}

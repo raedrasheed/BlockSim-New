@@ -1,0 +1,24 @@
+{
+  "contains_own_commit_sha": false,
+  "dependency_lock_sha256": "6e211ea7c031a3fab560843690e27e5a3c2aa2a8c363ab483369a2babc8157be",
+  "final_stage5b2_run_count": 1890,
+  "intended_freeze_branch": "thesis-v43-stage5b2-freeze-5",
+  "matrix_sha256": "84db950f0bfc608281ea57ee2074ca204d034c627c7af41adbec7eed98c2cde3",
+  "output_schema_version": "5b1g.1",
+  "preserved_freezes": [
+    "thesis-v43-stage5b2-freeze-1",
+    "thesis-v43-stage5b2-freeze-2",
+    "thesis-v43-stage5b2-freeze-3",
+    "thesis-v43-stage5b2-freeze-4"
+  ],
+  "retention_checksum_sha256": "2283f2ff69bcabf423267b2984ef4acfce852b217b39e1efe8061e583bc1702e",
+  "scenario_engine_version": "5b1g.1",
+  "seed_schedule_sha256": "6122dbd0f455a1c4c9676ec6575f064c3a682b3c978705d6588af11489b13e10",
+  "self_reference_note": "This internal manifest does NOT contain the SHA of the commit that contains it; the corrective-commit SHA is recorded externally in the new remote freeze branch 'thesis-v43-stage5b2-freeze-5' and the Stage-5B1G completion report.",
+  "stage": "5B1G",
+  "superseded_freeze_invalid_for_execution": "thesis-v43-stage5b2-freeze-4",
+  "supersedes_freeze": "thesis-v43-stage5b2-freeze-4",
+  "test_suite_result": "423 passed in 235.78s (0:03:55)",
+  "thesis_docx_sha256": "2c3afdc5739109d0ea12ada96c3115d626a2188c1acbaeaa4b6020974884cbda",
+  "thesis_pdf_sha256": "131412bb2ce17ed97b98dfbefc136c7b5b226b9fd7372e79a25e4b0dc057e9c4"
+}

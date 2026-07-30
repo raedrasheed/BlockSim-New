@@ -1,0 +1,24 @@
+{
+  "accepted": 0,
+  "checks": {
+    "b2_exhaustion": true,
+    "block_proposals": true,
+    "candidates": true,
+    "delay_stream": true,
+    "energy": true,
+    "parent_chain": true,
+    "per_miner_generation": true,
+    "solution_positions": true,
+    "stale_diagnostic": true,
+    "template_chronology": true
+  },
+  "config": {
+    "miner_count": 100,
+    "mu": 2.0,
+    "scenario_id": "B1",
+    "seed": 20260201,
+    "target_block_interval_s": 9000.0
+  },
+  "stale_block_count": 0,
+  "status": "COMPLETED"
+}

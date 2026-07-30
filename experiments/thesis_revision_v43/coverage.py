@@ -22,6 +22,7 @@ Reconciliation is exact by construction:
 
 from __future__ import annotations
 import math
+from fractions import Fraction
 from typing import List, Tuple, Dict
 
 
@@ -130,11 +131,14 @@ def coverage_at_time(starts, rates, S, t) -> Dict[str, int]:
 
 
 def b2_exhaustion_time(starts, rates, S):
-    """Earliest time t_ex at which the union of all swept circular arcs covers the
-    WHOLE domain S (union_length == S). Monotone binary search over time using the
-    exact circular interval-union; overlap never counts as new coverage; each miner
-    is capped at one full traversal. Returns (t_ex, counts_at_exhaustion). Miners
-    with rate <= 0 (inactive) contribute no path (pass their rate as 0)."""
+    """FLOAT approximation (NOT exact — do not label as exact). Earliest time t_ex at
+    which the union of all swept circular arcs covers the WHOLE domain S. Monotone
+    float binary search over time using the exact circular interval-union; overlap
+    never counts as new coverage; each miner is capped at one full traversal. Returns
+    (t_ex_float, counts_at_exhaustion). The exact rational closure is
+    `b2_exhaustion_time_exact`; this float routine is retained only as an independent
+    cross-check for the exact one. Miners with rate <= 0 (inactive) contribute no
+    path (pass their rate as 0)."""
     active = [r for r in rates if r > 0]
     if not active:
         return math.inf, dict(total_candidate_evaluations=0,
@@ -189,3 +193,97 @@ def exhaustive_winner_reference(pos, starts: List[int], rates, S: int):
                 best = t
                 best_id = i
     return best, best_id
+
+
+# ---------------------------------------------------------------------------
+# EXACT B2 circular-exhaustion closure (Stage 5B1G, Section 7)
+# ---------------------------------------------------------------------------
+def coverage_at_time_exact(starts, rates_int, S, t: Fraction) -> Dict[str, int]:
+    """Exact integer coverage at exact rational time t. Each active miner i (integer
+    rate r_i) has completed floor(r_i * t) candidates by time t (unified convention:
+    candidate d completes at (d+1)/r_i), capped at one traversal S. No float anywhere.
+    Miners with rate <= 0 contribute no path."""
+    lengths = []
+    for r in rates_int:
+        r = int(r)
+        if r <= 0 or t <= 0:
+            lengths.append(0)
+            continue
+        c = (r * t.numerator) // t.denominator          # exact floor(r*t)
+        lengths.append(min(int(S), int(c)))
+    return b2_coverage_exact(starts, lengths, S)
+
+
+def b2_exhaustion_time_exact(starts, rates_int, S) -> Dict[str, object]:
+    """EXACT circular-exhaustion event for B2 (Section 7).
+
+    The domain is exhausted at t_ex = max over positions q of the first-cover time
+    f(q) = min_i ((q - start_i) mod S + 1) / r_i (integer rate r_i, unified
+    convention). Because each g_i(q)=((q-s_i) mod S + 1)/r_i is increasing in q
+    between the starts and every g_i resets only at q = s_i, the min-of-increasing
+    function f is increasing on each inter-start arc; therefore its maximum over the
+    ring is attained at one of the n positions q_i = (s_i - 1) mod S (the position
+    each miner covers LAST). We evaluate f exactly (Fraction) at those <= n candidate
+    positions and take the max -> t_ex is an exact rational m*/r_{i*}. This is
+    O(n^2), exact at any scale (no float, no S-enumeration).
+
+    Returns the exact exhaustion time as an irreducible Fraction (numerator/
+    denominator) plus the immediately preceding candidate-event time t_prev and a
+    proof pair: coverage(t_prev) < S and coverage(t_ex) == S. exact_exhaustion_
+    verified is True iff both hold."""
+    S = int(S)
+    idx = [i for i, r in enumerate(rates_int) if int(r) > 0]
+    if S <= 0 or not idx:
+        return dict(exact_exhaustion_verified=False,
+                    b2_exhaustion_time_fraction_numerator=None,
+                    b2_exhaustion_time_fraction_denominator=None,
+                    b2_exhaustion_time_s=None, previous_candidate_event_time_s=None,
+                    coverage_before_exhaustion=0, coverage_at_exhaustion=0,
+                    reason="no_active_miners" if not idx else "empty_domain")
+    st = [int(starts[i]) % S for i in range(len(starts))]
+    ri = [int(rates_int[i]) for i in range(len(rates_int))]
+
+    # candidate peak positions: the position each active miner covers last
+    t_ex = None
+    for i in idx:
+        q = (st[i] - 1) % S
+        # f(q) = min_j ((q - s_j) mod S + 1)/r_j  (exact Fraction), tie -> lowest j
+        fq = None
+        for j in idx:
+            d = (q - st[j]) % S
+            cand = Fraction(d + 1, ri[j])
+            if fq is None or cand < fq:
+                fq = cand
+        if t_ex is None or fq > t_ex:
+            t_ex = fq
+    # exhaustion is achieved at a candidate event of the controlling miner => t_ex is
+    # already an exact Fraction m*/r_{i*}; keep it irreducible (Fraction does this).
+
+    # immediately preceding candidate-event time (largest event time strictly < t_ex)
+    t_prev = None
+    for j in idx:
+        num = ri[j] * t_ex.numerator
+        den = t_ex.denominator
+        m = (num - 1) // den                            # largest integer m with m < r_j*t_ex
+        if m < 1:
+            continue
+        m = min(m, S)
+        cand = Fraction(m, ri[j])
+        if t_prev is None or cand > t_prev:
+            t_prev = cand
+
+    cov_ex = coverage_at_time_exact(st, ri, S, t_ex)["distinct_candidate_evaluations"]
+    if t_prev is None:
+        cov_before = 0
+    else:
+        cov_before = coverage_at_time_exact(st, ri, S, t_prev)["distinct_candidate_evaluations"]
+    verified = (cov_ex == S and cov_before < S)
+    return dict(
+        exact_exhaustion_verified=bool(verified),
+        b2_exhaustion_time_fraction_numerator=int(t_ex.numerator),
+        b2_exhaustion_time_fraction_denominator=int(t_ex.denominator),
+        b2_exhaustion_time_s=float(t_ex),
+        previous_candidate_event_time_s=(float(t_prev) if t_prev is not None else None),
+        coverage_before_exhaustion=int(cov_before),
+        coverage_at_exhaustion=int(cov_ex),
+        reason=None)
