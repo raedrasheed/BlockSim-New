@@ -30,7 +30,7 @@ from experiments.thesis_revision_v43 import coverage as _cov
 from experiments.thesis_revision_v43 import exact_sampling as _exact
 from experiments.thesis_revision_v43.schemas import OUTPUT_SCHEMA_VERSION
 
-ENGINE_VERSION = "5b1g.1"
+ENGINE_VERSION = "5b1g.2"
 
 J_PER_KWH = 3_600_000.0
 HASHES_PER_TH = 1e12
@@ -262,9 +262,13 @@ class _Accum:
         self.actual_competitor_miners = 0        # actual admitted competitors (== stale producers)
         self.actual_proposal_miners = 0          # 1 winner + all admitted stales, per accepted height
         self.potential_finders = 0               # per-miner reachable finders (miners)
-        # separate, NON-integrated stale-race quantities (Section 2)
-        self.stale_race_candidate_evaluations = 0
-        self.stale_race_active_time = Fraction(0)
+        # separate, NON-integrated post-winner diagnostic work (5B1G.1 §4).
+        # post_winner_* covers EVERY active non-winning miner; stale_producer_postwinner_*
+        # is the producer-only subset. Neither enters primary metrics.
+        self.post_winner_candidate_evaluations = 0
+        self.post_winner_active_time = Fraction(0)
+        self.stale_producer_postwinner_candidate_evaluations = 0
+        self.stale_producer_postwinner_active_time = Fraction(0)
         # separate main vs stale block propagation (Section 5)
         self.main_block_prop_msgs = 0
         self.main_block_prop_bytes = 0
@@ -342,7 +346,8 @@ def _resolve(discoveries, delays):
     per-miner discoveries and a delay list, returns (winner, proposal_count,
     competitor_miner_count, stale_count) under the pairwise rule. The engine does NOT
     call this — it uses `_resolve_stale_race`, which derives recipient-specific delays
-    from the delivery identity and admits at most one stale per height (Sections 2-4)."""
+    from the delivery identity and admits one stale per non-winning MINER (multiple
+    distinct miners may each stale at the same height; no global cap) (Sections 2-4)."""
     if not discoveries:
         return None, 0, 0, 0
     discoveries.sort(key=lambda d: (d["time"], d["miner"]))
@@ -382,10 +387,11 @@ def _resolve_stale_race(discoveries, cfg, gen_id, parent_block_id):
     admitted stale producers. A non-winning miner j produces a stale block iff it is a
     distinct miner with a distinct candidate identity AND discovered before it would
     have received the winner (discovery_time_j < winner_time + delivery_delay(w->j)).
-    Each miner produces AT MOST ONE stale per height (its earliest reachable
-    solution), but MULTIPLE distinct miners may each produce a stale at the same
-    height -> stale_block_count ranges 0 .. N_active-1. There is NO global one-stale
-    cap. Recipient-specific delays come from `_delivery_delay` (order-independent).
+    A given non-winning miner contributes at most one stale proposal per height (its
+    earliest reachable solution), but MULTIPLE distinct miners may each produce a
+    stale at the same height -> stale_block_count ranges 0 .. N_active-1. There is NO
+    global one-stale-per-height cap. Recipient-specific delays come from
+    `_delivery_delay` (order-independent).
     The race's evaluations, active time and energy are reported SEPARATELY and NOT
     integrated into primary metrics."""
     winner = min(discoveries, key=lambda d: (d["time"], d["miner"]))
@@ -551,10 +557,13 @@ def _sim_disjoint(cfg, n, S, p, rates_int, active_ids, inactive, ranges_all, BIG
                     idle_time_s=float(eff_end - prod_time) if is_c2 else 0.0,
                     offline_time_s=0.0,
                     earliest_solution_position=own_pos, earliest_solution_time_s=own_t,
+                    earliest_solution_identity=(str(mine_sol[1]) if mine_sol else None),
+                    path_wraps_around=False,           # disjoint ranges are linear (no wrap)
+                    path_end_position=acc.last_pos[i], circular_candidates_evaluated=int(c_i),
                     search_progress_reason=spr, stop_reason=life,
                     completed_range=bool(c_i >= S_i[i]),
                     generated_block_id=None, received_winner_time_s=None,
-                    propagation_delay_s=None,
+                    propagation_delay_s=None, delivery_stream_key=None,
                     potential_old_parent_solution_position=own_pos,
                     potential_old_parent_solution_time_s=own_t,
                     found_competing_solution_before_receipt=False,
@@ -574,10 +583,13 @@ def _sim_disjoint(cfg, n, S, p, rates_int, active_ids, inactive, ranges_all, BIG
                     productive_search_time_s=0.0, active_nonproductive_time_s=0.0,
                     idle_time_s=0.0, offline_time_s=float(eff_end),
                     earliest_solution_position=None, earliest_solution_time_s=None,
+                    earliest_solution_identity=None,
+                    path_wraps_around=False, path_end_position=None,
+                    circular_candidates_evaluated=0,
                     search_progress_reason="inactive", stop_reason="inactive",
                     completed_range=False,
                     generated_block_id=None, received_winner_time_s=None,
-                    propagation_delay_s=None,
+                    propagation_delay_s=None, delivery_stream_key=None,
                     potential_old_parent_solution_position=None,
                     potential_old_parent_solution_time_s=None,
                     found_competing_solution_before_receipt=False,
@@ -589,35 +601,18 @@ def _sim_disjoint(cfg, n, S, p, rates_int, active_ids, inactive, ranges_all, BIG
         block_id = None
         stale_block_count = actual_comp = actual_prop = pot_comp = 0
         stale_pids = []
+        disc_by_miner = {d["miner"]: d for d in discoveries}
         if is_accepted:
             acc.accepted += 1
             block_id = f"blk-{acc.accepted}"
-            race, producers, stale_block_ids, actual_prop, actual_comp, stale_block_count = \
-                _record_stale_race(acc, cfg, gen_id, parent_before, block_id, discoveries,
-                                   rates_int, S, winner["time"], True, ranges_all, len(active_ids))
+            race, producers, stale_block_ids, actual_prop, actual_comp, stale_block_count, \
+                delivery_info = _record_stale_race(
+                    acc, cfg, gen_id, parent_before, block_id, discoveries, disc_by_miner,
+                    active_ids, rates_int, S, winner["time"], True, ranges_all)
             pot_comp = race["potential_competitor_miner_count"]
             stale_pids = [int(p["miner"]) for p in producers]
-            producer_block = {int(p["miner"]): sid for p, sid in zip(producers, stale_block_ids)}
-            if acc.gen_rows is not None:
-                w = gen_rows.get(winner["miner"])
-                if w is not None:
-                    w["generated_block_id"] = block_id
-                    w["received_winner_time_s"] = float(winner["time"])
-                    w["stop_reason"] = "solution_found"
-                for d in race["competitors"]:
-                    gr = gen_rows.get(d["miner"])
-                    if gr is None:
-                        continue
-                    gr["received_winner_time_s"] = float(race["received"][d["miner"]])
-                    gr["propagation_delay_s"] = float(race["delay_by"][d["miner"]])
-                    before = race["disc_time_by"][d["miner"]] < race["received"][d["miner"]]
-                    gr["found_competing_solution_before_receipt"] = bool(before)
-                    if d["miner"] in producer_block:
-                        gr["produced_stale_block"] = True
-                        gr["stale_block_id"] = producer_block[d["miner"]]
-                        gr["stop_reason"] = "stale_block_generated"
-                    else:
-                        gr["stop_reason"] = "winner_received"
+            _patch_winner_and_deliveries(gen_rows if acc.gen_rows is not None else None,
+                                         winner, block_id, delivery_info)
             refresh_cause = "accepted_block"
         elif is_exhausted:
             acc.exhausted += 1
@@ -681,20 +676,26 @@ def _sim_disjoint(cfg, n, S, p, rates_int, active_ids, inactive, ranges_all, BIG
 
 
 def _record_stale_race(acc, cfg, gen_id, parent_block_id, block_id, discoveries,
-                       rates_int, S, winner_time, disjoint, ranges_all, n_active):
+                       disc_by_miner, active_ids, rates_int, S, winner_time, disjoint,
+                       ranges_all):
     """Resolve the single-height stale race ONCE for an accepted height, admitting ALL
-    qualifying stale producers (one per distinct miner, no global cap), update the
-    diagnostic accumulators, count main- vs stale-block propagation, emit
-    machine-readable delivery-delay and stale-race records, and return
-    (race, producers, stale_block_ids, actual_proposal, actual_competitor,
-    stale_block_count). Primary metrics are untouched."""
+    qualifying stale producers (one per distinct miner, no global cap). Derive a
+    winner-delivery for EVERY active non-winning miner (5B1G.1 §3), accumulate the
+    post-winner diagnostic work over ALL of them (§4), count main- vs stale-block
+    propagation, emit machine-readable delivery-delay and stale-race records, and
+    return (race, producers, stale_block_ids, actual_proposal, actual_competitor,
+    stale_block_count, delivery_info). Primary metrics are untouched."""
     race = _resolve_stale_race(discoveries, cfg, gen_id, parent_block_id)
     winner = race["winner"]
+    wid = winner["miner"]
     producers = race["stale_producers"]                    # one entry per distinct miner
+    producer_ids = {p["miner"] for p in producers}
     stale_block_count = len(producers)
     actual_competitor = stale_block_count                  # == number of stale producers
     actual_proposal = 1 + stale_block_count                # winner + all admitted stales
     stale_block_ids = [f"stale-{block_id}-m{int(p['miner'])}" for p in producers]
+    producer_block = {int(p["miner"]): sid for p, sid in zip(producers, stale_block_ids)}
+    n_active = len(active_ids)
 
     acc.single_height_stale_blocks += stale_block_count
     acc.actual_stale_producer_miners += stale_block_count
@@ -706,8 +707,7 @@ def _record_stale_race(acc, cfg, gen_id, parent_block_id, block_id, discoveries,
 
     # MAIN-block propagation: the winner delivers its block to every OTHER active
     # miner (integrated coordination). Each admitted STALE block gossips to the same
-    # peers; stale propagation is counted SEPARATELY and its energy is NOT integrated
-    # into primary metrics (Sections 2,5).
+    # peers; stale propagation is counted SEPARATELY and NOT integrated (Sections 2,5).
     main_msgs = max(n_active - 1, 0)
     acc.main_block_prop_msgs += main_msgs
     acc.main_block_prop_bytes += main_msgs * cfg.block_size_bytes
@@ -715,30 +715,56 @@ def _record_stale_race(acc, cfg, gen_id, parent_block_id, block_id, discoveries,
     acc.coord["block_propagation"]["bytes"] += main_msgs * cfg.block_size_bytes
     acc.stale_block_prop_msgs += stale_block_count * main_msgs
     acc.stale_block_prop_bytes += stale_block_count * main_msgs * cfg.block_size_bytes
-    for p in producers:
-        r_int = rates_int[p["miner"]]
-        cap = (ranges_all[p["miner"]][1] - ranges_all[p["miner"]][0] + 1) if disjoint else S
-        primary_c = _completed(r_int, winner_time, cap)
-        acc.stale_race_candidate_evaluations += max((p["offset"] + 1) - primary_c, 0)
-        dt = p["time"] - winner_time
-        if dt > 0:
-            acc.stale_race_active_time += dt
 
-    if acc.delivery_delay_records is not None:
-        for d in race["competitors"]:
+    # --- winner delivery + post-winner diagnostic work for EVERY active non-winner ---
+    delivery_info = {}
+    for j in active_ids:
+        if j == wid:
+            continue
+        delay, key = _delivery_delay(cfg, gen_id, parent_block_id, wid, j)
+        recv = winner_time + delay
+        d = disc_by_miner.get(j)
+        t_sol = d["time"] if d else None
+        same_identity = bool(d is not None and d["identity"] == winner["identity"])
+        potential_comp = bool(d is not None and d["identity"] != winner["identity"])
+        produced = j in producer_ids
+        t_stop = min(recv, t_sol) if t_sol is not None else recv     # §4 stop time
+        cap = (ranges_all[j][1] - ranges_all[j][0] + 1) if disjoint else S
+        ev = max(_completed(rates_int[j], t_stop, cap) - _completed(rates_int[j], winner_time, cap), 0)
+        dt = t_stop - winner_time
+        acc.post_winner_candidate_evaluations += int(ev)
+        if dt > 0:
+            acc.post_winner_active_time += dt
+        if produced:
+            acc.stale_producer_postwinner_candidate_evaluations += int(ev)
+            if dt > 0:
+                acc.stale_producer_postwinner_active_time += dt
+            sr = "stale_block_generated"
+        elif t_sol is not None:
+            sr = "winner_received"                    # had a solution (same-id or after receipt)
+        else:
+            sr = "no_reachable_solution"              # received the winner, found nothing
+        delivery_info[j] = dict(
+            delay=delay, recv=recv, key=key, t_sol=t_sol, t_stop=t_stop, produced=produced,
+            same_identity=same_identity, potential_competitor=potential_comp, stop_reason=sr,
+            stale_block_id=producer_block.get(j),
+            identity=(d["identity"] if d is not None else None))
+        if acc.delivery_delay_records is not None:
             acc.delivery_delay_records.append(dict(
                 template_generation_id=gen_id, parent_block_id=parent_block_id,
-                winner_miner_id=int(winner["miner"]), recipient_miner_id=int(d["miner"]),
-                propagation_delay_s=float(race["delay_by"][d["miner"]]),
-                received_winner_time_s=float(race["received"][d["miner"]]),
-                recipient_discovery_time_s=float(race["disc_time_by"][d["miner"]]),
-                delivery_stream_key=race["delay_key_by"][d["miner"]],
-                discovered_before_receipt=bool(race["disc_time_by"][d["miner"]]
-                                               < race["received"][d["miner"]])))
+                winner_miner_id=int(wid), recipient_miner_id=int(j),
+                propagation_delay_s=float(delay), received_winner_time_s=float(recv),
+                recipient_discovery_time_s=(float(t_sol) if t_sol is not None else None),
+                recipient_earliest_solution_identity=(str(d["identity"]) if d is not None else None),
+                delivery_stream_key=key,
+                discovered_before_receipt=bool(t_sol is not None and t_sol < recv),
+                potential_competitor=potential_comp, produced_stale_block=produced,
+                same_identity_independent_discovery=same_identity, stop_reason=sr))
+
     if acc.stale_race_records is not None:
         acc.stale_race_records.append(dict(
             template_generation_id=gen_id, parent_block_id=parent_block_id,
-            accepted_block_id=block_id, winner_miner_id=int(winner["miner"]),
+            accepted_block_id=block_id, winner_miner_id=int(wid),
             winner_time_s=float(winner["time"]),
             potential_finder_miner_count=len(discoveries),
             potential_competitor_miner_count=race["potential_competitor_miner_count"],
@@ -748,12 +774,41 @@ def _record_stale_race(acc, cfg, gen_id, parent_block_id, block_id, discoveries,
             stale_block_count=stale_block_count,
             single_height_stale_block_count=stale_block_count,
             height_has_any_stale=bool(stale_block_count > 0),
+            active_nonwinner_delivery_count=len(delivery_info),
             stale_producer_miner_ids=[int(p["miner"]) for p in producers],
             stale_block_ids=list(stale_block_ids),
             stale_candidate_identities=[str(p["identity"]) for p in producers],
             stale_discovery_times=[float(p["time"]) for p in producers],
             stale_race_energy_not_integrated=True))
-    return race, producers, stale_block_ids, actual_proposal, actual_competitor, stale_block_count
+    return (race, producers, stale_block_ids, actual_proposal, actual_competitor,
+            stale_block_count, delivery_info)
+
+
+def _patch_winner_and_deliveries(gen_rows, winner, block_id, delivery_info):
+    """Patch the per-miner-generation rows for an accepted height: the winner row
+    (solution_found + its own receipt time), and EVERY active non-winner's delivery
+    (receipt time, delay, stream key, before-receipt flag, produced-stale, lifecycle
+    stop reason) — including same-identity and no-solution miners (5B1G.1 §3,§5)."""
+    if gen_rows is None:
+        return
+    w = gen_rows.get(winner["miner"])
+    if w is not None:
+        w["generated_block_id"] = block_id
+        w["received_winner_time_s"] = float(winner["time"])
+        w["stop_reason"] = "solution_found"
+    for j, info in delivery_info.items():
+        gr = gen_rows.get(j)
+        if gr is None:
+            continue
+        gr["received_winner_time_s"] = float(info["recv"])
+        gr["propagation_delay_s"] = float(info["delay"])
+        gr["delivery_stream_key"] = info["key"]
+        gr["found_competing_solution_before_receipt"] = bool(
+            info["t_sol"] is not None and info["t_sol"] < info["recv"])
+        if info["produced"]:
+            gr["produced_stale_block"] = True
+            gr["stale_block_id"] = info["stale_block_id"]
+        gr["stop_reason"] = info["stop_reason"]
 
 
 def _sim_frontier(cfg, n, S, p, rates_int, active_ids, inactive, BIG, acc):
@@ -777,6 +832,10 @@ def _sim_frontier(cfg, n, S, p, rates_int, active_ids, inactive, BIG, acc):
         pos = _exact.sample_without_replacement(r_solpos, S, k) if k > 0 else np.empty(0, dtype=np.int64)
         acc.total_sol += k
         starts = ([int(r_starts.integers(0, S)) for _ in active_ids] if scen == "B2" else None)
+        is_b2 = (scen == "B2")
+        # actual seeded circular start per active miner (B2); B1 always starts at 0
+        start_by_miner = ({i: int(starts[idx]) for idx, i in enumerate(active_ids)}
+                          if is_b2 else {i: 0 for i in active_ids})
 
         discoveries = []
         if active_ids and k > 0:
@@ -821,12 +880,20 @@ def _sim_frontier(cfg, n, S, p, rates_int, active_ids, inactive, BIG, acc):
         gen_total = 0
         gen_rows = {}
         disc_by_miner = {d["miner"]: d for d in discoveries}
+        # EXACT per-miner completed counts at the exact rational eff_end — the SINGLE
+        # source used for per-miner rows AND B2 union coverage (Section 1, no float).
+        active_lengths = _cov.lengths_at_time_exact([rates_int[i] for i in active_ids], eff_end, S)
+        len_by_miner = {i: active_lengths[idx] for idx, i in enumerate(active_ids)}
         for i in active_ids:
             acc.m_gen[i] += 1
-            c_i = _completed(rates_int[i], eff_end, S)
+            c_i = len_by_miner[i]                       # exact; == _completed(rate_i, eff_end, S)
+            sstart = start_by_miner[i]                  # real seeded start (B2) / 0 (B1)
             acc.searched_cum[i] += c_i
             gen_total += c_i
-            acc.last_pos[i] = int(c_i - 1) if c_i > 0 else None
+            # circular last position from the ACTUAL start (Section 2)
+            last_pos = ((sstart + c_i - 1) % S) if c_i > 0 else None
+            acc.last_pos[i] = last_pos
+            wraps = bool(c_i > 0 and sstart + c_i > S)
             prod_time = Fraction(c_i, rates_int[i])
             acc.productive_t[i] += prod_time
             acc.active_t[i] += eff_end
@@ -851,18 +918,22 @@ def _sim_frontier(cfg, n, S, p, rates_int, active_ids, inactive, BIG, acc):
                     run_id=None, template_generation_id=gen_id, miner_id=i,
                     template_id=f"tmpl-{gen_id}", assigned_range_start=0,
                     assigned_range_end=int(S - 1), assigned_range_size=int(S),
-                    search_start_position=0, candidates_evaluated_this_generation=int(c_i),
+                    search_start_position=int(sstart),
+                    candidates_evaluated_this_generation=int(c_i),
                     cumulative_candidates_evaluated=int(acc.searched_cum[i]),
-                    last_evaluated_position=acc.last_pos[i],
+                    last_evaluated_position=last_pos,
                     unsearched_candidates_this_generation=int(S - c_i),
                     inactive_candidates_this_generation=0,
                     productive_search_time_s=float(prod_time), active_nonproductive_time_s=float(eff_end - prod_time),
                     idle_time_s=0.0, offline_time_s=0.0,
                     earliest_solution_position=own_pos, earliest_solution_time_s=own_t,
+                    earliest_solution_identity=(str(md["identity"]) if md else None),
+                    path_wraps_around=wraps, path_end_position=last_pos,
+                    circular_candidates_evaluated=int(c_i),
                     search_progress_reason=spr, stop_reason=life,
                     completed_range=bool(c_i >= S),
                     generated_block_id=None, received_winner_time_s=None,
-                    propagation_delay_s=None,
+                    propagation_delay_s=None, delivery_stream_key=None,
                     potential_old_parent_solution_position=own_pos,
                     potential_old_parent_solution_time_s=own_t,
                     found_competing_solution_before_receipt=False,
@@ -874,17 +945,21 @@ def _sim_frontier(cfg, n, S, p, rates_int, active_ids, inactive, BIG, acc):
                 gen_rows[i] = dict(
                     run_id=None, template_generation_id=gen_id, miner_id=i,
                     template_id=f"tmpl-{gen_id}", assigned_range_start=0,
-                    assigned_range_end=int(S - 1), assigned_range_size=int(S), search_start_position=0,
+                    assigned_range_end=int(S - 1), assigned_range_size=int(S),
+                    search_start_position=(None if is_b2 else 0),   # B2 inactive: null start
                     candidates_evaluated_this_generation=0, cumulative_candidates_evaluated=0,
                     last_evaluated_position=None, unsearched_candidates_this_generation=0,
                     inactive_candidates_this_generation=int(S),
                     productive_search_time_s=0.0, active_nonproductive_time_s=0.0,
                     idle_time_s=0.0, offline_time_s=float(eff_end),
                     earliest_solution_position=None, earliest_solution_time_s=None,
+                    earliest_solution_identity=None,
+                    path_wraps_around=False, path_end_position=None,
+                    circular_candidates_evaluated=0,
                     search_progress_reason="inactive", stop_reason="inactive",
                     completed_range=False,
                     generated_block_id=None, received_winner_time_s=None,
-                    propagation_delay_s=None,
+                    propagation_delay_s=None, delivery_stream_key=None,
                     potential_old_parent_solution_position=None,
                     potential_old_parent_solution_time_s=None,
                     found_competing_solution_before_receipt=False,
@@ -895,9 +970,9 @@ def _sim_frontier(cfg, n, S, p, rates_int, active_ids, inactive, BIG, acc):
         elif is_b1:
             gen_distinct = _completed(max_rate, eff_end, S)
         else:
-            lengths = _cov.lengths_from_winner_time(float(eff_end), [rates_int[i] for i in active_ids], S)
-            covx = _cov.b2_coverage_exact(starts, lengths, S)
-            gen_total = int(covx["total_candidate_evaluations"])
+            # EXACT circular union from the SAME exact per-miner lengths (no float).
+            covx = _cov.b2_coverage_exact(starts, active_lengths, S)
+            assert int(covx["total_candidate_evaluations"]) == gen_total   # rows == network total
             gen_distinct = int(covx["distinct_candidate_evaluations"])
         acc.total_evals += gen_total
         acc.distinct_evals += gen_distinct
@@ -909,32 +984,14 @@ def _sim_frontier(cfg, n, S, p, rates_int, active_ids, inactive, BIG, acc):
         if is_accepted:
             acc.accepted += 1
             block_id = f"blk-{acc.accepted}"
-            race, producers, stale_block_ids, actual_prop, actual_comp, stale_block_count = \
-                _record_stale_race(acc, cfg, gen_id, parent_before, block_id, discoveries,
-                                   rates_int, S, winner["time"], False, None, len(active_ids))
+            race, producers, stale_block_ids, actual_prop, actual_comp, stale_block_count, \
+                delivery_info = _record_stale_race(
+                    acc, cfg, gen_id, parent_before, block_id, discoveries, disc_by_miner,
+                    active_ids, rates_int, S, winner["time"], False, None)
             pot_comp = race["potential_competitor_miner_count"]
             stale_pids = [int(p["miner"]) for p in producers]
-            producer_block = {int(p["miner"]): sid for p, sid in zip(producers, stale_block_ids)}
-            if acc.gen_rows is not None:
-                w = gen_rows.get(winner["miner"])
-                if w is not None:
-                    w["generated_block_id"] = block_id
-                    w["received_winner_time_s"] = float(winner["time"])
-                    w["stop_reason"] = "solution_found"
-                for d in race["competitors"]:
-                    gr = gen_rows.get(d["miner"])
-                    if gr is None:
-                        continue
-                    gr["received_winner_time_s"] = float(race["received"][d["miner"]])
-                    gr["propagation_delay_s"] = float(race["delay_by"][d["miner"]])
-                    before = race["disc_time_by"][d["miner"]] < race["received"][d["miner"]]
-                    gr["found_competing_solution_before_receipt"] = bool(before)
-                    if d["miner"] in producer_block:
-                        gr["produced_stale_block"] = True
-                        gr["stale_block_id"] = producer_block[d["miner"]]
-                        gr["stop_reason"] = "stale_block_generated"
-                    else:
-                        gr["stop_reason"] = "winner_received"
+            _patch_winner_and_deliveries(gen_rows if acc.gen_rows is not None else None,
+                                         winner, block_id, delivery_info)
             refresh_cause = "accepted_block"
         elif is_exhausted:
             acc.exhausted += 1
@@ -1034,8 +1091,9 @@ def _build_result(cfg, n, S, p, rates, rates_int, shares, ranges_all, active_ids
     has_blocks = acc.accepted > 0
     block_na = None if has_blocks else "no_accepted_blocks"
     non_productive_active = float((at - pt).clip(min=0).sum())
-    # SINGLE_HEIGHT_STALE_RACE_DIAGNOSTIC (Sections 1,8): <=1 admitted stale per
-    # accepted height; a secondary diagnostic, isolated from the primary metrics.
+    # SINGLE_HEIGHT_STALE_RACE_DIAGNOSTIC (Sections 1,8): one stale per non-winning
+    # MINER per height, many distinct miners may stale one height (0..N_active-1, no
+    # global cap); a secondary diagnostic, isolated from the primary metrics.
     stales = acc.single_height_stale_blocks
     all_valid = acc.accepted + stales
     sh_per_block = (stales / acc.accepted) if has_blocks else None
@@ -1093,9 +1151,18 @@ def _build_result(cfg, n, S, p, rates, rates_int, shares, ranges_all, active_ids
         actual_competitor_miner_count=acc.actual_competitor_miners,
         actual_proposal_miner_count=acc.actual_proposal_miners,
         actual_stale_producer_miner_count=acc.actual_stale_producer_miners,
-        # stale-race work reported SEPARATELY, NEVER integrated into primary metrics
-        stale_race_candidate_evaluations=acc.stale_race_candidate_evaluations,
-        stale_race_active_time_s=float(acc.stale_race_active_time),
+        # post-winner diagnostic work reported SEPARATELY, NEVER integrated into
+        # primary metrics (5B1G.1 §4). post_winner_* covers EVERY active non-winner;
+        # stale_producer_postwinner_* is the producer-only subset.
+        post_winner_candidate_evaluations=acc.post_winner_candidate_evaluations,
+        post_winner_active_time_s=float(acc.post_winner_active_time),
+        post_winner_energy_not_integrated=True,
+        stale_producer_postwinner_candidate_evaluations=acc.stale_producer_postwinner_candidate_evaluations,
+        stale_producer_postwinner_active_time_s=float(acc.stale_producer_postwinner_active_time),
+        # retained legacy names — defined to EQUAL the COMPLETE post-winner totals
+        # (all active non-winners), NOT the producer-only subset.
+        stale_race_candidate_evaluations=acc.post_winner_candidate_evaluations,
+        stale_race_active_time_s=float(acc.post_winner_active_time),
         stale_race_energy_not_integrated=True,
         # main-block vs stale-block propagation counted separately (Section 5)
         main_block_propagation_message_count=acc.main_block_prop_msgs,

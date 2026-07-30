@@ -8,7 +8,7 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 # schema / component versions (recorded in the code-freeze manifest)
 # ---------------------------------------------------------------------------
-OUTPUT_SCHEMA_VERSION = "5b1g.1"
+OUTPUT_SCHEMA_VERSION = "5b1g.2"
 
 # ---------------------------------------------------------------------------
 # explicit machine-readable NA (undefined / not-applicable)
@@ -81,8 +81,11 @@ PER_MINER_GENERATION_FIELDS = (
     "unsearched_candidates_this_generation", "inactive_candidates_this_generation",
     "productive_search_time_s", "active_nonproductive_time_s", "idle_time_s",
     "offline_time_s", "earliest_solution_position", "earliest_solution_time_s",
+    "earliest_solution_identity",
+    # circular path provenance (Stage 5B1G.1 §2)
+    "path_wraps_around", "path_end_position", "circular_candidates_evaluated",
     "search_progress_reason", "stop_reason", "completed_range", "generated_block_id",
-    "received_winner_time_s", "propagation_delay_s",
+    "received_winner_time_s", "propagation_delay_s", "delivery_stream_key",
     "potential_old_parent_solution_position", "potential_old_parent_solution_time_s",
     "found_competing_solution_before_receipt", "produced_stale_block", "stale_block_id",
 )
@@ -93,11 +96,16 @@ GENERATION_STOP_REASONS = (
     "no_reachable_solution", "simulation_cutoff", "inactive",
 )
 
-# machine-readable delivery-delay + stale-race record schemas (Sections 2,4,12)
+# machine-readable delivery-delay + stale-race record schemas (Sections 2,4,12).
+# A delivery record exists for EVERY active non-winning miner (Stage 5B1G.1 §3),
+# regardless of whether it is a potential competitor, a stale producer, a
+# same-identity independent finder, or a miner with no reachable solution.
 DELIVERY_DELAY_RECORD_FIELDS = (
     "template_generation_id", "parent_block_id", "winner_miner_id",
     "recipient_miner_id", "propagation_delay_s", "received_winner_time_s",
-    "recipient_discovery_time_s", "delivery_stream_key", "discovered_before_receipt",
+    "recipient_discovery_time_s", "recipient_earliest_solution_identity",
+    "delivery_stream_key", "discovered_before_receipt", "potential_competitor",
+    "produced_stale_block", "same_identity_independent_discovery", "stop_reason",
 )
 STALE_RACE_RECORD_FIELDS = (
     "template_generation_id", "parent_block_id", "accepted_block_id",
@@ -105,6 +113,7 @@ STALE_RACE_RECORD_FIELDS = (
     "potential_competitor_miner_count", "actual_stale_producer_miner_count",
     "actual_proposal_miner_count", "actual_competitor_miner_count",
     "stale_block_count", "single_height_stale_block_count", "height_has_any_stale",
+    "active_nonwinner_delivery_count",
     # one entry PER stale producer (no collapsing several producers into one block)
     "stale_producer_miner_ids", "stale_block_ids", "stale_candidate_identities",
     "stale_discovery_times", "stale_race_energy_not_integrated",

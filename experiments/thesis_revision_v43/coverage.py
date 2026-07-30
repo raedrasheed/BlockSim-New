@@ -198,20 +198,28 @@ def exhaustive_winner_reference(pos, starts: List[int], rates, S: int):
 # ---------------------------------------------------------------------------
 # EXACT B2 circular-exhaustion closure (Stage 5B1G, Section 7)
 # ---------------------------------------------------------------------------
-def coverage_at_time_exact(starts, rates_int, S, t: Fraction) -> Dict[str, int]:
-    """Exact integer coverage at exact rational time t. Each active miner i (integer
-    rate r_i) has completed floor(r_i * t) candidates by time t (unified convention:
-    candidate d completes at (d+1)/r_i), capped at one traversal S. No float anywhere.
-    Miners with rate <= 0 contribute no path."""
-    lengths = []
+def lengths_at_time_exact(rates_int, t: Fraction, S) -> List[int]:
+    """Exact per-miner completed candidate counts at exact rational time t:
+        completed_i = min(S, floor(rate_i * t))
+    evaluated with pure integer/Fraction arithmetic `(rate_i * t.num) // t.den` — NO
+    float. Miners with rate <= 0 (inactive) contribute 0. This is the single source of
+    per-miner candidate counts for B2 (per-miner-generation rows, network total,
+    circular union, distinct and duplicate counts) so all four agree exactly."""
+    S = int(S)
+    out = []
     for r in rates_int:
         r = int(r)
         if r <= 0 or t <= 0:
-            lengths.append(0)
+            out.append(0)
             continue
-        c = (r * t.numerator) // t.denominator          # exact floor(r*t)
-        lengths.append(min(int(S), int(c)))
-    return b2_coverage_exact(starts, lengths, S)
+        out.append(min(S, (r * t.numerator) // t.denominator))     # exact floor(r*t)
+    return out
+
+
+def coverage_at_time_exact(starts, rates_int, S, t: Fraction) -> Dict[str, int]:
+    """Exact integer coverage at exact rational time t (unified convention: candidate
+    d completes at (d+1)/r_i), capped at one traversal S. No float anywhere."""
+    return b2_coverage_exact(starts, lengths_at_time_exact(rates_int, t, S), S)
 
 
 def b2_exhaustion_time_exact(starts, rates_int, S) -> Dict[str, object]:

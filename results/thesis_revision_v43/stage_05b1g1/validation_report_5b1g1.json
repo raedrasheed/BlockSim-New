@@ -1,0 +1,567 @@
+{
+  "adversarial_boundary_exact_ne_float": true,
+  "all_reconciliations_pass": true,
+  "coverage": {
+    "adversarial_boundary": true,
+    "b1_same_identity": true,
+    "b2_random_start": true,
+    "b2_wraparound": true,
+    "delay_levels": [
+      0.0,
+      0.42,
+      5.0,
+      30.0,
+      60.0
+    ],
+    "multiple_stale_producers": true,
+    "no_reachable_solution_miner": true,
+    "nonstale_competitor": true,
+    "nonzero_delay": true,
+    "zero_delay": true
+  },
+  "failed": [],
+  "reconciliation_families": [
+    "network_generation_totals",
+    "exact_b2_candidates",
+    "b2_paths",
+    "all_nonwinner_deliveries",
+    "postwinner_separation",
+    "primary_energy_invariant",
+    "delivery_stream",
+    "stale_diagnostic"
+  ],
+  "results": [
+    {
+      "accepted": 13,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "allocation_policy": "equal",
+        "hash_rate_distribution": "homogeneous",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B0",
+        "seed": 1
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 13,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "allocation_policy": "weighted",
+        "hash_rate_distribution": "heterogeneous_moderate",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B0",
+        "seed": 1
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 0,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "allocation_policy": "equal",
+        "hash_rate_distribution": "homogeneous",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B1",
+        "seed": 1
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 2,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "allocation_policy": "weighted",
+        "hash_rate_distribution": "heterogeneous_moderate",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B1",
+        "seed": 1
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 7,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "allocation_policy": "equal",
+        "hash_rate_distribution": "homogeneous",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B2",
+        "seed": 1
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 7,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "allocation_policy": "weighted",
+        "hash_rate_distribution": "heterogeneous_moderate",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B2",
+        "seed": 1
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 13,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "allocation_policy": "equal",
+        "hash_rate_distribution": "homogeneous",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 1
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 13,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "allocation_policy": "weighted",
+        "hash_rate_distribution": "heterogeneous_moderate",
+        "idle_power_ratio": 0.0,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 1
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 13,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "allocation_policy": "equal",
+        "hash_rate_distribution": "homogeneous",
+        "idle_power_ratio": 0.1,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "C2",
+        "seed": 1
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 13,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "allocation_policy": "weighted",
+        "hash_rate_distribution": "heterogeneous_moderate",
+        "idle_power_ratio": 0.1,
+        "miner_count": 40,
+        "mu": 2.0,
+        "scenario_id": "C2",
+        "seed": 1
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 16,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "miner_count": 40,
+        "mu": 1.0,
+        "propagation_delay_mean_s": 0.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 3
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 16,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "miner_count": 40,
+        "mu": 1.0,
+        "propagation_delay_mean_s": 0.42,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 3
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 16,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "miner_count": 40,
+        "mu": 1.0,
+        "propagation_delay_mean_s": 5.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 3
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 16,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "miner_count": 40,
+        "mu": 1.0,
+        "propagation_delay_mean_s": 30.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 3
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 16,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "miner_count": 40,
+        "mu": 1.0,
+        "propagation_delay_mean_s": 60.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 3
+      },
+      "max_stale_at_height": 1,
+      "passed": true,
+      "stale": 2
+    },
+    {
+      "accepted": 4,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "miner_count": 12,
+        "mu": 4.0,
+        "scenario_id": "B2",
+        "seed": 5
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 15,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "miner_count": 12,
+        "mu": 4.0,
+        "scenario_id": "B2",
+        "seed": 7
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 6,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "miner_count": 8,
+        "mu": 0.5,
+        "scenario_id": "B2",
+        "seed": 11
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 501,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "miner_count": 20,
+        "mu": 4.0,
+        "network_hash_rate_hps": 2000.0,
+        "propagation_delay_mean_s": 60.0,
+        "scenario_id": "B1",
+        "seed": 5,
+        "target_block_interval_s": 1.0
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    },
+    {
+      "accepted": 10024,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "miner_count": 20,
+        "mu": 4.0,
+        "network_hash_rate_hps": 2000.0,
+        "propagation_delay_mean_s": 60.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 5,
+        "target_block_interval_s": 1.0
+      },
+      "max_stale_at_height": 10,
+      "passed": true,
+      "stale": 26329
+    },
+    {
+      "accepted": 9894,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "miner_count": 15,
+        "mu": 4.0,
+        "network_hash_rate_hps": 2000.0,
+        "propagation_delay_mean_s": 30.0,
+        "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+        "seed": 9,
+        "target_block_interval_s": 1.0
+      },
+      "max_stale_at_height": 9,
+      "passed": true,
+      "stale": 24060
+    },
+    {
+      "accepted": 7,
+      "checks": {
+        "all_nonwinner_deliveries": true,
+        "b2_paths": true,
+        "delivery_stream": true,
+        "exact_b2_candidates": true,
+        "network_generation_totals": true,
+        "postwinner_separation": true,
+        "primary_energy_invariant": true,
+        "stale_diagnostic": true
+      },
+      "config": {
+        "inactive_miner_fraction": 0.2,
+        "miner_count": 20,
+        "mu": 3.0,
+        "scenario_id": "B2",
+        "seed": 2
+      },
+      "max_stale_at_height": 0,
+      "passed": true,
+      "stale": 0
+    }
+  ],
+  "run_cap": 50,
+  "run_count": 22,
+  "under_cap": true
+}

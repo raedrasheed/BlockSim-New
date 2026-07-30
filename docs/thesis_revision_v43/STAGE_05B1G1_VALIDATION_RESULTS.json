@@ -1,0 +1,22 @@
+{
+  "run_count": 22,
+  "all_pass": true,
+  "coverage": {
+    "b1_same_identity": true,
+    "b2_random_start": true,
+    "b2_wraparound": true,
+    "adversarial_boundary": true,
+    "no_reachable_solution_miner": true,
+    "nonstale_competitor": true,
+    "multiple_stale_producers": true,
+    "zero_delay": true,
+    "nonzero_delay": true,
+    "delay_levels": [
+      0.0,
+      0.42,
+      5.0,
+      30.0,
+      60.0
+    ]
+  }
+}

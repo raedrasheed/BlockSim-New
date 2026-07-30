@@ -1,0 +1,2345 @@
+{
+  "source_config": {
+    "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+    "seed": 5,
+    "miner_count": 20,
+    "mu": 4.0,
+    "network_hash_rate_hps": 2000.0,
+    "target_block_interval_s": 1.0,
+    "propagation_delay_mean_s": 60.0
+  },
+  "engine_version": "5b1g.2",
+  "schema_version": "5b1g.2",
+  "run_totals": {
+    "accepted_heights": 10024,
+    "stale_block_count": 26329,
+    "post_winner_candidate_evaluations": 52627238,
+    "stale_producer_postwinner_candidate_evaluations": 4166578,
+    "delivery_record_count": 190456
+  },
+  "stale_race_records_sample": [
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "accepted_block_id": "blk-1",
+      "winner_miner_id": 9,
+      "winner_time_s": 0.76,
+      "potential_finder_miner_count": 2,
+      "potential_competitor_miner_count": 1,
+      "actual_stale_producer_miner_count": 1,
+      "actual_proposal_miner_count": 2,
+      "actual_competitor_miner_count": 1,
+      "stale_block_count": 1,
+      "single_height_stale_block_count": 1,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        3
+      ],
+      "stale_block_ids": [
+        "stale-blk-1-m3"
+      ],
+      "stale_candidate_identities": [
+        "1510"
+      ],
+      "stale_discovery_times": [
+        3.11
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "accepted_block_id": "blk-2",
+      "winner_miner_id": 13,
+      "winner_time_s": 0.42,
+      "potential_finder_miner_count": 3,
+      "potential_competitor_miner_count": 2,
+      "actual_stale_producer_miner_count": 2,
+      "actual_proposal_miner_count": 3,
+      "actual_competitor_miner_count": 2,
+      "stale_block_count": 2,
+      "single_height_stale_block_count": 2,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        9,
+        15
+      ],
+      "stale_block_ids": [
+        "stale-blk-2-m9",
+        "stale-blk-2-m15"
+      ],
+      "stale_candidate_identities": [
+        "3823",
+        "6246"
+      ],
+      "stale_discovery_times": [
+        2.24,
+        2.47
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "accepted_block_id": "blk-3",
+      "winner_miner_id": 12,
+      "winner_time_s": 0.97,
+      "potential_finder_miner_count": 3,
+      "potential_competitor_miner_count": 2,
+      "actual_stale_producer_miner_count": 2,
+      "actual_proposal_miner_count": 3,
+      "actual_competitor_miner_count": 2,
+      "stale_block_count": 2,
+      "single_height_stale_block_count": 2,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        3,
+        9
+      ],
+      "stale_block_ids": [
+        "stale-blk-3-m3",
+        "stale-blk-3-m9"
+      ],
+      "stale_candidate_identities": [
+        "1441",
+        "3841"
+      ],
+      "stale_discovery_times": [
+        2.42,
+        2.42
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 4,
+      "parent_block_id": "blk-3",
+      "accepted_block_id": "blk-4",
+      "winner_miner_id": 12,
+      "winner_time_s": 0.1,
+      "potential_finder_miner_count": 6,
+      "potential_competitor_miner_count": 5,
+      "actual_stale_producer_miner_count": 5,
+      "actual_proposal_miner_count": 6,
+      "actual_competitor_miner_count": 5,
+      "stale_block_count": 5,
+      "single_height_stale_block_count": 5,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        7,
+        4,
+        17,
+        15,
+        13
+      ],
+      "stale_block_ids": [
+        "stale-blk-4-m7",
+        "stale-blk-4-m4",
+        "stale-blk-4-m17",
+        "stale-blk-4-m15",
+        "stale-blk-4-m13"
+      ],
+      "stale_candidate_identities": [
+        "2951",
+        "1788",
+        "6991",
+        "6217",
+        "5583"
+      ],
+      "stale_discovery_times": [
+        1.52,
+        1.89,
+        1.92,
+        2.18,
+        3.84
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 6,
+      "parent_block_id": "blk-4",
+      "accepted_block_id": "blk-5",
+      "winner_miner_id": 18,
+      "winner_time_s": 0.75,
+      "potential_finder_miner_count": 3,
+      "potential_competitor_miner_count": 2,
+      "actual_stale_producer_miner_count": 2,
+      "actual_proposal_miner_count": 3,
+      "actual_competitor_miner_count": 2,
+      "stale_block_count": 2,
+      "single_height_stale_block_count": 2,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        19,
+        6
+      ],
+      "stale_block_ids": [
+        "stale-blk-5-m19",
+        "stale-blk-5-m6"
+      ],
+      "stale_candidate_identities": [
+        "7793",
+        "2696"
+      ],
+      "stale_discovery_times": [
+        1.94,
+        2.97
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 7,
+      "parent_block_id": "blk-5",
+      "accepted_block_id": "blk-6",
+      "winner_miner_id": 10,
+      "winner_time_s": 0.31,
+      "potential_finder_miner_count": 4,
+      "potential_competitor_miner_count": 3,
+      "actual_stale_producer_miner_count": 3,
+      "actual_proposal_miner_count": 4,
+      "actual_competitor_miner_count": 3,
+      "stale_block_count": 3,
+      "single_height_stale_block_count": 3,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        12,
+        8,
+        18
+      ],
+      "stale_block_ids": [
+        "stale-blk-6-m12",
+        "stale-blk-6-m8",
+        "stale-blk-6-m18"
+      ],
+      "stale_candidate_identities": [
+        "4927",
+        "3389",
+        "7528"
+      ],
+      "stale_discovery_times": [
+        1.28,
+        1.9,
+        3.29
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 8,
+      "parent_block_id": "blk-6",
+      "accepted_block_id": "blk-7",
+      "winner_miner_id": 17,
+      "winner_time_s": 1.59,
+      "potential_finder_miner_count": 1,
+      "potential_competitor_miner_count": 0,
+      "actual_stale_producer_miner_count": 0,
+      "actual_proposal_miner_count": 1,
+      "actual_competitor_miner_count": 0,
+      "stale_block_count": 0,
+      "single_height_stale_block_count": 0,
+      "height_has_any_stale": false,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [],
+      "stale_block_ids": [],
+      "stale_candidate_identities": [],
+      "stale_discovery_times": [],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 9,
+      "parent_block_id": "blk-7",
+      "accepted_block_id": "blk-8",
+      "winner_miner_id": 12,
+      "winner_time_s": 0.7,
+      "potential_finder_miner_count": 5,
+      "potential_competitor_miner_count": 4,
+      "actual_stale_producer_miner_count": 3,
+      "actual_proposal_miner_count": 4,
+      "actual_competitor_miner_count": 3,
+      "stale_block_count": 3,
+      "single_height_stale_block_count": 3,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        2,
+        6,
+        14
+      ],
+      "stale_block_ids": [
+        "stale-blk-8-m2",
+        "stale-blk-8-m6",
+        "stale-blk-8-m14"
+      ],
+      "stale_candidate_identities": [
+        "939",
+        "2609",
+        "5871"
+      ],
+      "stale_discovery_times": [
+        1.4,
+        2.1,
+        2.72
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 10,
+      "parent_block_id": "blk-8",
+      "accepted_block_id": "blk-9",
+      "winner_miner_id": 4,
+      "winner_time_s": 0.31,
+      "potential_finder_miner_count": 7,
+      "potential_competitor_miner_count": 6,
+      "actual_stale_producer_miner_count": 6,
+      "actual_proposal_miner_count": 7,
+      "actual_competitor_miner_count": 6,
+      "stale_block_count": 6,
+      "single_height_stale_block_count": 6,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        18,
+        15,
+        19,
+        2,
+        6,
+        9
+      ],
+      "stale_block_ids": [
+        "stale-blk-9-m18",
+        "stale-blk-9-m15",
+        "stale-blk-9-m19",
+        "stale-blk-9-m2",
+        "stale-blk-9-m6",
+        "stale-blk-9-m9"
+      ],
+      "stale_candidate_identities": [
+        "7236",
+        "6037",
+        "7647",
+        "964",
+        "2637",
+        "3874"
+      ],
+      "stale_discovery_times": [
+        0.37,
+        0.38,
+        0.48,
+        1.65,
+        2.38,
+        2.75
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 11,
+      "parent_block_id": "blk-9",
+      "accepted_block_id": "blk-10",
+      "winner_miner_id": 16,
+      "winner_time_s": 0.26,
+      "potential_finder_miner_count": 4,
+      "potential_competitor_miner_count": 3,
+      "actual_stale_producer_miner_count": 3,
+      "actual_proposal_miner_count": 4,
+      "actual_competitor_miner_count": 3,
+      "stale_block_count": 3,
+      "single_height_stale_block_count": 3,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        11,
+        9,
+        7
+      ],
+      "stale_block_ids": [
+        "stale-blk-10-m11",
+        "stale-blk-10-m9",
+        "stale-blk-10-m7"
+      ],
+      "stale_candidate_identities": [
+        "4487",
+        "3810",
+        "3160"
+      ],
+      "stale_discovery_times": [
+        0.88,
+        2.11,
+        3.61
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 12,
+      "parent_block_id": "blk-10",
+      "accepted_block_id": "blk-11",
+      "winner_miner_id": 9,
+      "winner_time_s": 0.18,
+      "potential_finder_miner_count": 8,
+      "potential_competitor_miner_count": 7,
+      "actual_stale_producer_miner_count": 7,
+      "actual_proposal_miner_count": 8,
+      "actual_competitor_miner_count": 7,
+      "stale_block_count": 7,
+      "single_height_stale_block_count": 7,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        15,
+        5,
+        4,
+        10,
+        8,
+        19,
+        11
+      ],
+      "stale_block_ids": [
+        "stale-blk-11-m15",
+        "stale-blk-11-m5",
+        "stale-blk-11-m4",
+        "stale-blk-11-m10",
+        "stale-blk-11-m8",
+        "stale-blk-11-m19",
+        "stale-blk-11-m11"
+      ],
+      "stale_candidate_identities": [
+        "6017",
+        "2097",
+        "1764",
+        "4329",
+        "3546",
+        "7975",
+        "4782"
+      ],
+      "stale_discovery_times": [
+        0.18,
+        0.98,
+        1.65,
+        3.3,
+        3.47,
+        3.76,
+        3.83
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 13,
+      "parent_block_id": "blk-11",
+      "accepted_block_id": "blk-12",
+      "winner_miner_id": 6,
+      "winner_time_s": 0.21,
+      "potential_finder_miner_count": 4,
+      "potential_competitor_miner_count": 3,
+      "actual_stale_producer_miner_count": 3,
+      "actual_proposal_miner_count": 4,
+      "actual_competitor_miner_count": 3,
+      "stale_block_count": 3,
+      "single_height_stale_block_count": 3,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        8,
+        13,
+        19
+      ],
+      "stale_block_ids": [
+        "stale-blk-12-m8",
+        "stale-blk-12-m13",
+        "stale-blk-12-m19"
+      ],
+      "stale_candidate_identities": [
+        "3231",
+        "5374",
+        "7823"
+      ],
+      "stale_discovery_times": [
+        0.32,
+        1.75,
+        2.24
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 14,
+      "parent_block_id": "blk-12",
+      "accepted_block_id": "blk-13",
+      "winner_miner_id": 2,
+      "winner_time_s": 2.04,
+      "potential_finder_miner_count": 2,
+      "potential_competitor_miner_count": 1,
+      "actual_stale_producer_miner_count": 1,
+      "actual_proposal_miner_count": 2,
+      "actual_competitor_miner_count": 1,
+      "stale_block_count": 1,
+      "single_height_stale_block_count": 1,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        12
+      ],
+      "stale_block_ids": [
+        "stale-blk-13-m12"
+      ],
+      "stale_candidate_identities": [
+        "5167"
+      ],
+      "stale_discovery_times": [
+        3.68
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 15,
+      "parent_block_id": "blk-13",
+      "accepted_block_id": "blk-14",
+      "winner_miner_id": 19,
+      "winner_time_s": 0.14,
+      "potential_finder_miner_count": 2,
+      "potential_competitor_miner_count": 1,
+      "actual_stale_producer_miner_count": 1,
+      "actual_proposal_miner_count": 2,
+      "actual_competitor_miner_count": 1,
+      "stale_block_count": 1,
+      "single_height_stale_block_count": 1,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        6
+      ],
+      "stale_block_ids": [
+        "stale-blk-14-m6"
+      ],
+      "stale_candidate_identities": [
+        "2680"
+      ],
+      "stale_discovery_times": [
+        2.81
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 16,
+      "parent_block_id": "blk-14",
+      "accepted_block_id": "blk-15",
+      "winner_miner_id": 12,
+      "winner_time_s": 0.67,
+      "potential_finder_miner_count": 3,
+      "potential_competitor_miner_count": 2,
+      "actual_stale_producer_miner_count": 2,
+      "actual_proposal_miner_count": 3,
+      "actual_competitor_miner_count": 2,
+      "stale_block_count": 2,
+      "single_height_stale_block_count": 2,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        0,
+        13
+      ],
+      "stale_block_ids": [
+        "stale-blk-15-m0",
+        "stale-blk-15-m13"
+      ],
+      "stale_candidate_identities": [
+        "86",
+        "5424"
+      ],
+      "stale_discovery_times": [
+        0.87,
+        2.25
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "accepted_block_id": "blk-2",
+      "winner_miner_id": 13,
+      "winner_time_s": 0.42,
+      "potential_finder_miner_count": 3,
+      "potential_competitor_miner_count": 2,
+      "actual_stale_producer_miner_count": 2,
+      "actual_proposal_miner_count": 3,
+      "actual_competitor_miner_count": 2,
+      "stale_block_count": 2,
+      "single_height_stale_block_count": 2,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        9,
+        15
+      ],
+      "stale_block_ids": [
+        "stale-blk-2-m9",
+        "stale-blk-2-m15"
+      ],
+      "stale_candidate_identities": [
+        "3823",
+        "6246"
+      ],
+      "stale_discovery_times": [
+        2.24,
+        2.47
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "accepted_block_id": "blk-3",
+      "winner_miner_id": 12,
+      "winner_time_s": 0.97,
+      "potential_finder_miner_count": 3,
+      "potential_competitor_miner_count": 2,
+      "actual_stale_producer_miner_count": 2,
+      "actual_proposal_miner_count": 3,
+      "actual_competitor_miner_count": 2,
+      "stale_block_count": 2,
+      "single_height_stale_block_count": 2,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        3,
+        9
+      ],
+      "stale_block_ids": [
+        "stale-blk-3-m3",
+        "stale-blk-3-m9"
+      ],
+      "stale_candidate_identities": [
+        "1441",
+        "3841"
+      ],
+      "stale_discovery_times": [
+        2.42,
+        2.42
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 4,
+      "parent_block_id": "blk-3",
+      "accepted_block_id": "blk-4",
+      "winner_miner_id": 12,
+      "winner_time_s": 0.1,
+      "potential_finder_miner_count": 6,
+      "potential_competitor_miner_count": 5,
+      "actual_stale_producer_miner_count": 5,
+      "actual_proposal_miner_count": 6,
+      "actual_competitor_miner_count": 5,
+      "stale_block_count": 5,
+      "single_height_stale_block_count": 5,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        7,
+        4,
+        17,
+        15,
+        13
+      ],
+      "stale_block_ids": [
+        "stale-blk-4-m7",
+        "stale-blk-4-m4",
+        "stale-blk-4-m17",
+        "stale-blk-4-m15",
+        "stale-blk-4-m13"
+      ],
+      "stale_candidate_identities": [
+        "2951",
+        "1788",
+        "6991",
+        "6217",
+        "5583"
+      ],
+      "stale_discovery_times": [
+        1.52,
+        1.89,
+        1.92,
+        2.18,
+        3.84
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 6,
+      "parent_block_id": "blk-4",
+      "accepted_block_id": "blk-5",
+      "winner_miner_id": 18,
+      "winner_time_s": 0.75,
+      "potential_finder_miner_count": 3,
+      "potential_competitor_miner_count": 2,
+      "actual_stale_producer_miner_count": 2,
+      "actual_proposal_miner_count": 3,
+      "actual_competitor_miner_count": 2,
+      "stale_block_count": 2,
+      "single_height_stale_block_count": 2,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        19,
+        6
+      ],
+      "stale_block_ids": [
+        "stale-blk-5-m19",
+        "stale-blk-5-m6"
+      ],
+      "stale_candidate_identities": [
+        "7793",
+        "2696"
+      ],
+      "stale_discovery_times": [
+        1.94,
+        2.97
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 7,
+      "parent_block_id": "blk-5",
+      "accepted_block_id": "blk-6",
+      "winner_miner_id": 10,
+      "winner_time_s": 0.31,
+      "potential_finder_miner_count": 4,
+      "potential_competitor_miner_count": 3,
+      "actual_stale_producer_miner_count": 3,
+      "actual_proposal_miner_count": 4,
+      "actual_competitor_miner_count": 3,
+      "stale_block_count": 3,
+      "single_height_stale_block_count": 3,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        12,
+        8,
+        18
+      ],
+      "stale_block_ids": [
+        "stale-blk-6-m12",
+        "stale-blk-6-m8",
+        "stale-blk-6-m18"
+      ],
+      "stale_candidate_identities": [
+        "4927",
+        "3389",
+        "7528"
+      ],
+      "stale_discovery_times": [
+        1.28,
+        1.9,
+        3.29
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 9,
+      "parent_block_id": "blk-7",
+      "accepted_block_id": "blk-8",
+      "winner_miner_id": 12,
+      "winner_time_s": 0.7,
+      "potential_finder_miner_count": 5,
+      "potential_competitor_miner_count": 4,
+      "actual_stale_producer_miner_count": 3,
+      "actual_proposal_miner_count": 4,
+      "actual_competitor_miner_count": 3,
+      "stale_block_count": 3,
+      "single_height_stale_block_count": 3,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        2,
+        6,
+        14
+      ],
+      "stale_block_ids": [
+        "stale-blk-8-m2",
+        "stale-blk-8-m6",
+        "stale-blk-8-m14"
+      ],
+      "stale_candidate_identities": [
+        "939",
+        "2609",
+        "5871"
+      ],
+      "stale_discovery_times": [
+        1.4,
+        2.1,
+        2.72
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 10,
+      "parent_block_id": "blk-8",
+      "accepted_block_id": "blk-9",
+      "winner_miner_id": 4,
+      "winner_time_s": 0.31,
+      "potential_finder_miner_count": 7,
+      "potential_competitor_miner_count": 6,
+      "actual_stale_producer_miner_count": 6,
+      "actual_proposal_miner_count": 7,
+      "actual_competitor_miner_count": 6,
+      "stale_block_count": 6,
+      "single_height_stale_block_count": 6,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        18,
+        15,
+        19,
+        2,
+        6,
+        9
+      ],
+      "stale_block_ids": [
+        "stale-blk-9-m18",
+        "stale-blk-9-m15",
+        "stale-blk-9-m19",
+        "stale-blk-9-m2",
+        "stale-blk-9-m6",
+        "stale-blk-9-m9"
+      ],
+      "stale_candidate_identities": [
+        "7236",
+        "6037",
+        "7647",
+        "964",
+        "2637",
+        "3874"
+      ],
+      "stale_discovery_times": [
+        0.37,
+        0.38,
+        0.48,
+        1.65,
+        2.38,
+        2.75
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 11,
+      "parent_block_id": "blk-9",
+      "accepted_block_id": "blk-10",
+      "winner_miner_id": 16,
+      "winner_time_s": 0.26,
+      "potential_finder_miner_count": 4,
+      "potential_competitor_miner_count": 3,
+      "actual_stale_producer_miner_count": 3,
+      "actual_proposal_miner_count": 4,
+      "actual_competitor_miner_count": 3,
+      "stale_block_count": 3,
+      "single_height_stale_block_count": 3,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        11,
+        9,
+        7
+      ],
+      "stale_block_ids": [
+        "stale-blk-10-m11",
+        "stale-blk-10-m9",
+        "stale-blk-10-m7"
+      ],
+      "stale_candidate_identities": [
+        "4487",
+        "3810",
+        "3160"
+      ],
+      "stale_discovery_times": [
+        0.88,
+        2.11,
+        3.61
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 12,
+      "parent_block_id": "blk-10",
+      "accepted_block_id": "blk-11",
+      "winner_miner_id": 9,
+      "winner_time_s": 0.18,
+      "potential_finder_miner_count": 8,
+      "potential_competitor_miner_count": 7,
+      "actual_stale_producer_miner_count": 7,
+      "actual_proposal_miner_count": 8,
+      "actual_competitor_miner_count": 7,
+      "stale_block_count": 7,
+      "single_height_stale_block_count": 7,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        15,
+        5,
+        4,
+        10,
+        8,
+        19,
+        11
+      ],
+      "stale_block_ids": [
+        "stale-blk-11-m15",
+        "stale-blk-11-m5",
+        "stale-blk-11-m4",
+        "stale-blk-11-m10",
+        "stale-blk-11-m8",
+        "stale-blk-11-m19",
+        "stale-blk-11-m11"
+      ],
+      "stale_candidate_identities": [
+        "6017",
+        "2097",
+        "1764",
+        "4329",
+        "3546",
+        "7975",
+        "4782"
+      ],
+      "stale_discovery_times": [
+        0.18,
+        0.98,
+        1.65,
+        3.3,
+        3.47,
+        3.76,
+        3.83
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 13,
+      "parent_block_id": "blk-11",
+      "accepted_block_id": "blk-12",
+      "winner_miner_id": 6,
+      "winner_time_s": 0.21,
+      "potential_finder_miner_count": 4,
+      "potential_competitor_miner_count": 3,
+      "actual_stale_producer_miner_count": 3,
+      "actual_proposal_miner_count": 4,
+      "actual_competitor_miner_count": 3,
+      "stale_block_count": 3,
+      "single_height_stale_block_count": 3,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        8,
+        13,
+        19
+      ],
+      "stale_block_ids": [
+        "stale-blk-12-m8",
+        "stale-blk-12-m13",
+        "stale-blk-12-m19"
+      ],
+      "stale_candidate_identities": [
+        "3231",
+        "5374",
+        "7823"
+      ],
+      "stale_discovery_times": [
+        0.32,
+        1.75,
+        2.24
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 16,
+      "parent_block_id": "blk-14",
+      "accepted_block_id": "blk-15",
+      "winner_miner_id": 12,
+      "winner_time_s": 0.67,
+      "potential_finder_miner_count": 3,
+      "potential_competitor_miner_count": 2,
+      "actual_stale_producer_miner_count": 2,
+      "actual_proposal_miner_count": 3,
+      "actual_competitor_miner_count": 2,
+      "stale_block_count": 2,
+      "single_height_stale_block_count": 2,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        0,
+        13
+      ],
+      "stale_block_ids": [
+        "stale-blk-15-m0",
+        "stale-blk-15-m13"
+      ],
+      "stale_candidate_identities": [
+        "86",
+        "5424"
+      ],
+      "stale_discovery_times": [
+        0.87,
+        2.25
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 17,
+      "parent_block_id": "blk-15",
+      "accepted_block_id": "blk-16",
+      "winner_miner_id": 1,
+      "winner_time_s": 1.76,
+      "potential_finder_miner_count": 5,
+      "potential_competitor_miner_count": 4,
+      "actual_stale_producer_miner_count": 4,
+      "actual_proposal_miner_count": 5,
+      "actual_competitor_miner_count": 4,
+      "stale_block_count": 4,
+      "single_height_stale_block_count": 4,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        14,
+        16,
+        3,
+        9
+      ],
+      "stale_block_ids": [
+        "stale-blk-16-m14",
+        "stale-blk-16-m16",
+        "stale-blk-16-m3",
+        "stale-blk-16-m9"
+      ],
+      "stale_candidate_identities": [
+        "5832",
+        "6639",
+        "1554",
+        "3971"
+      ],
+      "stale_discovery_times": [
+        2.33,
+        2.4,
+        3.55,
+        3.72
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 18,
+      "parent_block_id": "blk-16",
+      "accepted_block_id": "blk-17",
+      "winner_miner_id": 16,
+      "winner_time_s": 0.87,
+      "potential_finder_miner_count": 3,
+      "potential_competitor_miner_count": 2,
+      "actual_stale_producer_miner_count": 2,
+      "actual_proposal_miner_count": 3,
+      "actual_competitor_miner_count": 2,
+      "stale_block_count": 2,
+      "single_height_stale_block_count": 2,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        18,
+        11
+      ],
+      "stale_block_ids": [
+        "stale-blk-17-m18",
+        "stale-blk-17-m11"
+      ],
+      "stale_candidate_identities": [
+        "7295",
+        "4724"
+      ],
+      "stale_discovery_times": [
+        0.96,
+        3.25
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 19,
+      "parent_block_id": "blk-17",
+      "accepted_block_id": "blk-18",
+      "winner_miner_id": 1,
+      "winner_time_s": 3.13,
+      "potential_finder_miner_count": 4,
+      "potential_competitor_miner_count": 3,
+      "actual_stale_producer_miner_count": 3,
+      "actual_proposal_miner_count": 4,
+      "actual_competitor_miner_count": 3,
+      "stale_block_count": 3,
+      "single_height_stale_block_count": 3,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        13,
+        14,
+        3
+      ],
+      "stale_block_ids": [
+        "stale-blk-18-m13",
+        "stale-blk-18-m14",
+        "stale-blk-18-m3"
+      ],
+      "stale_candidate_identities": [
+        "5568",
+        "5974",
+        "1576"
+      ],
+      "stale_discovery_times": [
+        3.69,
+        3.75,
+        3.77
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 20,
+      "parent_block_id": "blk-18",
+      "accepted_block_id": "blk-19",
+      "winner_miner_id": 8,
+      "winner_time_s": 0.74,
+      "potential_finder_miner_count": 7,
+      "potential_competitor_miner_count": 6,
+      "actual_stale_producer_miner_count": 6,
+      "actual_proposal_miner_count": 7,
+      "actual_competitor_miner_count": 6,
+      "stale_block_count": 6,
+      "single_height_stale_block_count": 6,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        13,
+        9,
+        5,
+        10,
+        17,
+        15
+      ],
+      "stale_block_ids": [
+        "stale-blk-19-m13",
+        "stale-blk-19-m9",
+        "stale-blk-19-m5",
+        "stale-blk-19-m10",
+        "stale-blk-19-m17",
+        "stale-blk-19-m15"
+      ],
+      "stale_candidate_identities": [
+        "5334",
+        "3737",
+        "2200",
+        "4308",
+        "7115",
+        "6381"
+      ],
+      "stale_discovery_times": [
+        1.35,
+        1.38,
+        2.01,
+        3.09,
+        3.16,
+        3.82
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 21,
+      "parent_block_id": "blk-19",
+      "accepted_block_id": "blk-20",
+      "winner_miner_id": 7,
+      "winner_time_s": 2.23,
+      "potential_finder_miner_count": 4,
+      "potential_competitor_miner_count": 3,
+      "actual_stale_producer_miner_count": 3,
+      "actual_proposal_miner_count": 4,
+      "actual_competitor_miner_count": 3,
+      "stale_block_count": 3,
+      "single_height_stale_block_count": 3,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        0,
+        9,
+        19
+      ],
+      "stale_block_ids": [
+        "stale-blk-20-m0",
+        "stale-blk-20-m9",
+        "stale-blk-20-m19"
+      ],
+      "stale_candidate_identities": [
+        "249",
+        "3887",
+        "7918"
+      ],
+      "stale_discovery_times": [
+        2.5,
+        2.88,
+        3.19
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 24,
+      "parent_block_id": "blk-22",
+      "accepted_block_id": "blk-23",
+      "winner_miner_id": 6,
+      "winner_time_s": 0.67,
+      "potential_finder_miner_count": 3,
+      "potential_competitor_miner_count": 2,
+      "actual_stale_producer_miner_count": 2,
+      "actual_proposal_miner_count": 3,
+      "actual_competitor_miner_count": 2,
+      "stale_block_count": 2,
+      "single_height_stale_block_count": 2,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        1,
+        15
+      ],
+      "stale_block_ids": [
+        "stale-blk-23-m1",
+        "stale-blk-23-m15"
+      ],
+      "stale_candidate_identities": [
+        "604",
+        "6284"
+      ],
+      "stale_discovery_times": [
+        2.05,
+        2.85
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 25,
+      "parent_block_id": "blk-23",
+      "accepted_block_id": "blk-24",
+      "winner_miner_id": 19,
+      "winner_time_s": 0.05,
+      "potential_finder_miner_count": 5,
+      "potential_competitor_miner_count": 4,
+      "actual_stale_producer_miner_count": 4,
+      "actual_proposal_miner_count": 5,
+      "actual_competitor_miner_count": 4,
+      "stale_block_count": 4,
+      "single_height_stale_block_count": 4,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        1,
+        5,
+        2,
+        13
+      ],
+      "stale_block_ids": [
+        "stale-blk-24-m1",
+        "stale-blk-24-m5",
+        "stale-blk-24-m2",
+        "stale-blk-24-m13"
+      ],
+      "stale_candidate_identities": [
+        "455",
+        "2063",
+        "923",
+        "5328"
+      ],
+      "stale_discovery_times": [
+        0.56,
+        0.64,
+        1.24,
+        1.29
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 26,
+      "parent_block_id": "blk-24",
+      "accepted_block_id": "blk-25",
+      "winner_miner_id": 5,
+      "winner_time_s": 0.14,
+      "potential_finder_miner_count": 6,
+      "potential_competitor_miner_count": 5,
+      "actual_stale_producer_miner_count": 5,
+      "actual_proposal_miner_count": 6,
+      "actual_competitor_miner_count": 5,
+      "stale_block_count": 5,
+      "single_height_stale_block_count": 5,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        13,
+        2,
+        14,
+        15,
+        0
+      ],
+      "stale_block_ids": [
+        "stale-blk-25-m13",
+        "stale-blk-25-m2",
+        "stale-blk-25-m14",
+        "stale-blk-25-m15",
+        "stale-blk-25-m0"
+      ],
+      "stale_candidate_identities": [
+        "5250",
+        "941",
+        "5765",
+        "6170",
+        "285"
+      ],
+      "stale_discovery_times": [
+        0.51,
+        1.42,
+        1.66,
+        1.71,
+        2.86
+      ],
+      "stale_race_energy_not_integrated": true
+    },
+    {
+      "template_generation_id": 27,
+      "parent_block_id": "blk-25",
+      "accepted_block_id": "blk-26",
+      "winner_miner_id": 12,
+      "winner_time_s": 0.55,
+      "potential_finder_miner_count": 3,
+      "potential_competitor_miner_count": 2,
+      "actual_stale_producer_miner_count": 2,
+      "actual_proposal_miner_count": 3,
+      "actual_competitor_miner_count": 2,
+      "stale_block_count": 2,
+      "single_height_stale_block_count": 2,
+      "height_has_any_stale": true,
+      "active_nonwinner_delivery_count": 19,
+      "stale_producer_miner_ids": [
+        8,
+        6
+      ],
+      "stale_block_ids": [
+        "stale-blk-26-m8",
+        "stale-blk-26-m6"
+      ],
+      "stale_candidate_identities": [
+        "3298",
+        "2762"
+      ],
+      "stale_discovery_times": [
+        0.99,
+        3.63
+      ],
+      "stale_race_energy_not_integrated": true
+    }
+  ],
+  "delivery_delay_records_by_class": {
+    "producer": {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 3,
+      "propagation_delay_s": 149.881074793,
+      "received_winner_time_s": 150.641074793,
+      "recipient_discovery_time_s": 3.11,
+      "recipient_earliest_solution_identity": "1510",
+      "delivery_stream_key": "5|1|genesis|9|3|propagation_delay",
+      "discovered_before_receipt": true,
+      "potential_competitor": true,
+      "produced_stale_block": true,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "stale_block_generated"
+    },
+    "nonstale_competitor": {
+      "template_generation_id": 9,
+      "parent_block_id": "blk-7",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 17,
+      "propagation_delay_s": 2.146383558,
+      "received_winner_time_s": 2.846383558,
+      "recipient_discovery_time_s": 3.75,
+      "recipient_earliest_solution_identity": "7174",
+      "delivery_stream_key": "5|9|blk-7|12|17|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": true,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "winner_received"
+    },
+    "no_solution": {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 0,
+      "propagation_delay_s": 30.378389849,
+      "received_winner_time_s": 31.138389849,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|0|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    }
+  },
+  "delivery_delay_records_sample": [
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 0,
+      "propagation_delay_s": 30.378389849,
+      "received_winner_time_s": 31.138389849,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|0|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 1,
+      "propagation_delay_s": 129.721402323,
+      "received_winner_time_s": 130.481402323,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|1|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 2,
+      "propagation_delay_s": 48.557569402,
+      "received_winner_time_s": 49.317569402,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|2|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 3,
+      "propagation_delay_s": 149.881074793,
+      "received_winner_time_s": 150.641074793,
+      "recipient_discovery_time_s": 3.11,
+      "recipient_earliest_solution_identity": "1510",
+      "delivery_stream_key": "5|1|genesis|9|3|propagation_delay",
+      "discovered_before_receipt": true,
+      "potential_competitor": true,
+      "produced_stale_block": true,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "stale_block_generated"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 4,
+      "propagation_delay_s": 11.824513423,
+      "received_winner_time_s": 12.584513423,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|4|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 5,
+      "propagation_delay_s": 27.456332956,
+      "received_winner_time_s": 28.216332956,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|5|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 6,
+      "propagation_delay_s": 61.065267527,
+      "received_winner_time_s": 61.825267527,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|6|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 7,
+      "propagation_delay_s": 109.182296181,
+      "received_winner_time_s": 109.942296181,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|7|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 8,
+      "propagation_delay_s": 1.373184437,
+      "received_winner_time_s": 2.133184437,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|8|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 10,
+      "propagation_delay_s": 44.109231849,
+      "received_winner_time_s": 44.869231849,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|10|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 11,
+      "propagation_delay_s": 47.654869891,
+      "received_winner_time_s": 48.414869891,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|11|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 12,
+      "propagation_delay_s": 38.939498127,
+      "received_winner_time_s": 39.699498127,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|12|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 13,
+      "propagation_delay_s": 89.683726207,
+      "received_winner_time_s": 90.443726207,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|13|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 14,
+      "propagation_delay_s": 52.624563765,
+      "received_winner_time_s": 53.384563765,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|14|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 15,
+      "propagation_delay_s": 66.301074009,
+      "received_winner_time_s": 67.061074009,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|15|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 16,
+      "propagation_delay_s": 22.659142118,
+      "received_winner_time_s": 23.419142118,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|16|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 17,
+      "propagation_delay_s": 193.9064931,
+      "received_winner_time_s": 194.6664931,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|17|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 18,
+      "propagation_delay_s": 11.495013066,
+      "received_winner_time_s": 12.255013066,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|18|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 1,
+      "parent_block_id": "genesis",
+      "winner_miner_id": 9,
+      "recipient_miner_id": 19,
+      "propagation_delay_s": 55.190734414,
+      "received_winner_time_s": 55.950734414,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|1|genesis|9|19|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 0,
+      "propagation_delay_s": 64.048589844,
+      "received_winner_time_s": 64.468589844,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|0|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 1,
+      "propagation_delay_s": 4.093681716,
+      "received_winner_time_s": 4.513681716,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|1|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 2,
+      "propagation_delay_s": 2.743688405,
+      "received_winner_time_s": 3.163688405,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|2|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 3,
+      "propagation_delay_s": 13.246546031,
+      "received_winner_time_s": 13.666546031,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|3|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 4,
+      "propagation_delay_s": 161.452426708,
+      "received_winner_time_s": 161.872426708,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|4|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 5,
+      "propagation_delay_s": 27.882203516,
+      "received_winner_time_s": 28.302203516,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|5|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 6,
+      "propagation_delay_s": 62.013629495,
+      "received_winner_time_s": 62.433629495,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|6|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 7,
+      "propagation_delay_s": 16.08040989,
+      "received_winner_time_s": 16.50040989,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|7|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 8,
+      "propagation_delay_s": 131.003054636,
+      "received_winner_time_s": 131.423054636,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|8|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 9,
+      "propagation_delay_s": 14.765263688,
+      "received_winner_time_s": 15.185263688,
+      "recipient_discovery_time_s": 2.24,
+      "recipient_earliest_solution_identity": "3823",
+      "delivery_stream_key": "5|2|blk-1|13|9|propagation_delay",
+      "discovered_before_receipt": true,
+      "potential_competitor": true,
+      "produced_stale_block": true,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "stale_block_generated"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 10,
+      "propagation_delay_s": 75.067900932,
+      "received_winner_time_s": 75.487900932,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|10|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 11,
+      "propagation_delay_s": 17.374724444,
+      "received_winner_time_s": 17.794724444,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|11|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 12,
+      "propagation_delay_s": 116.104822367,
+      "received_winner_time_s": 116.524822367,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|12|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 14,
+      "propagation_delay_s": 193.485456737,
+      "received_winner_time_s": 193.905456737,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|14|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 15,
+      "propagation_delay_s": 128.922127811,
+      "received_winner_time_s": 129.342127811,
+      "recipient_discovery_time_s": 2.47,
+      "recipient_earliest_solution_identity": "6246",
+      "delivery_stream_key": "5|2|blk-1|13|15|propagation_delay",
+      "discovered_before_receipt": true,
+      "potential_competitor": true,
+      "produced_stale_block": true,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "stale_block_generated"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 16,
+      "propagation_delay_s": 9.463773656,
+      "received_winner_time_s": 9.883773656,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|16|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 17,
+      "propagation_delay_s": 136.792151003,
+      "received_winner_time_s": 137.212151003,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|17|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 18,
+      "propagation_delay_s": 115.375382322,
+      "received_winner_time_s": 115.795382322,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|18|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 2,
+      "parent_block_id": "blk-1",
+      "winner_miner_id": 13,
+      "recipient_miner_id": 19,
+      "propagation_delay_s": 36.022925763,
+      "received_winner_time_s": 36.442925763,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|2|blk-1|13|19|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 0,
+      "propagation_delay_s": 59.38184996,
+      "received_winner_time_s": 60.35184996,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|0|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 1,
+      "propagation_delay_s": 31.969322615,
+      "received_winner_time_s": 32.939322615,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|1|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 2,
+      "propagation_delay_s": 4.919042691,
+      "received_winner_time_s": 5.889042691,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|2|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 3,
+      "propagation_delay_s": 13.428006858,
+      "received_winner_time_s": 14.398006858,
+      "recipient_discovery_time_s": 2.42,
+      "recipient_earliest_solution_identity": "1441",
+      "delivery_stream_key": "5|3|blk-2|12|3|propagation_delay",
+      "discovered_before_receipt": true,
+      "potential_competitor": true,
+      "produced_stale_block": true,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "stale_block_generated"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 4,
+      "propagation_delay_s": 136.211732969,
+      "received_winner_time_s": 137.181732969,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|4|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 5,
+      "propagation_delay_s": 55.014430567,
+      "received_winner_time_s": 55.984430567,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|5|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 6,
+      "propagation_delay_s": 24.348911491,
+      "received_winner_time_s": 25.318911491,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|6|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 7,
+      "propagation_delay_s": 20.006540321,
+      "received_winner_time_s": 20.976540321,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|7|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 8,
+      "propagation_delay_s": 33.04891897,
+      "received_winner_time_s": 34.01891897,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|8|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 9,
+      "propagation_delay_s": 220.363707736,
+      "received_winner_time_s": 221.333707736,
+      "recipient_discovery_time_s": 2.42,
+      "recipient_earliest_solution_identity": "3841",
+      "delivery_stream_key": "5|3|blk-2|12|9|propagation_delay",
+      "discovered_before_receipt": true,
+      "potential_competitor": true,
+      "produced_stale_block": true,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "stale_block_generated"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 10,
+      "propagation_delay_s": 33.168136863,
+      "received_winner_time_s": 34.138136863,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|10|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 11,
+      "propagation_delay_s": 91.10553113,
+      "received_winner_time_s": 92.07553113,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|11|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 13,
+      "propagation_delay_s": 1.938998118,
+      "received_winner_time_s": 2.908998118,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|13|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 14,
+      "propagation_delay_s": 43.424068827,
+      "received_winner_time_s": 44.394068827,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|14|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 15,
+      "propagation_delay_s": 94.489057475,
+      "received_winner_time_s": 95.459057475,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|15|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 16,
+      "propagation_delay_s": 72.526536208,
+      "received_winner_time_s": 73.496536208,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|16|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 17,
+      "propagation_delay_s": 105.7024702,
+      "received_winner_time_s": 106.6724702,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|17|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 18,
+      "propagation_delay_s": 26.095933563,
+      "received_winner_time_s": 27.065933563,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|18|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 3,
+      "parent_block_id": "blk-2",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 19,
+      "propagation_delay_s": 117.909481962,
+      "received_winner_time_s": 118.879481962,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|3|blk-2|12|19|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 4,
+      "parent_block_id": "blk-3",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 0,
+      "propagation_delay_s": 54.118571964,
+      "received_winner_time_s": 54.218571964,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|4|blk-3|12|0|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 4,
+      "parent_block_id": "blk-3",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 1,
+      "propagation_delay_s": 34.833048932,
+      "received_winner_time_s": 34.933048932,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|4|blk-3|12|1|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    },
+    {
+      "template_generation_id": 4,
+      "parent_block_id": "blk-3",
+      "winner_miner_id": 12,
+      "recipient_miner_id": 2,
+      "propagation_delay_s": 93.065527602,
+      "received_winner_time_s": 93.165527602,
+      "recipient_discovery_time_s": null,
+      "recipient_earliest_solution_identity": null,
+      "delivery_stream_key": "5|4|blk-3|12|2|propagation_delay",
+      "discovered_before_receipt": false,
+      "potential_competitor": false,
+      "produced_stale_block": false,
+      "same_identity_independent_discovery": false,
+      "stop_reason": "no_reachable_solution"
+    }
+  ]
+}

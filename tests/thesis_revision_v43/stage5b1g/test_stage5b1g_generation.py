@@ -54,14 +54,15 @@ def test_stale_producer_row_populated():
 # 21
 def test_non_producing_competitor_row():
     r = _stale_run()
-    # a distinct-identity competitor that did NOT produce the admitted stale: it either
-    # received the winner or found a competing solution that was not admitted.
-    comp = [g for g in r["per_miner_generation"]
-            if g["received_winner_time_s"] is not None and not g["produced_stale_block"]
-            and g["generated_block_id"] is None]
+    # a non-winning miner that received the winner without producing a stale: it had a
+    # reachable solution (same-identity or found after receipt) -> "winner_received".
+    # (No-solution recipients also receive the winner but keep "no_reachable_solution".)
+    comp = [g for g in r["per_miner_generation"] if g["stop_reason"] == "winner_received"]
     assert comp
     for g in comp:
-        assert g["stop_reason"] == "winner_received"
+        assert g["received_winner_time_s"] is not None
+        assert not g["produced_stale_block"]
+        assert g["generated_block_id"] is None
         assert g["propagation_delay_s"] is not None
 
 

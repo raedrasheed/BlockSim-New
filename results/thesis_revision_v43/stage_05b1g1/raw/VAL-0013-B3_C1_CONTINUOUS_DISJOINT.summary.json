@@ -1,0 +1,22 @@
+{
+  "accepted": 16,
+  "checks": {
+    "all_nonwinner_deliveries": true,
+    "b2_paths": true,
+    "delivery_stream": true,
+    "exact_b2_candidates": true,
+    "network_generation_totals": true,
+    "postwinner_separation": true,
+    "primary_energy_invariant": true,
+    "stale_diagnostic": true
+  },
+  "config": {
+    "miner_count": 40,
+    "mu": 1.0,
+    "propagation_delay_mean_s": 30.0,
+    "scenario_id": "B3_C1_CONTINUOUS_DISJOINT",
+    "seed": 3
+  },
+  "stale_block_count": 0,
+  "status": "COMPLETED"
+}

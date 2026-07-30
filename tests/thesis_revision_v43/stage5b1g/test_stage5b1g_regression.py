@@ -95,5 +95,6 @@ def test_primary_energy_invariant_and_versions():
     for scen in ("B0", "B1", "B2", "B3_C1_CONTINUOUS_DISJOINT"):
         r = run_scenario(EngineConfig(scen, seed=1, miner_count=50))
         assert math.isclose(r["total_energy_kwh"], 8.420833333333333, rel_tol=1e-12)
-    assert ENGINE_VERSION == "5b1g.1"
-    assert OUTPUT_SCHEMA_VERSION == "5b1g.1"
+    # 5b1g-family engine (patch level bumps with each micro-correction, e.g. 5b1g.2)
+    assert ENGINE_VERSION.startswith("5b1g.")
+    assert OUTPUT_SCHEMA_VERSION.startswith("5b1g.")
