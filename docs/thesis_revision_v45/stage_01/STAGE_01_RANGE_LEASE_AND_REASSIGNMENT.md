@@ -1,0 +1,272 @@
+# Stage 1 — Range Lease and Reassignment
+
+**Document status:** Stage-1 specification-only. This document DEFINES the range-lease and
+reassignment structure of the idle policy within PoCol. It does NOT claim that any mechanism
+described here is implemented, validated, secure, fair, or incentive-compatible. Stage 1
+SPECIFIES; it does NOT demonstrate any property of what it specifies. All quantities are
+modeled quantities under the normative energy model of `STAGE_01_PROTOCOL_SCOPE.md`.
+
+**Naming rule (binding).** The algorithm is ALWAYS **PoCol**. The mechanism specified here is
+part of **the idle policy within PoCol** — an operating policy that lives inside PoCol, not a
+new algorithm, variant, or fork. The prohibited strings "PoCol-E", "Energy-Aware PoCol", and
+"Enhanced PoCol" MUST NOT appear.
+
+**Baseline (must not be contradicted).** Nonce-domain partitioning ALONE does not reduce total
+fixed-horizon energy (invariant A1). Leasing and reassignment are *scheduling and coordination*
+devices: they organise which miner searches which region of the nonce domain and permit
+coverage to be maintained without continuous full participation. Any energy reduction they
+enable arises ONLY through reduced active power-time (miners moved to `LOW_POWER_LISTEN`, held
+in `RESERVE`, or removed from active hashing), NEVER through partitioning itself.
+
+---
+
+## 1. Purpose and position
+
+The nonce domain of a round is partitioned into disjoint ranges (Protocol Scope, Section A,
+item 3). Under the idle policy an assignment of a range is granted as a **time-bounded lease**
+rather than an indefinite grant. Leasing makes range custody explicit and revocable, which is
+the precondition for reassigning coverage when a miner exhausts, abandons, departs, or is held
+in reserve — and therefore the precondition for reducing active participation without leaving
+regions of the nonce domain permanently unsearched.
+
+This document specifies the lifecycle of a lease and the provenance rules that make
+reassignment auditable. It defines the reconciliation invariant (I8), the provenance invariant
+(I9), and the rules governing whether previously searched positions may be searched again. It
+does NOT specify reward or penalty values (see `STAGE_01_REWARD_PENALTY_INTERFACE.md`), nor the
+progress-verification interface itself (see `STAGE_01_PROGRESS_VERIFICATION_ABSTRACTION.md`).
+
+---
+
+## 2. The Assignment object
+
+A lease is represented by an **Assignment object**. Its fields are fixed for Stage 1:
+
+| Field | Meaning |
+|---|---|
+| `RoundID` | The round the assignment belongs to. |
+| `TemplateID` | The immutable block template the assigned work targets. |
+| `AssignmentID` | Stable unique identifier of this assignment instance. |
+| `MinerID` | The miner holding the lease. |
+| `range_start` | First nonce position of the leased range (inclusive). |
+| `range_end` | Last nonce position of the leased range (inclusive). |
+| `range_size` | Count of positions in `[range_start, range_end]`; equals `range_end − range_start + 1`. |
+| `lease_start` | Time at which the lease becomes active. |
+| `lease_expiry` | Time after which the lease is no longer valid unless renewed. |
+| `assignment_version` | Monotonic version counter for this range's assignment lineage. |
+| `previous_assignment_reference` | The `AssignmentID` this assignment supersedes, or null for an original assignment. |
+| `signature/authentication` | Authentication binding the assignment to the assigning authority so a miner can verify custody. |
+
+An Assignment object is well-formed only if `range_start ≤ range_end`, `range_size` equals the
+implied count, `lease_start < lease_expiry`, and `RoundID`/`TemplateID` reference the round's
+committed template.
+
+---
+
+## 3. Lease lifecycle
+
+### 3.1 Lease start
+
+A lease **starts** when an Assignment object with a fresh `AssignmentID` is issued to a
+`MinerID` for a disjoint range and becomes active at `lease_start`. From `lease_start` the
+holder is the sole miner sanctioned to search that range for the referenced `RoundID` and
+`TemplateID`. Custody is exclusive: at any instant at most one active (non-superseded) lease may
+cover any given nonce position for a given `(RoundID, TemplateID)`.
+
+### 3.2 Lease expiry
+
+A lease **expires** at `lease_expiry`. On expiry the range is no longer under the holder's
+sanctioned custody. An expired range is eligible for renewal (3.3), reclamation, or
+reassignment (Section 5). Expiry does not by itself assert anything about how much of the range
+was searched — that is recorded separately by progress checkpoints (Section 4). Expiry converts
+custody from "held" to "reclaimable"; it never silently deletes accounting for the range.
+
+### 3.3 Renewal
+
+**Renewal** extends custody of the same range to the same holder past the original
+`lease_expiry`. A renewal is issued as a new Assignment object with:
+
+- the SAME `range_start`, `range_end`, `range_size`, `RoundID`, `TemplateID`, and `MinerID`;
+- a fresh `AssignmentID`;
+- `assignment_version` incremented by one;
+- `previous_assignment_reference` set to the superseded `AssignmentID`;
+- a later `lease_expiry`.
+
+Renewal is a provenance-preserving operation: the searched prefix accumulated under the prior
+lease (Section 4) carries forward, so a renewed holder is not required to re-search positions it
+has already searched. Renewal to the same holder is distinguished from reassignment (Section 5)
+only by whether `MinerID` changes; both follow the provenance rules of Section 6.
+
+---
+
+## 4. Progress checkpoints, searched prefix, unsearched suffix
+
+### 4.1 Progress checkpoints
+
+A holder searches its leased range and may emit **progress checkpoints** attesting how far the
+range has been searched. A progress checkpoint is treated ONLY as a *modeled
+progress-verification abstraction*; it is NOT a cryptographic proof that every position up to
+the checkpoint was actually hashed. The interface, its audit probability, and its detection
+semantics are specified in `STAGE_01_PROGRESS_VERIFICATION_ABSTRACTION.md`; this document uses
+only the *frontier* a checkpoint reports.
+
+### 4.2 Searched prefix and unsearched suffix
+
+For a range searched in monotonic order from `range_start`, the last checkpointed frontier
+partitions the range into two contiguous parts:
+
+- **Searched prefix** — the positions from `range_start` up to and including the reported
+  frontier. These are the positions the holder claims to have searched (subject to audit; the
+  claim is modeled, not proven).
+- **Unsearched suffix** — the positions from just after the frontier to `range_end`. These are
+  the positions still to be searched under the current lease.
+
+By construction, `|searched prefix| + |unsearched suffix| = range_size` for a live lease.
+Stage 1 models search as advancing a single monotonic frontier per lease; non-contiguous search
+orders are out of scope at Stage 1 and would require an explicit covered-set representation
+rather than a single frontier.
+
+---
+
+## 5. Abandonment, revocation, reassignment
+
+### 5.1 Abandonment
+
+**Abandonment** occurs when a holder ceases to make sanctioned progress on a live lease —
+for example on transition to `OFFLINE`, `EXHAUSTED_PENDING` without completing the range, or
+departure. On abandonment the range's searched prefix (as last checkpointed) is retained for
+accounting, and the unsearched suffix becomes eligible for reassignment. Abandonment is holder-
+originated (the holder stops); revocation (5.2) is authority-originated.
+
+### 5.2 Revocation
+
+**Revocation** is an authority-originated withdrawal of a live lease before `lease_expiry` — for
+example on lease-policy change, security-recovery action, or detected misbehaviour. Revocation
+supersedes the current Assignment object and marks the range reclaimable exactly as expiry does,
+with the last checkpointed searched prefix retained.
+
+### 5.3 Reassignment
+
+**Reassignment** issues a new Assignment object for a range (or the unsearched suffix of a range)
+to a DIFFERENT `MinerID`, following expiry, abandonment, revocation, or departure. Reassignment
+is the mechanism by which coverage of the nonce domain is maintained without requiring the
+original holder to continue. The reassigned Assignment object:
+
+- references the range or unsearched suffix being transferred;
+- carries a fresh `AssignmentID` and the new holder's `MinerID`;
+- increments `assignment_version`;
+- sets `previous_assignment_reference` to the superseded `AssignmentID` (Section 6);
+- carries its own `lease_start`/`lease_expiry`.
+
+Reassignment of only the unsearched suffix narrows `range_start` to just after the transferred
+frontier so that the new lease does not re-cover the prior searched prefix (subject to Section 7).
+
+---
+
+## 6. Provenance preservation (I9)
+
+**Invariant I9 — full provenance for every reassignment.** Every reassignment (and every
+renewal) MUST carry complete provenance linking it to the assignment it supersedes. Concretely:
+
+- `previous_assignment_reference` MUST be set to the `AssignmentID` of the immediately
+  superseded assignment (null only for an original, never for a reassignment or renewal).
+- `assignment_version` MUST be strictly greater than the superseded assignment's version.
+- `RoundID` and `TemplateID` MUST be preserved unchanged across the lineage; a change of
+  template requires a new original assignment under the new `TemplateID`, not a reassignment.
+
+The chain of `previous_assignment_reference` links forms an auditable lineage from any current
+Assignment object back to the original assignment of its range. No range may change custody
+without appending to this lineage. Provenance makes reassignment reconstructable: given the
+lineage, the searched prefix contributed under each successive holder is attributable, which is
+required for the reconciliation of Section 8 and for the reward/penalty interface's
+reassignment-reward and abandonment-penalty terms.
+
+---
+
+## 7. Re-searching previously searched positions
+
+Whether previously searched positions may be searched again is governed by the following rules;
+they exist so that aggregate progress accounting cannot be inflated or corrupted by re-searching.
+
+**MAY be re-searched (permitted):**
+
+1. On a **new TemplateID** (template refresh). A searched prefix is defined relative to a
+   specific `(RoundID, TemplateID)`. When the template changes, all prior search is stale;
+   positions are searched afresh against the new template and no prior prefix carries over.
+2. When a prior searched prefix **cannot be relied upon** — for example a checkpoint failed
+   audit, or provenance for the prior prefix is incomplete (I9 unsatisfied). In that case the
+   affected positions are treated as unsearched and MAY be re-searched, and the unreliable prior
+   claim MUST NOT be counted toward searched coverage.
+
+**MUST NOT be re-searched as counted progress (prohibited double-counting):**
+
+3. Within the **same `(RoundID, TemplateID)`**, positions in a *reliable* searched prefix
+   inherited across renewal or suffix-only reassignment MUST NOT be re-searched and counted a
+   second time. Re-searching them wastes active power-time (contrary to the idle policy's
+   purpose) and, if counted, would double-count coverage.
+
+Re-searching for redundancy or verification is not forbidden as an activity, but redundant
+searches of an already-counted reliable prefix MUST NOT increase the searched total. Searched
+coverage is counted at most once per position per `(RoundID, TemplateID)`.
+
+---
+
+## 8. Reconciliation invariant (I8)
+
+**Invariant I8 — assignment accounting reconciles.** For every range within a
+`(RoundID, TemplateID)`, and in aggregate across the round's nonce domain, the assignment
+accounting MUST reconcile exactly:
+
+```
+searched + unsearched + inactive + reassigned = assigned
+```
+
+where, for the scope being reconciled:
+
+- **assigned** — total positions placed under assignment (the union of leased ranges);
+- **searched** — positions counted as searched under reliable, provenance-complete checkpoints
+  (counted at most once per position per template, per Section 7);
+- **unsearched** — positions under a live lease not yet within a searched prefix;
+- **inactive** — positions whose custody has lapsed (expired, abandoned, or revoked) and that
+  are not currently under any live lease and not yet reassigned;
+- **reassigned** — positions currently transferred to a successor lease under a
+  provenance-complete reassignment (I9).
+
+The four right-hand terms MUST be mutually exclusive and collectively exhaustive over `assigned`
+at every reconciliation point. A position is in exactly one of the four categories at any instant.
+
+### 8.1 No gap or overlap may be hidden by aggregate counts
+
+The equality of I8 is necessary but NOT sufficient. Reconciliation MUST hold **positionally**,
+not merely in aggregate:
+
+- **No hidden gap.** No position within `assigned` may be absent from all four categories. A
+  position that is neither searched, nor under a live lease (unsearched), nor inactive, nor
+  reassigned is an accounting gap and is prohibited — even if the aggregate totals happen to sum
+  correctly.
+- **No hidden overlap.** No position may be counted in more than one category, and no position
+  may be under two live leases at once (custody is exclusive, Section 3.1). In particular a
+  reassigned suffix MUST NOT remain counted as unsearched under the superseded lease.
+
+Because compensating errors can make aggregate sums balance while a gap in one region is masked
+by an overlap in another, I8 is enforced against the position-level partition of each range —
+via `range_start`/`range_end` boundaries and the provenance lineage — and not against totals
+alone. Aggregate counts are a summary of the positional partition, never a substitute for it.
+
+---
+
+## 9. Referenced identifiers
+
+- **Miner states:** `REGISTERED`, `RESERVE`, `ACTIVE_HASHING`, `EXHAUSTED_PENDING`,
+  `LOW_POWER_LISTEN`, `WAKING`, `OFFLINE`, `DISQUALIFIED`.
+- **Assignment object fields:** `RoundID`, `TemplateID`, `AssignmentID`, `MinerID`,
+  `range_start`, `range_end`, `range_size`, `lease_start`, `lease_expiry`, `assignment_version`,
+  `previous_assignment_reference`, `signature/authentication`.
+- **Invariants used here:** **I8** (assignment accounting reconciles:
+  searched + unsearched + inactive + reassigned = assigned, positionally with no hidden gap or
+  overlap); **I9** (every reassignment has full provenance).
+- **Related documents:** `STAGE_01_PROTOCOL_SCOPE.md`,
+  `STAGE_01_PROGRESS_VERIFICATION_ABSTRACTION.md`, `STAGE_01_EARLY_STOP_CERTIFICATE.md`,
+  `STAGE_01_REWARD_PENALTY_INTERFACE.md`.
+
+Nothing in this document claims that leasing or reassignment is implemented, secure, fair, or
+incentive-compatible. Stage 1 specifies the structure only.
