@@ -27,10 +27,20 @@ def main():
     runs = C.load_runs()
     manifest = json.load(open(os.path.join(C.STAGE5B2, "manifests", "results_manifest.json")))
 
-    # 1. results-3 commit
+    # 1. analysis branch is built on the authoritative results-3 commit
+    #    (Stage 6 checks out results-3 directly; Stage 6A corrective branches build on it).
     head = git("rev-parse", "HEAD")
-    rec(1, "results-3 commit matches expected", head == C.RESULTS3_COMMIT,
-        {"head": head, "expected": C.RESULTS3_COMMIT})
+    try:
+        subprocess.check_call(
+            ["git", "-C", C.REPO_ROOT, "merge-base", "--is-ancestor",
+             C.RESULTS3_COMMIT, "HEAD"])
+        anc = True
+    except subprocess.CalledProcessError:
+        anc = False
+    rec(1, "results-3 is HEAD or an ancestor of HEAD (built on results-3)",
+        head == C.RESULTS3_COMMIT or anc,
+        {"head": head, "results3": C.RESULTS3_COMMIT,
+         "head_is_results3": head == C.RESULTS3_COMMIT, "results3_is_ancestor": anc})
 
     # 2. matrix checksum
     msha = C.sha256_file(C.MATRIX_CSV)

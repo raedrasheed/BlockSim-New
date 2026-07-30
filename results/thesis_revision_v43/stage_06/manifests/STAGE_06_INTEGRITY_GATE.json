@@ -1,15 +1,17 @@
 {
  "gate": "STAGE_06_INPUT_INTEGRITY",
- "results3_commit": "278af17e76416c6018df6ffa23795904ae5a4e89",
+ "results3_commit": "547ea339c64aa2475b8faa4e88b934925d550df4",
  "all_pass": true,
  "checks": [
   {
    "n": 1,
-   "name": "results-3 commit matches expected",
+   "name": "results-3 is HEAD or an ancestor of HEAD (built on results-3)",
    "pass": true,
    "detail": {
-    "head": "278af17e76416c6018df6ffa23795904ae5a4e89",
-    "expected": "278af17e76416c6018df6ffa23795904ae5a4e89"
+    "head": "547ea339c64aa2475b8faa4e88b934925d550df4",
+    "results3": "278af17e76416c6018df6ffa23795904ae5a4e89",
+    "head_is_results3": false,
+    "results3_is_ancestor": true
    }
   },
   {

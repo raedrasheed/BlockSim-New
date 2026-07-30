@@ -159,18 +159,22 @@ def fig04():
         for s in sorted(eq):
             ax.plot([0, 1], [eq[s], wt[s]], color=col, alpha=0.45, lw=0.8)
             rows.append({"miner_count": N, "seed": s, "equal": eq[s], "weighted": wt[s]})
-        ax.scatter([0] * len(eq), list(eq.values()), s=12, color=col, label=f"N={N}")
+        ax.scatter([0] * len(eq), list(eq.values()), s=12, color=col, label=f"N = {N} miners")
         ax.scatter([1] * len(wt), list(wt.values()), s=12, color=col)
     ax.axhline(C.CONTINUOUS_ENERGY_ANCHOR_KWH, color="grey", ls="--", lw=1,
-               label="anchor 8.4208 kWh")
-    ax.set_xticks([0, 1]); ax.set_xticklabels(["equal (idle saving)", "weighted (no idle)"])
-    ax.set_ylabel("total_energy_kwh"); ax.legend(fontsize=7)
-    ax.set_title("H5 [CONFIRMATORY] C2 idle-energy TRADE-OFF: weighted allocation\n"
-                 "restores fairness but eliminates the idle-driven energy saving")
+               label="Fixed-power anchor: 8.4208 kWh")
+    ax.set_xticks([0, 1]); ax.set_xticklabels(["Equal ranges", "Hash-rate-weighted ranges"])
+    ax.set_ylabel("Total energy over 10,000 s (kWh)"); ax.legend(fontsize=7)
+    ax.set_title("H5 [CONFIRMATORY] C2 idle-energy trade-off under heterogeneous hash "
+                 "rates:\nweighted ranges remove modeled idle and return energy to the "
+                 "fixed-power anchor")
     save(fig, "fig04_h5_c2_energy_tradeoff",
-         "Seed-matched C2 total energy: equal allocation lets fast miners idle (energy < "
-         "anchor); weighted removes idle so energy returns to the anchor. The saving is "
-         "idle-driven, not from partitioning.",
+         "Each line connects seed-matched runs. Under heterogeneous hash rates, "
+         "equal-size ranges allow faster miners to complete earlier and enter the modeled "
+         "idle state, reducing energy below the fixed-power anchor. Hash-rate-weighted "
+         "ranges equalize modeled range-completion times, remove that idle opportunity, and "
+         "return energy to the anchor. This is a completion-balance versus idle-energy "
+         "trade-off, not an incentive-fairness or reward-fairness result.",
          "CONFIRMATORY", rows, ["miner_count", "seed", "equal", "weighted"])
 
 
@@ -270,38 +274,59 @@ def fig07():
          "CONFIRMATORY", rows, ["outcome", "mu", "value"])
 
 
-# ---- FIG 8: H7 delay single-height diagnostic ----
+# ---- FIG 8: H7 delay single-height diagnostic (count-rate, N kept separate) ----
 def fig08():
-    fig, ax = plt.subplots(figsize=(6.6, 4.2))
+    from s6_stats import bootstrap_ci_mean_cluster
+    fig, ax = plt.subplots(figsize=(7.2, 4.4))
     rows = []
     h7 = by("H7")
-    levels = [(0.0, "0"), (0.42, "0.42 (base)"), (5.0, "5"), (30.0, "30"), (60.0, "60")]
-    groups = []
-    for dl, lab in levels:
+    levels = [0.0, 0.42, 5.0, 30.0, 60.0]
+
+    def level_runs(dl, N):
         if dl == 0.42:
-            s = [r for r in runs if r["hypothesis_id"] == "H1;A1"
-                 and r["scenario_id"] == "B3_C1_CONTINUOUS_DISJOINT"
-                 and r["miner_count"] in (100, 500)]
-        else:
-            s = [r for r in h7 if r["propagation_delay_mean_s"] == dl]
-        vals = [r["single_height_stales_per_accepted_block"] for r in s]
-        groups.append((lab, vals))
-        for r in s:
-            rows.append({"delay_s": dl, "seed": r["seed"], "miner_count": r["miner_count"],
-                         "sh_stales_per_accepted_block": r["single_height_stales_per_accepted_block"]})
-    strip(ax, groups, 801)
-    ax.set_ylabel("single_height_stales_per_accepted_block")
+            return [r for r in runs if r["hypothesis_id"] == "H1;A1"
+                    and r["scenario_id"] == "B3_C1_CONTINUOUS_DISJOINT"
+                    and r["miner_count"] == N]
+        return [r for r in h7 if r["propagation_delay_mean_s"] == dl
+                and r["miner_count"] == N]
+
+    for i, dl in enumerate(levels):
+        for N, off, col in [(100, -0.16, PALETTE[0]), (500, 0.16, PALETTE[1])]:
+            s = level_runs(dl, N)
+            v = np.array([r["single_height_stales_per_accepted_block"] for r in s])
+            x = i + off + jitter(v.size, 800 + i * 2 + (0 if N == 100 else 1), w=0.06)
+            ax.scatter(x, v, s=12, color=col, alpha=0.6, edgecolors="none", zorder=3)
+            m = float(v.mean())
+            lo, hi = bootstrap_ci_mean_cluster(v, seed=C.RNG_SEED_BOOTSTRAP)
+            ax.plot([i + off, i + off], [lo, hi], color="black", lw=1, zorder=4)
+            ax.plot([i + off - 0.08, i + off + 0.08], [m, m], color="black", lw=2, zorder=4)
+            for r in s:
+                rows.append({"delay_s": dl, "miner_count": N, "seed": r["seed"],
+                             "sh_stales_per_accepted_block": r["single_height_stales_per_accepted_block"],
+                             "level_mean": m, "cluster_boot_lo": lo, "cluster_boot_hi": hi})
+    from matplotlib.lines import Line2D
+    ax.legend(handles=[Line2D([0], [0], marker="o", color="w", markerfacecolor=PALETTE[0], label="N = 100 miners"),
+                       Line2D([0], [0], marker="o", color="w", markerfacecolor=PALETTE[1], label="N = 500 miners"),
+                       Line2D([0], [0], color="black", lw=1, label="run-cluster bootstrap 95% CI")],
+              fontsize=7, loc="upper left")
+    ax.set_xticks(range(len(levels)))
+    ax.set_xticklabels([f"{d:g}" for d in levels])
+    ax.set_ylabel("single_height_stales_per_accepted_block (count-rate)")
     ax.set_xlabel("propagation_delay_mean_s")
     ax.set_title("H7 [SECONDARY — SINGLE-HEIGHT STALE-RACE DIAGNOSTIC] delay sensitivity\n"
-                 "one accepted height in isolation; NOT a fork-rate or security claim; "
-                 "primary metrics unchanged across delay")
+                 "count-rate per accepted block; N kept separate; NOT a fork-rate or "
+                 "security claim; primary metrics unchanged across delay")
     save(fig, "fig08_h7_delay_singleheight",
-         "Single-height stales per accepted block vs propagation delay (B3/C1, N∈{100,500}, "
-         "n=60 per level). Secondary diagnostic only; energy, candidate counts, accepted "
-         "blocks and active time are identical across delays. Delay=0 has zero observed "
-         "stales (see report for the rule-of-three upper bound).",
+         "Run-level single-height stales per accepted block vs propagation delay (B3/C1; "
+         "N=100 and N=500 shown separately, 30 runs each). Bar = level mean, whisker = "
+         "seed/run-cluster bootstrap 95% CI. This is a COUNT-RATE diagnostic (several "
+         "distinct miners may stale at one accepted height), so no binomial/Wilson interval "
+         "is used. At delay=0, zero stale blocks are observed across the accepted heights. "
+         "Secondary diagnostic only; energy, candidate counts, accepted blocks and active "
+         "time are identical across delays.",
          "SECONDARY", rows,
-         ["delay_s", "seed", "miner_count", "sh_stales_per_accepted_block"])
+         ["delay_s", "miner_count", "seed", "sh_stales_per_accepted_block",
+          "level_mean", "cluster_boot_lo", "cluster_boot_hi"])
 
 
 # ---- FIG 9: zero-block probability by scenario ----

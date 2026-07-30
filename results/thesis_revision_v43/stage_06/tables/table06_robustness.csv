@@ -1,7 +1,7 @@
 hypothesis,label,outcome,mean_diff,hl_median_diff,perm_p,wilcoxon_p,p_holm,deterministic,mean_vs_median_direction_agree,robustness
-H1,H1: B1>B2 (duplicate_evaluation_rate),duplicate_evaluation_rate,0.3953936750765925,0.3919527427850048,9.999000099990002e-05,2.2996057560669792e-26,0.00029997000299970003,False,True,stable
-H1,H1: B2>B3/C1 (duplicate_evaluation_rate),duplicate_evaluation_rate,0.6000396582567409,0.6033097113793894,9.999000099990002e-05,2.2996057560669792e-26,0.00029997000299970003,False,True,stable
-H1,H1: B1>B3/C1 (duplicate_evaluation_rate),duplicate_evaluation_rate,0.9954333333333335,0.9962500000000001,9.999000099990002e-05,1.302296550044173e-26,0.00029997000299970003,False,True,stable
+H1,H1: B1>B2 (duplicate_evaluation_rate),duplicate_evaluation_rate,0.3953936750765925,0.3898922706444956,9.999000099990002e-05,1.862645149230957e-09,0.00019998000199980003,False,True,stable
+H1,H1: B2>B3/C1 (duplicate_evaluation_rate),duplicate_evaluation_rate,0.6000396582567409,0.6055410626888378,9.999000099990002e-05,1.862645149230957e-09,0.00019998000199980003,False,True,stable
+H1,H1: B1>B3/C1 (duplicate_evaluation_rate),duplicate_evaluation_rate,0.9954333333333335,0.9954333333333333,,4.320463057827488e-08,,True,,deterministic (design identity)
 H5,H5 B3 N=100: weighted vs equal (completion_time_std_s),completion_time_std_s,-769.4470361195255,-767.309853615003,9.999000099990002e-05,1.862645149230957e-09,0.0007999200079992001,False,True,stable
 H5,H5 B3 N=100: weighted vs equal (total_idle_time_s),total_idle_time_s,0.0,0.0,,,,True,,deterministic (design identity)
 H5,H5 B3 N=100: weighted vs equal (total_energy_kwh),total_energy_kwh,0.0,0.0,,,,True,,deterministic (design identity)

@@ -26,18 +26,19 @@
   "field_authority_map": "3b3d0d25f32e41d9e9bdf2fece6b30602a92a1c9011bc35fc612b5ea34cfe7b9"
  },
  "analysis_script_checksums": {
-  "s6_analysis.py": "8c2fd9ee2926bbdba9048892e06179db1d6a460a21c67babe0ff8d6b1e8fff53",
-  "s6_claims.py": "40b1490c54007ec8efca54550401dbdfb212c204bee14980168d8b7e1f59c59f",
+  "s6_analysis.py": "2ad2803c658a17dc785b88ea268b269b70f015a65d9cb6f9252acb380888b43e",
+  "s6_claims.py": "f92a60c89dde29da25f9ab14429de8078591a6c19e33e07d5cc712425d861844",
   "s6_common.py": "d0a6f95632f4c9b14ee7d94352d46035e85c8f4abc937e825a3ba217723ccdd2",
-  "s6_figures.py": "5af8f48c9042ced16e5ce731c9837288991514020376e8a4ed860aa28e729347",
-  "s6_integrity_gate.py": "150c66437f77b4e49af031aa8bc0ff1ed11dd4c132c9819b06e242fdae6464d7",
-  "s6_manifests.py": "2662cc9ee167d1ce3bb5fc543a32e737e8ddb961a2d1e0ababfcda634d67d512",
+  "s6_figures.py": "7d2e899592265f5c3c7b02aadf1fa8bd1e1b502d351598e3cde20608b468384b",
+  "s6_integrity_gate.py": "5d5a016f4a3a9d71a11f1cb65498c0f06d01028dfe95e2f879e9e2876bd6ea95",
+  "s6_manifests.py": "3e7aa39ae1d4aac133faa26fb26994aaf455c7582053a2a2aa5bb3959cf5d806",
   "s6_run_all.py": "8c405005c24ea55c5384cc00ecedffa8ee86e5f804c657a9db85efc4c7972838",
-  "s6_stats.py": "8a51c0992864b3463f358b571ae373ce0b6021dd95e14b94894056a97d0af226",
-  "s6_tables.py": "9ffdacbb3ec9e0f91ba82b524f48f5a3ac25dc4626caab90824e024c530640b9"
+  "s6_stats.py": "e52696d84450d432c2f98b5527e1702a614d3375c374b936276682841a574b25",
+  "s6_tables.py": "08f23734f0a3fa16bbaade660c20002f3347f341a81f93a2c6968b13d9cfbe21"
  },
  "test_checksums": {
-  "test_stage6.py": "80a6f09a0134a98d1406db1b3a22c4f7cd16e21bd615ed4d64a997e875d7bcd9"
+  "test_stage6.py": "80a6f09a0134a98d1406db1b3a22c4f7cd16e21bd615ed4d64a997e875d7bcd9",
+  "test_stage6a.py": "edaa2becddf9770980340d534ffd550cefaadf979c988117f28ed25fd79a9026"
  },
  "statistics": {
   "unit": "one physical run per frozen master seed",
@@ -82,6 +83,24 @@
   "docs/thesis_revision_v43/STAGE_06_RESULTS_REPORT.md",
   "docs/thesis_revision_v43/STAGE_06_ENVIRONMENT.json",
   "docs/thesis_revision_v43/STAGE_06_ANALYSIS_MANIFEST.json",
+  "docs/thesis_revision_v43/STAGE_06_QUALITY_GATES.json",
   "docs/thesis_revision_v43/STAGE_06_CHECKSUM_MANIFEST.sha256"
- ]
+ ],
+ "stage_6a_corrections": {
+  "branch": "thesis-v43-stage6-analysis-2",
+  "base_commit": "547ea339c64aa2475b8faa4e88b934925d550df4",
+  "defects_fixed": [
+   "H5 fairness overclaim -> modeled completion-balance terms",
+   "H3 preregistered idle-saving identity verified directly per-miner",
+   "H7 count-rate intervals (seed/run-cluster bootstrap; no binomial/Wilson) + separate binary any-stale diagnostic",
+   "H1 seed-cluster inference (30 clusters, not 150 pooled pairs)"
+  ],
+  "docs": [
+   "docs/thesis_revision_v43/STAGE_06A_CORRECTION_REPORT.md",
+   "docs/thesis_revision_v43/STAGE_06A_DEPENDENCE_AUDIT.md",
+   "docs/thesis_revision_v43/STAGE_06A_H3_IDENTITY_AUDIT.md",
+   "docs/thesis_revision_v43/STAGE_06A_H7_INTERVAL_AUDIT.md"
+  ],
+  "new_diagnostic": "results/thesis_revision_v43/stage_06a/diagnostics/h3_idle_saving_identity.csv"
+ }
 }

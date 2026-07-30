@@ -138,6 +138,29 @@ def paired_effect(a, b, seed_boot):
     }
 
 
+def effect_from_diff(diff, seed_boot, ref_mean=None):
+    """Paired effect bundle computed directly from a difference vector (one value per
+    independent seed-cluster). mean_diff = mean(diff), scientific units."""
+    d = np.asarray(diff, dtype=float)
+    n = d.size
+    md = float(np.mean(d)) if n else None
+    sd = float(np.std(d, ddof=1)) if n > 1 else 0.0
+    dz = float(md / sd) if sd > 0 else None
+    hl = hodges_lehmann_paired(d) if n else None
+    lo, hi = bootstrap_ci_paired(d, seed=seed_boot)
+    rel = (float(md / ref_mean) if (ref_mean not in (None, 0)) else None)
+    return {"n_clusters": int(n), "mean_diff": md, "median_diff_hl": hl, "sd_diff": sd,
+            "dz": dz, "rel_change_vs_ref": rel, "boot_ci_lo": lo, "boot_ci_hi": hi,
+            "deterministic": bool(n and np.ptp(d) == 0)}
+
+
+def bootstrap_ci_mean_cluster(values, seed, n_boot=10000, level=0.95):
+    """Seed/run-cluster bootstrap 95% CI for a mean: resample the cluster-level values
+    (one per independent seed) with replacement. Identical to bootstrap_ci_mean but named
+    to make the clustered interpretation explicit for count-rate diagnostics (H7)."""
+    return bootstrap_ci_mean(values, seed=seed, n_boot=n_boot, level=level)
+
+
 def wilson_ci(k, n, level=0.95):
     if n == 0:
         return (None, None)

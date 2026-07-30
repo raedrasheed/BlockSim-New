@@ -28,9 +28,11 @@ numbers are reproduced by `analysis/thesis_revision_v43/stage_06/s6_run_all.py`.
 3. **C2 energy savings are idle-driven, not partitioning-driven (H3/H4/H5).** Under
    homogeneous equal ranges the idle policy never triggers (saving = 0). Savings appear
    only when **heterogeneity** makes fast miners finish early and idle (H5 C2 equal:
-   −3.4/−3.8 kWh). Weighted allocation restores completion symmetry and removes idle — and
-   thereby **removes the saving** (energy returns to the anchor). Fairness–energy
-   **trade-off**, not guaranteed superiority.
+   −3.4/−3.8 kWh). Hash-rate-weighted allocation restores modeled range-completion symmetry
+   and removes idle — and thereby **removes the saving** (energy returns to the anchor).
+   A completion-balance versus idle-energy **trade-off**, not guaranteed superiority and not
+   a reward/incentive/economic/Sybil-resistance result. The preregistered idle-saving
+   identity is verified directly per-miner (Stage 6A, max residual 7.1e-15 kWh).
 4. **Inactive miners lengthen block interval and cut throughput (H6, SUPPORTED);** raw
    energy falls with participation, but energy-per-accepted-block does not clearly rise
    (INCONCLUSIVE).
@@ -47,7 +49,7 @@ numbers are reproduced by `analysis/thesis_revision_v43/stage_06/s6_run_all.py`.
 |----------|-----------|-------------|
 | A Energy accounting | A1 + H3 + H6 | invariant confirmed; savings idle-/participation-driven only |
 | B Candidate redundancy | H1 | SUPPORTED (idealized assumptions) |
-| C Allocation policy | H5 | SUPPORTED fairness + energy trade-off |
+| C Allocation policy | H5 | SUPPORTED for reduced modeled completion-time imbalance & idle; documented energy trade-off |
 | D Miner count | covariate | no fixed-horizon energy scaling with N |
 | E Inactive miners | H6 | SUPPORTED (primary); epab INCONCLUSIVE |
 | F Scenario comparisons | H1/A1 | exact frozen defs; B3/C1 not double-counted |
@@ -65,9 +67,14 @@ refresh) / INCONCLUSIVE (interval); H7 SECONDARY_DIAGNOSTIC_ONLY; H5x EXPLORATOR
 Statistical unit = one physical run per frozen seed; seed-matched paired inference; effect
 sizes in scientific units first (mean + Hodges-Lehmann) with seed-pair bootstrap 95% CIs;
 two-sided paired permutation tests (10,000, seed 6060602); Wilcoxon signed-rank
-sensitivity; Holm within each confirmatory family. Zero-block runs retained;
-block-normalised metrics NA. Deterministic design identities are reported as identities,
-not tests. Robustness in `STAGE_06_ROBUSTNESS_RESULTS.md`.
+sensitivity; Holm within each confirmatory family. **H1 uncertainty is computed from 30
+independent seed clusters (not the 150 physical pairs), because the 30 seeds recur across
+five miner counts (Stage 6A §6).** **H7 uses a run-level count-rate with a seed/run-cluster
+bootstrap — no binomial/Wilson interval on the stale count (Stage 6A §5).** **The H3
+idle-saving identity is verified directly from per-miner records (Stage 6A §4).** Zero-block
+runs retained; block-normalised metrics NA. Deterministic design identities are reported as
+identities, not tests. Robustness in `STAGE_06_ROBUSTNESS_RESULTS.md`; corrections in the
+`STAGE_06A_*` documents.
 
 ## 6. Deliverables
 
@@ -82,6 +89,7 @@ effects). Figures (PDF+PNG+plotting data): `results/…/stage_06/figures/` and `
 
 All findings are conditioned on the modelled assumptions, the fixed 10,000-second horizon,
 and the frozen aggregate hash-rate setting; B0/B1 are abstractions, not real Bitcoin
-mining; no security, fork-chain, fairness, or real-deployment claim is made
+mining; no security, fork-chain, incentive/reward/economic/Sybil-resistance, or
+real-deployment claim is made
 (`STAGE_06_LIMITATIONS.md`). No thesis DOCX/PDF was edited; no scientific result was
 altered. Stage 6 does not begin thesis insertion.

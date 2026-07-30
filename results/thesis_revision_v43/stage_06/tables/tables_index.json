@@ -33,7 +33,7 @@
  },
  {
   "table": "table12_secondary_stale.csv",
-  "n_rows": 5
+  "n_rows": 10
  },
  {
   "table": "table02 = descriptive_long.csv (by s6_analysis)"

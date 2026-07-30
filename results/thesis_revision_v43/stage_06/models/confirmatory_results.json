@@ -1,75 +1,174 @@
 {
  "H1": {
   "family": "H1_duplicate_rate",
+  "dependence_correction": "seed-cluster aggregation: 150 physical run pairs (5 miner counts x 30 seeds) reduced to 30 independent seed-cluster values; uncertainty uses the 30 clusters, never 150 as independent replications.",
+  "physical_run_pairs_per_contrast": 150,
+  "independent_clusters": 30,
   "contrasts": [
    {
     "label": "H1: B1>B2 (duplicate_evaluation_rate)",
     "family": "H1_duplicate_rate",
     "outcome": "duplicate_evaluation_rate",
     "direction_expected": ">",
-    "n_pairs": 150,
-    "n_dropped_na": 0,
+    "cluster_unit": "master_seed",
+    "n_clusters": 30,
+    "physical_run_pairs": 150,
     "mean_diff": 0.3953936750765925,
-    "median_diff_hl": 0.3919527427850048,
-    "sd_diff": 0.13356736790247126,
-    "dz": 2.9602565453360032,
-    "rel_change_vs_a": 0.6589459040512522,
-    "boot_ci_lo": 0.37414543649531706,
-    "boot_ci_hi": 0.41614936268805863,
+    "median_diff_hl": 0.3898922706444956,
+    "sd_diff": 0.11877737998384806,
+    "dz": 3.328863417684075,
+    "rel_change_vs_ref": 0.6589459040512522,
+    "boot_ci_lo": 0.35499947798720244,
+    "boot_ci_hi": 0.4370410729018737,
     "deterministic": false,
     "perm_p": 9.999000099990002e-05,
     "perm_deterministic": false,
-    "wilcoxon_p": 2.2996057560669792e-26,
+    "wilcoxon_p": 1.862645149230957e-09,
     "ref_mean": 0.6000396582567409,
-    "trt_mean": 0.9954333333333335,
+    "n_specific_robustness": {
+     "100": {
+      "n_pairs": 30,
+      "mean_diff": 0.41509434783324134,
+      "perm_p": 9.999000099990002e-05,
+      "deterministic": false
+     },
+     "200": {
+      "n_pairs": 30,
+      "mean_diff": 0.38516110689652894,
+      "perm_p": 9.999000099990002e-05,
+      "deterministic": false
+     },
+     "300": {
+      "n_pairs": 30,
+      "mean_diff": 0.39714820848940907,
+      "perm_p": 9.999000099990002e-05,
+      "deterministic": false
+     },
+     "400": {
+      "n_pairs": 30,
+      "mean_diff": 0.38959196718946587,
+      "perm_p": 9.999000099990002e-05,
+      "deterministic": false
+     },
+     "500": {
+      "n_pairs": 30,
+      "mean_diff": 0.3899727449743172,
+      "perm_p": 9.999000099990002e-05,
+      "deterministic": false
+     }
+    },
     "direction_met": true,
-    "p_holm": 0.00029997000299970003
+    "p_holm": 0.00019998000199980003
    },
    {
     "label": "H1: B2>B3/C1 (duplicate_evaluation_rate)",
     "family": "H1_duplicate_rate",
     "outcome": "duplicate_evaluation_rate",
     "direction_expected": ">",
-    "n_pairs": 150,
-    "n_dropped_na": 0,
+    "cluster_unit": "master_seed",
+    "n_clusters": 30,
+    "physical_run_pairs": 150,
     "mean_diff": 0.6000396582567409,
-    "median_diff_hl": 0.6033097113793894,
-    "sd_diff": 0.1337893632032811,
-    "dz": 4.484957876247857,
-    "rel_change_vs_a": null,
-    "boot_ci_lo": 0.578741008277604,
-    "boot_ci_hi": 0.6211933240023068,
+    "median_diff_hl": 0.6055410626888378,
+    "sd_diff": 0.1187773799838481,
+    "dz": 5.0518007581775,
+    "rel_change_vs_ref": null,
+    "boot_ci_lo": 0.5583922604314596,
+    "boot_ci_hi": 0.640433855346131,
     "deterministic": false,
     "perm_p": 9.999000099990002e-05,
     "perm_deterministic": false,
-    "wilcoxon_p": 2.2996057560669792e-26,
+    "wilcoxon_p": 1.862645149230957e-09,
     "ref_mean": 0.0,
-    "trt_mean": 0.6000396582567409,
+    "n_specific_robustness": {
+     "100": {
+      "n_pairs": 30,
+      "mean_diff": 0.5749056521667586,
+      "perm_p": 9.999000099990002e-05,
+      "deterministic": false
+     },
+     "200": {
+      "n_pairs": 30,
+      "mean_diff": 0.609838893103471,
+      "perm_p": 9.999000099990002e-05,
+      "deterministic": false
+     },
+     "300": {
+      "n_pairs": 30,
+      "mean_diff": 0.5995184581772576,
+      "perm_p": 9.999000099990002e-05,
+      "deterministic": false
+     },
+     "400": {
+      "n_pairs": 30,
+      "mean_diff": 0.6079080328105341,
+      "perm_p": 9.999000099990002e-05,
+      "deterministic": false
+     },
+     "500": {
+      "n_pairs": 30,
+      "mean_diff": 0.6080272550256828,
+      "perm_p": 9.999000099990002e-05,
+      "deterministic": false
+     }
+    },
     "direction_met": true,
-    "p_holm": 0.00029997000299970003
+    "p_holm": 0.00019998000199980003
    },
    {
     "label": "H1: B1>B3/C1 (duplicate_evaluation_rate)",
     "family": "H1_duplicate_rate",
     "outcome": "duplicate_evaluation_rate",
     "direction_expected": ">",
-    "n_pairs": 150,
-    "n_dropped_na": 0,
+    "cluster_unit": "master_seed",
+    "n_clusters": 30,
+    "physical_run_pairs": 150,
     "mean_diff": 0.9954333333333335,
-    "median_diff_hl": 0.9962500000000001,
-    "sd_diff": 0.0029110604477833933,
-    "dz": 341.94869917294204,
-    "rel_change_vs_a": null,
-    "boot_ci_lo": 0.9949533333333335,
-    "boot_ci_hi": 0.9958811111111112,
-    "deterministic": false,
-    "perm_p": 9.999000099990002e-05,
-    "perm_deterministic": false,
-    "wilcoxon_p": 1.302296550044173e-26,
+    "median_diff_hl": 0.9954333333333333,
+    "sd_diff": 2.2584051416334807e-16,
+    "dz": 4407682726994444.5,
+    "rel_change_vs_ref": null,
+    "boot_ci_lo": 0.9954333333333333,
+    "boot_ci_hi": 0.9954333333333333,
+    "deterministic": true,
+    "perm_p": null,
+    "perm_deterministic": true,
+    "wilcoxon_p": 4.320463057827488e-08,
     "ref_mean": 0.0,
-    "trt_mean": 0.9954333333333335,
+    "n_specific_robustness": {
+     "100": {
+      "n_pairs": 30,
+      "mean_diff": 0.9899999999999997,
+      "perm_p": null,
+      "deterministic": true
+     },
+     "200": {
+      "n_pairs": 30,
+      "mean_diff": 0.9950000000000002,
+      "perm_p": null,
+      "deterministic": true
+     },
+     "300": {
+      "n_pairs": 30,
+      "mean_diff": 0.9966666666666666,
+      "perm_p": null,
+      "deterministic": true
+     },
+     "400": {
+      "n_pairs": 30,
+      "mean_diff": 0.9974999999999998,
+      "perm_p": null,
+      "deterministic": true
+     },
+     "500": {
+      "n_pairs": 30,
+      "mean_diff": 0.9980000000000001,
+      "perm_p": null,
+      "deterministic": true
+     }
+    },
     "direction_met": true,
-    "p_holm": 0.00029997000299970003
+    "p_holm": null
    }
   ]
  },
@@ -77,6 +176,16 @@
   "family": "H3_c2_idle_decomposition",
   "decomposition_identity_max_residual_kwh": 0.0,
   "decomposition_identity_holds": true,
+  "preregistered_idle_saving_identity": {
+   "runs_checked": 570,
+   "runs_with_idle": 120,
+   "tolerance_abs_kwh": 1e-09,
+   "tolerance_rel": 1e-09,
+   "max_abs_residual_kwh": 7.105427357601002e-15,
+   "max_rel_residual": 0.07337198493880757,
+   "failed_run_count": 0,
+   "identity_verified": true
+  },
   "n_c2_runs": 570,
   "n_c2_idle_triggered": 120,
   "homogeneous_equal_c2_max_idle_time_s": 0.0,
@@ -94,8 +203,8 @@
    "ci_lo": 1.4486262390054256,
    "ci_hi": 2.1539590633334535
   },
-  "note": "Under homogeneous rates + equal ranges the C2 idle policy never activates (idle_time=0) for any idle_power_ratio, so total energy = anchor and the saving is exactly 0. Idle-driven savings appear only under heterogeneity-induced early completion (see H5). Energy reduction is attributable to reduced ACTIVE power-time, never to partitioning.",
-  "classification": "DECOMPOSITION_IDENTITY_SUPPORTED; saving is idle-driven, zero under homogeneous-equal."
+  "note": "Under homogeneous rates + equal ranges the C2 idle policy never activates (idle_time=0) for any idle_power_ratio, so total energy = anchor and the saving is exactly 0. Idle-driven savings appear only under heterogeneity-induced early completion (see H5). Energy reduction is attributable to reduced ACTIVE power-time, never to partitioning. The preregistered identity saving = \u03a3 idle_time*(P_active-P_idle)/3.6e6 is verified directly from per-miner records (see STAGE_06A_H3_IDENTITY_AUDIT).",
+  "classification": "SUPPORTED: preregistered per-miner idle-saving identity verified for all C2 runs; saving is idle-driven and zero under homogeneous-equal."
  },
  "H4": {
   "family": "H4_homogeneous_symmetry",

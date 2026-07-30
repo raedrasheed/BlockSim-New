@@ -145,49 +145,172 @@ def analyze_A1():
 # =====================================================================
 # H1 — duplicate coverage ordering B1 > B2 > B3/C1
 # =====================================================================
+def _seed_cluster_diffs(ref_runs, trt_runs, outcome, ns=(100, 200, 300, 400, 500)):
+    """Corrected H1 dependence handling (Stage 6A §6): the same 30 master seeds recur
+    across five miner-count levels, so the 150 matched differences are NOT independent.
+    For each seed we take the direction-preserving mean of its five per-N differences,
+    yielding ONE value per independent seed-cluster (30 clusters). Also returns the raw
+    per-N difference arrays for N-specific robustness and the physical pair count."""
+    refN = {(r["miner_count"], r["seed"]): r[outcome] for r in ref_runs}
+    trtN = {(r["miner_count"], r["seed"]): r[outcome] for r in trt_runs}
+    seeds = sorted({s for (_n, s) in refN} & {s for (_n, s) in trtN})
+    cluster_vals, per_n = [], {n: [] for n in ns}
+    physical_pairs = 0
+    for s in seeds:
+        per_seed = []
+        for n in ns:
+            if (n, s) in refN and (n, s) in trtN:
+                d = float(trtN[(n, s)]) - float(refN[(n, s)])
+                per_seed.append(d)
+                per_n[n].append(d)
+                physical_pairs += 1
+        if per_seed:
+            cluster_vals.append(float(np.mean(per_seed)))  # direction-preserving mean
+    return np.array(cluster_vals), per_n, physical_pairs
+
+
+def cluster_contrast(label, family, ref_runs, trt_runs, outcome, direction):
+    """Seed-cluster confirmatory contrast: uncertainty from 30 independent seed clusters,
+    not from 150 pooled pairs."""
+    diff, per_n, physical_pairs = _seed_cluster_diffs(ref_runs, trt_runs, outcome)
+    ref_mean = float(np.mean([r[outcome] for r in ref_runs]))
+    eff = S.effect_from_diff(diff, seed_boot=C.RNG_SEED_BOOTSTRAP, ref_mean=ref_mean)
+    p, det = S.paired_permutation_p(diff, seed=C.RNG_SEED_PERMUTATION,
+                                    n_perm=C.N_PERMUTATION)
+    wil = S.wilcoxon_signed_rank(diff)
+    # N-specific robustness (30 matched pairs each)
+    n_specific = {}
+    for n, dv in per_n.items():
+        dv = np.array(dv)
+        if dv.size:
+            pn, dn = S.paired_permutation_p(dv, seed=C.RNG_SEED_PERMUTATION,
+                                            n_perm=C.N_PERMUTATION)
+            n_specific[n] = {"n_pairs": int(dv.size), "mean_diff": float(dv.mean()),
+                             "perm_p": pn, "deterministic": dn}
+    res = {"label": label, "family": family, "outcome": outcome,
+           "direction_expected": direction,
+           "cluster_unit": "master_seed", "n_clusters": int(diff.size),
+           "physical_run_pairs": int(physical_pairs), **eff,
+           "perm_p": p, "perm_deterministic": det, "wilcoxon_p": wil.get("p"),
+           "ref_mean": ref_mean, "n_specific_robustness": n_specific}
+    md = eff["mean_diff"]
+    res["direction_met"] = (md > 0) if direction == ">" else (md < 0)
+    return res
+
+
 def analyze_H1():
     B1 = by("H1;A1", scenario_id="B1")
     B2 = by("H1;A1", scenario_id="B2")
     B3 = by("H1;A1", scenario_id="B3_C1_CONTINUOUS_DISJOINT")
     fam = "H1_duplicate_rate"
     cs = [
-        contrast("H1: B1>B2 (duplicate_evaluation_rate)", fam, B2, B1,
-                 "duplicate_evaluation_rate", ">"),
-        contrast("H1: B2>B3/C1 (duplicate_evaluation_rate)", fam, B3, B2,
-                 "duplicate_evaluation_rate", ">"),
-        contrast("H1: B1>B3/C1 (duplicate_evaluation_rate)", fam, B3, B1,
-                 "duplicate_evaluation_rate", ">"),
+        cluster_contrast("H1: B1>B2 (duplicate_evaluation_rate)", fam, B2, B1,
+                         "duplicate_evaluation_rate", ">"),
+        cluster_contrast("H1: B2>B3/C1 (duplicate_evaluation_rate)", fam, B3, B2,
+                         "duplicate_evaluation_rate", ">"),
+        cluster_contrast("H1: B1>B3/C1 (duplicate_evaluation_rate)", fam, B3, B1,
+                         "duplicate_evaluation_rate", ">"),
     ]
+    # Holm across the stochastic cluster-level confirmatory contrasts
     holm = S.holm([(c["label"], c["perm_p"]) for c in cs])
     for c, h in zip(cs, holm):
         c["p_holm"] = h["p_holm"]
-    return {"family": fam, "contrasts": cs}
+    return {"family": fam, "dependence_correction":
+            "seed-cluster aggregation: 150 physical run pairs (5 miner counts x 30 seeds) "
+            "reduced to 30 independent seed-cluster values; uncertainty uses the 30 "
+            "clusters, never 150 as independent replications.",
+            "physical_run_pairs_per_contrast": 150, "independent_clusters": 30,
+            "contrasts": cs}
 
 
 # =====================================================================
 # H3 — C2 idle energy decomposition (identity) + magnitude
 # =====================================================================
+def _load_per_miner_c2():
+    import glob
+    import gzip
+    from collections import defaultdict
+    pm = defaultdict(list)
+    path = os.path.join(C.STAGE5B2, "per_miner", "per_miner-C2.jsonl.gz")
+    with gzip.open(path, "rt") as fh:
+        for line in fh:
+            if line.strip():
+                r = json.loads(line)
+                pm[r["run_id"]].append(r)
+    return pm
+
+
+H3_TOL_ABS = 1e-9  # kWh
+H3_TOL_REL = 1e-9
+
+
+def h3_idle_saving_identity():
+    """Directly verify the preregistered identity (Stage 6A §4):
+      saving_i = Σ_j idle_time_ij·(P_active_j − P_idle_j) / 3.6e6
+    with P_active_j = hash_rate_hps_j · efficiency / 1e12 (frozen params) and
+    P_idle_j = idle_power_ratio · P_active_j. Compared against
+    (anchor − total_energy_kwh), accounting for coordination energy."""
+    pm = _load_per_miner_c2()
+    mat = {m["run_id"]: m for m in C.load_matrix()}
+    runmap = {r["run_id"]: r for r in runs if r["scenario_id"] == "C2"}
+    recs, max_abs, max_rel, fails = [], 0.0, 0.0, 0
+    for rid, run in sorted(runmap.items()):
+        ipr = run["idle_power_ratio"]
+        eff = float(mat[rid]["efficiency_j_per_th"])
+        idle_save = 0.0
+        for m in pm[rid]:
+            p_active = m["hash_rate_hps"] * eff / 1e12          # W (frozen)
+            p_idle = ipr * p_active                             # W (frozen)
+            idle_save += m["idle_time_s"] * (p_active - p_idle) / 3.6e6
+        total = run["total_energy_kwh"]
+        coord = run["coordination_energy_kwh"]
+        observed = C.CONTINUOUS_ENERGY_ANCHOR_KWH - total       # anchor − total
+        residual = idle_save - (observed + coord)              # expected 0
+        rel = abs(residual) / observed if observed > 0 else (0.0 if abs(residual) == 0 else float("inf"))
+        ok = abs(residual) <= H3_TOL_ABS
+        if not ok:
+            fails += 1
+        max_abs = max(max_abs, abs(residual))
+        if observed > 0:
+            max_rel = max(max_rel, rel)
+        recs.append({"run_id": rid, "miner_count": run["miner_count"], "seed": run["seed"],
+                     "idle_power_ratio": ipr, "idle_power_saving_kwh": idle_save,
+                     "observed_saving_kwh": observed, "coordination_energy_kwh": coord,
+                     "residual_kwh": residual, "relative_residual": rel,
+                     "pass": ok})
+    summary = {"runs_checked": len(recs),
+               "runs_with_idle": sum(1 for r in recs if r["idle_power_saving_kwh"] > 0),
+               "tolerance_abs_kwh": H3_TOL_ABS, "tolerance_rel": H3_TOL_REL,
+               "max_abs_residual_kwh": max_abs, "max_rel_residual": max_rel,
+               "failed_run_count": fails, "identity_verified": bool(fails == 0)}
+    return recs, summary
+
+
 def analyze_H3():
     c2 = [r for r in runs if r["scenario_id"] == "C2"]
-    # decomposition identity: active + idle + coordination == total (exact)
     maxres = 0.0
     for r in c2:
         s = (r["active_energy_kwh"] + r["idle_energy_kwh"]
              + r["coordination_energy_kwh"])
         maxres = max(maxres, abs(s - r["total_energy_kwh"]))
-    # magnitude: saving vs anchor where idle triggered (idle_time>0)
     idle_runs = [r for r in c2 if r["total_idle_time_s"] > 0]
     savings = np.array([C.CONTINUOUS_ENERGY_ANCHOR_KWH - r["total_energy_kwh"]
                         for r in idle_runs]) if idle_runs else np.array([])
-    homeq = by("H3", idle_power_ratio=None)  # placeholder not used
-    # under homogeneous+equal C2 (H3;H4 and H3 SENS_IDLE) idle never triggers
     hom_c2 = [r for r in c2 if r["hash_rate_distribution"] == "homogeneous"
               and r["allocation_policy"] == "equal"]
     hom_idle_max = max((r["total_idle_time_s"] for r in hom_c2), default=0.0)
+    _recs, ident = h3_idle_saving_identity()
+    classification = (
+        "SUPPORTED: preregistered per-miner idle-saving identity verified for all "
+        "C2 runs; saving is idle-driven and zero under homogeneous-equal."
+        if ident["identity_verified"] else
+        "NOT_TESTABLE_AS_PREREGISTERED: per-miner idle-saving identity did not reconcile "
+        "within tolerance.")
     return {
         "family": "H3_c2_idle_decomposition",
         "decomposition_identity_max_residual_kwh": float(maxres),
         "decomposition_identity_holds": bool(maxres == 0.0),
+        "preregistered_idle_saving_identity": ident,
         "n_c2_runs": len(c2),
         "n_c2_idle_triggered": len(idle_runs),
         "homogeneous_equal_c2_max_idle_time_s": float(hom_idle_max),
@@ -197,9 +320,10 @@ def analyze_H3():
                 "activates (idle_time=0) for any idle_power_ratio, so total energy = "
                 "anchor and the saving is exactly 0. Idle-driven savings appear only "
                 "under heterogeneity-induced early completion (see H5). Energy reduction "
-                "is attributable to reduced ACTIVE power-time, never to partitioning.",
-        "classification": "DECOMPOSITION_IDENTITY_SUPPORTED; saving is idle-driven, "
-                          "zero under homogeneous-equal.",
+                "is attributable to reduced ACTIVE power-time, never to partitioning. The "
+                "preregistered identity saving = Σ idle_time*(P_active-P_idle)/3.6e6 is "
+                "verified directly from per-miner records (see STAGE_06A_H3_IDENTITY_AUDIT).",
+        "classification": classification,
     }
 
 
@@ -301,32 +425,68 @@ def analyze_H8():
 # =====================================================================
 # H7 — SECONDARY diagnostic: delay -> single-height stale rate
 # =====================================================================
+def _h7_level_runs(h7, dl, N):
+    if dl == 0.42:
+        return [r for r in baseline_b3c1(N)]
+    return [r for r in h7 if r["propagation_delay_mean_s"] == dl and r["miner_count"] == N]
+
+
 def analyze_H7():
+    """Stage 6A §5 correction: single_height_stales_per_accepted_block is a COUNT-RATE
+    diagnostic (several distinct miners may stale at one accepted height), so no
+    Wilson/Clopper-Pearson/binomial interval is applied to stale_count/accepted_blocks.
+    Uncertainty comes from run-level values with a seed/run-cluster bootstrap. A separate
+    binary diagnostic uses heights_with_any_stale/accepted_heights. N=100 and N=500 are
+    kept separate; an optional pooled curve uses seed-cluster resampling only."""
     h7 = by("H7")
-    levels = {0.42: baseline_b3c1(100) + baseline_b3c1(500)}
-    for dl in (0, 5, 30, 60):
-        levels[dl] = [r for r in h7 if r["propagation_delay_mean_s"] == dl]
-    rows = []
-    for dl in sorted(levels):
-        s = levels[dl]
-        rate = np.array([r["single_height_stales_per_accepted_block"] for r in s])
-        counts = int(sum(r["single_height_stale_block_count"] for r in s))
-        acc = int(sum(r["accepted_blocks"] for r in s))
-        frac = np.array([r["single_height_stale_fraction_of_valid_proposals"] for r in s])
-        row = {"delay_s": dl, "n_runs": len(s),
-               "sh_stales_per_block": S.describe(rate),
-               "sh_stale_count_total": counts,
-               "accepted_block_total": acc,
-               "sh_fraction_of_valid_proposals": S.describe(frac)}
-        if counts == 0:
-            row["zero_obs_upper_bound_rule_of_three"] = S.rule_of_three(acc)
-            lo, hi = S.clopper_pearson(0, acc)
-            row["zero_obs_exact_binomial_upper_95"] = hi
-        else:
-            lo, hi = S.wilson_ci(counts, acc)
-            row["wilson_ci_95"] = [lo, hi]
-        rows.append(row)
-    # primary invariance across delay (seed-matched to baseline)
+    delays = [0, 0.42, 5, 30, 60]
+    levels = []
+    for dl in delays:
+        for N in (100, 500):
+            s = _h7_level_runs(h7, dl, N)
+            rate = np.array([r["single_height_stales_per_accepted_block"] for r in s])
+            d = S.describe(rate)
+            lo, hi = S.bootstrap_ci_mean_cluster(rate, seed=C.RNG_SEED_BOOTSTRAP)
+            # separate binary any-stale-height diagnostic (per-run proportion)
+            anyfrac = np.array([(r["heights_with_any_stale"] / r["accepted_heights"])
+                                if r["accepted_heights"] else 0.0 for r in s])
+            alo, ahi = S.bootstrap_ci_mean_cluster(anyfrac, seed=C.RNG_SEED_BOOTSTRAP + 1)
+            row = {
+                "delay_s": dl, "miner_count": N, "n_runs": len(s),
+                "run_level_sh_stales_per_accepted_block": [float(x) for x in rate],
+                "mean": d["mean"], "median": d["median"], "sd": d["sd"],
+                "iqr": d["iqr"], "min": d["min"], "max": d["max"],
+                "mean_count_rate_cluster_boot_ci95": [lo, hi],
+                "sh_stale_block_count_total": int(sum(r["single_height_stale_block_count"] for r in s)),
+                "accepted_block_total": int(sum(r["accepted_blocks"] for r in s)),
+                "accepted_heights_total": int(sum(r["accepted_heights"] for r in s)),
+                "heights_with_any_stale_total": int(sum(r["heights_with_any_stale"] for r in s)),
+                "any_stale_height_fraction_mean": float(anyfrac.mean()),
+                "any_stale_height_fraction_cluster_boot_ci95": [alo, ahi],
+            }
+            if row["sh_stale_block_count_total"] == 0:
+                row["observed"] = (f"0 stale blocks observed across "
+                                   f"{row['accepted_heights_total']} accepted heights")
+                row["assumption_dependent_secondary_zero_bound_rule_of_three"] = {
+                    "value": S.rule_of_three(row["accepted_heights_total"]),
+                    "label": "ASSUMPTION-DEPENDENT / SECONDARY: treats accepted heights as "
+                             "independent Bernoulli trials, which they are not; provided only "
+                             "as a coarse upper reference, NOT an exact binomial interval",
+                }
+            levels.append(row)
+    # optional pooled-by-seed-cluster curve (aggregate the two N per seed -> 30 clusters)
+    pooled = []
+    for dl in delays:
+        per_seed = {}
+        for N in (100, 500):
+            for r in _h7_level_runs(h7, dl, N):
+                per_seed.setdefault(r["seed"], []).append(
+                    r["single_height_stales_per_accepted_block"])
+        clusters = np.array([np.mean(v) for v in per_seed.values()])
+        lo, hi = S.bootstrap_ci_mean_cluster(clusters, seed=C.RNG_SEED_BOOTSTRAP + 2)
+        pooled.append({"delay_s": dl, "n_seed_clusters": int(clusters.size),
+                       "mean": float(clusters.mean()),
+                       "seed_cluster_boot_ci95": [lo, hi]})
     prim = {}
     for outcome in ("total_energy_kwh", "accepted_blocks", "total_candidate_evaluations",
                     "total_active_time_s"):
@@ -340,7 +500,14 @@ def analyze_H7():
         prim[outcome] = {"max_abs_dev_vs_baseline": maxdev, "invariant": bool(maxdev == 0.0)}
     return {
         "classification": "SECONDARY_DIAGNOSTIC_ONLY",
-        "levels": rows,
+        "interval_framework": "run-level count-rate with seed/run-cluster bootstrap; NO "
+                              "binomial/Wilson/Clopper-Pearson on stale_count/accepted_blocks "
+                              "(multiple distinct miners may stale at one height).",
+        "levels": levels,
+        "pooled_seed_cluster_curve": pooled,
+        "binary_any_stale_definition": "heights_with_any_stale / accepted_heights = "
+            "probability that an accepted height has at least one modeled stale producer "
+            "(per-run proportion; uncertainty via run-cluster bootstrap).",
         "primary_invariance_across_delay": prim,
         "note": "H7 is the single-height stale-race diagnostic (amended 5B1G): one "
                 "accepted height in isolation, no fork resolution, energy/evaluations "
@@ -444,25 +611,43 @@ def main():
         w = csv.DictWriter(fh, fieldnames=cols)
         w.writeheader()
         w.writerows(dl)
-    # confirmatory effects CSV (flatten all contrasts)
+    # confirmatory effects CSV (flatten all contrasts; H1 is seed-cluster based)
     eff_rows = []
     for hk in ("H1", "H5", "H6", "H8"):
         for c in bundle[hk]["contrasts"]:
             eff_rows.append({"hypothesis": hk, **{k: c.get(k) for k in (
-                "label", "family", "outcome", "direction_expected", "n_pairs",
+                "label", "family", "outcome", "direction_expected",
+                "cluster_unit", "n_clusters", "physical_run_pairs", "n_pairs",
                 "n_dropped_na", "ref_mean", "trt_mean", "mean_diff", "median_diff_hl",
-                "sd_diff", "dz", "rel_change_vs_a", "boot_ci_lo", "boot_ci_hi",
-                "perm_p", "p_holm", "wilcoxon_p", "perm_deterministic",
-                "direction_met")}})
+                "sd_diff", "dz", "rel_change_vs_a", "rel_change_vs_ref",
+                "boot_ci_lo", "boot_ci_hi", "perm_p", "p_holm", "wilcoxon_p",
+                "perm_deterministic", "direction_met")}})
     with open(os.path.join(OUT_T, "confirmatory_effects.csv"), "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(eff_rows[0].keys()))
         w.writeheader()
         w.writerows(eff_rows)
+    # H3 preregistered idle-saving identity audit -> stage_06a/diagnostics
+    recs, _summary = h3_idle_saving_identity()
+    s6a_diag = os.path.join(C.REPO_ROOT, "results", "thesis_revision_v43",
+                            "stage_06a", "diagnostics")
+    os.makedirs(s6a_diag, exist_ok=True)
+    with open(os.path.join(s6a_diag, "h3_idle_saving_identity.csv"), "w", newline="") as fh:
+        cols = ["run_id", "miner_count", "seed", "idle_power_ratio",
+                "idle_power_saving_kwh", "observed_saving_kwh", "coordination_energy_kwh",
+                "residual_kwh", "relative_residual", "pass"]
+        w = csv.DictWriter(fh, fieldnames=cols)
+        w.writeheader()
+        w.writerows(recs)
     print("descriptive rows:", len(dl))
     print("confirmatory effect rows:", len(eff_rows))
     print("A1 max_abs_dev:", bundle["A1"]["max_abs_deviation_kwh"])
+    print("H3 identity verified:", bundle["H3"]["preregistered_idle_saving_identity"]["identity_verified"],
+          "max_abs_residual:", bundle["H3"]["preregistered_idle_saving_identity"]["max_abs_residual_kwh"])
+    print("H1 clusters:", bundle["H1"]["independent_clusters"],
+          "physical pairs:", bundle["H1"]["physical_run_pairs_per_contrast"])
     print("wrote analysis_bundle.json, confirmatory_results.json, descriptive_long.csv, "
-          "confirmatory_effects.csv, a1_invariant.json, h7_secondary.json")
+          "confirmatory_effects.csv, a1_invariant.json, h7_secondary.json, "
+          "stage_06a/diagnostics/h3_idle_saving_identity.csv")
 
 
 if __name__ == "__main__":

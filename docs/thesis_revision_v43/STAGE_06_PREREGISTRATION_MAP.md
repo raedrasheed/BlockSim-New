@@ -49,9 +49,14 @@ permutation = 10,000 (seed 6060602).
 - **IV / levels:** scenario {B1, B2, B3/C1} (B0 = reference/anchor, not in the ordering).
 - **Outcome / canonical field:** primary `duplicate_evaluation_rate`; secondary
   `distinct_candidate_identities`, `energy_per_accepted_block_kwh`, exhaustion.
-- **Unit:** run·seed. **Pairing:** `(miner_count, seed)`. **Inclusion:** `H1;A1` CORE
-  (600 runs). **NA rule:** duplicate rate always defined; `energy_per_accepted_block_kwh`
-  NA when zero-block (B1 near-always zero-block).
+- **Unit:** run·seed. **Pairing:** seed-matched `(miner_count, seed)`. **Clustering
+  (Stage 6A §6):** because the 30 master seeds recur across the five miner counts, the 150
+  physical differences per contrast are aggregated (direction-preserving mean) to **30
+  independent seed-cluster values**, and uncertainty is computed from those 30 clusters —
+  never from 150 as independent replications; N-specific analyses (30 pairs each) are
+  retained as robustness. **Inclusion:** `H1;A1` CORE (600 runs). **NA rule:** duplicate
+  rate always defined; `energy_per_accepted_block_kwh` NA when zero-block (B1 near-always
+  zero-block).
 - **Test:** paired permutation (two-sided) on differences; **effect size** paired mean
   difference + Hodges-Lehmann; **CI** seed-pair bootstrap 95%; Wilcoxon signed-rank
   sensitivity.

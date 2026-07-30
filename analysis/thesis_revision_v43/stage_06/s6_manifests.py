@@ -107,7 +107,22 @@ def gen_manifest():
             "STAGE_06_SECONDARY_DIAGNOSTICS.md", "STAGE_06_CLAIM_CLASSIFICATION.md",
             "STAGE_06_LIMITATIONS.md", "STAGE_06_RESULTS_REPORT.md",
             "STAGE_06_ENVIRONMENT.json", "STAGE_06_ANALYSIS_MANIFEST.json",
-            "STAGE_06_CHECKSUM_MANIFEST.sha256")],
+            "STAGE_06_QUALITY_GATES.json", "STAGE_06_CHECKSUM_MANIFEST.sha256")],
+        "stage_6a_corrections": {
+            "branch": "thesis-v43-stage6-analysis-2",
+            "base_commit": "547ea339c64aa2475b8faa4e88b934925d550df4",
+            "defects_fixed": [
+                "H5 fairness overclaim -> modeled completion-balance terms",
+                "H3 preregistered idle-saving identity verified directly per-miner",
+                "H7 count-rate intervals (seed/run-cluster bootstrap; no binomial/Wilson) "
+                "+ separate binary any-stale diagnostic",
+                "H1 seed-cluster inference (30 clusters, not 150 pooled pairs)"],
+            "docs": [f"docs/thesis_revision_v43/{d}" for d in (
+                "STAGE_06A_CORRECTION_REPORT.md", "STAGE_06A_DEPENDENCE_AUDIT.md",
+                "STAGE_06A_H3_IDENTITY_AUDIT.md", "STAGE_06A_H7_INTERVAL_AUDIT.md")],
+            "new_diagnostic": "results/thesis_revision_v43/stage_06a/diagnostics/"
+                              "h3_idle_saving_identity.csv",
+        },
     }
     p = os.path.join(DOCS, "STAGE_06_ANALYSIS_MANIFEST.json")
     json.dump(man, open(p, "w"), indent=1)
@@ -120,7 +135,10 @@ def gen_checksums():
     root = C.REPO_ROOT
     targets = []
     for base in (os.path.join(root, "results", "thesis_revision_v43", "stage_06"),
+                 os.path.join(root, "results", "thesis_revision_v43", "stage_06a"),
                  os.path.join(root, "analysis", "thesis_revision_v43", "stage_06")):
+        if not os.path.isdir(base):
+            continue
         for dp, _dn, fs in os.walk(base):
             if "__pycache__" in dp:
                 continue
@@ -128,8 +146,9 @@ def gen_checksums():
                 if f.endswith(".pyc"):
                     continue
                 targets.append(os.path.join(dp, f))
+    # both STAGE_06_* and STAGE_06A_* docs (startswith STAGE_06, not STAGE_06_)
     for f in sorted(os.listdir(DOCS)):
-        if f.startswith("STAGE_06_") and f != "STAGE_06_CHECKSUM_MANIFEST.sha256":
+        if f.startswith("STAGE_06") and f != "STAGE_06_CHECKSUM_MANIFEST.sha256":
             targets.append(os.path.join(DOCS, f))
     lines = []
     for t in sorted(targets):

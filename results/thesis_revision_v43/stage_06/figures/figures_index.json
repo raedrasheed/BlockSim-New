@@ -32,7 +32,7 @@
  {
   "figure": "fig04_h5_c2_energy_tradeoff",
   "tag": "CONFIRMATORY",
-  "caption": "Seed-matched C2 total energy: equal allocation lets fast miners idle (energy < anchor); weighted removes idle so energy returns to the anchor. The saving is idle-driven, not from partitioning.",
+  "caption": "Each line connects seed-matched runs. Under heterogeneous hash rates, equal-size ranges allow faster miners to complete earlier and enter the modeled idle state, reducing energy below the fixed-power anchor. Hash-rate-weighted ranges equalize modeled range-completion times, remove that idle opportunity, and return energy to the anchor. This is a completion-balance versus idle-energy trade-off, not an incentive-fairness or reward-fairness result.",
   "files": [
    "fig04_h5_c2_energy_tradeoff.pdf",
    "fig04_h5_c2_energy_tradeoff.png"
@@ -72,7 +72,7 @@
  {
   "figure": "fig08_h7_delay_singleheight",
   "tag": "SECONDARY",
-  "caption": "Single-height stales per accepted block vs propagation delay (B3/C1, N\u2208{100,500}, n=60 per level). Secondary diagnostic only; energy, candidate counts, accepted blocks and active time are identical across delays. Delay=0 has zero observed stales (see report for the rule-of-three upper bound).",
+  "caption": "Run-level single-height stales per accepted block vs propagation delay (B3/C1; N=100 and N=500 shown separately, 30 runs each). Bar = level mean, whisker = seed/run-cluster bootstrap 95% CI. This is a COUNT-RATE diagnostic (several distinct miners may stale at one accepted height), so no binomial/Wilson interval is used. At delay=0, zero stale blocks are observed across the accepted heights. Secondary diagnostic only; energy, candidate counts, accepted blocks and active time are identical across delays.",
   "files": [
    "fig08_h7_delay_singleheight.pdf",
    "fig08_h7_delay_singleheight.png"

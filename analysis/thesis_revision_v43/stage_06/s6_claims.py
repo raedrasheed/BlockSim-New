@@ -67,8 +67,17 @@ def classify():
     h3 = B["H3"]
     out["hypotheses"]["H3"] = {
         "status": "CONFIRMATORY",
-        "overall": "SUPPORTED (decomposition identity)",
-        "note": f"active+idle+coordination = total exactly (max residual "
+        "overall": ("SUPPORTED (preregistered idle-saving identity verified)"
+                    if h3["preregistered_idle_saving_identity"]["identity_verified"] else
+                    "NOT_TESTABLE_AS_PREREGISTERED (idle-saving identity did not reconcile)"),
+        "note": f"The preregistered identity saving = sum_j idle_time_j*(P_active_j - "
+                f"P_idle_j)/3.6e6 was verified DIRECTLY from per-miner records for all "
+                f"{h3['preregistered_idle_saving_identity']['runs_checked']} C2 runs: max "
+                f"absolute residual "
+                f"{h3['preregistered_idle_saving_identity']['max_abs_residual_kwh']:.1e} kWh "
+                f"(tolerance {h3['preregistered_idle_saving_identity']['tolerance_abs_kwh']:.0e}), "
+                f"{h3['preregistered_idle_saving_identity']['failed_run_count']} failures. "
+                f"active+idle+coordination = total exactly (max residual "
                 f"{h3['decomposition_identity_max_residual_kwh']:.1e} kWh). Under "
                 f"homogeneous+equal the C2 idle policy never triggers, so the saving is "
                 f"exactly 0; idle-driven savings appear only under heterogeneity-induced "
@@ -94,12 +103,15 @@ def classify():
                           "mean_diff": c["mean_diff"], "p_holm": c.get("p_holm"),
                           "deterministic": c.get("perm_deterministic"),
                           "disposition": disp(c)} for c in cs],
-        "overall": "SUPPORTED (fairness) + TRADE-OFF (energy)",
-        "note": "Weighted allocation removes completion-time dispersion (both scenarios) "
-                "and removes C2 idle; but removing idle eliminates the idle-driven C2 "
-                "energy saving (energy returns to the anchor). Trade-off, not guaranteed "
-                "PoCol superiority. On continuous B3/C1 there is no idle to remove and "
-                "energy is invariant either way.",
+        "overall": "SUPPORTED for reduced modeled completion-time imbalance and idle; "
+                   "documented energy trade-off",
+        "note": "Hash-rate-weighted ranges remove modeled range-completion-time dispersion "
+                "(both scenarios) and remove C2 modeled idle; but removing idle eliminates "
+                "the idle-driven C2 energy saving (energy returns to the fixed-power "
+                "anchor). This is a modeled completion-balance versus idle-energy trade-off "
+                "only; it is NOT a reward, incentive, participation, economic, "
+                "Sybil-resistance, or proof-of-effort claim. On continuous B3/C1 there is "
+                "no idle to remove and energy is invariant either way.",
     }
 
     # H6

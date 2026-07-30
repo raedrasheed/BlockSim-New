@@ -41,8 +41,9 @@ assumptions and the frozen matrix; none is a real-deployment or security claim.
   outcomes (e.g. H6), which can render a directionally-consistent small effect
   non-significant. Such cases are classified INCONCLUSIVE, not NOT_SUPPORTED.
 - B3 and C1 share one physical execution; they are never treated as independent samples.
-- No fairness, incentive, reward, or Sybil claims are made — those mechanisms are not
-  implemented.
+- No incentive, reward, participation, economic, Sybil-resistance, or proof-of-effort
+  claims are made — those mechanisms are not implemented. H5 speaks only to modeled
+  range-completion balance and idle energy.
 
 ## 4. Approved bounded wording
 

@@ -68,12 +68,15 @@ def t3():
         ["A1", "accounting invariant (former H2)", "verification (identity)",
          "total_energy_kwh", "B0/B1/B2/B3;C1 continuous, inactive=0, active", 1140,
          "none (deterministic identity)", "none"],
-        ["H1", "confirmatory", "paired permutation + bootstrap CI + Wilcoxon",
+        ["H1", "confirmatory", "seed-CLUSTER permutation + cluster bootstrap CI + Wilcoxon",
          "duplicate_evaluation_rate", "H1;A1 CORE (B0/B1/B2/B3;C1 x5N)", 600,
-         "Holm within H1 (3 ordered contrasts)", "seed-matched (miner_count,seed)"],
-        ["H3", "confirmatory", "identity verification + magnitude",
-         "active/idle/total energy", "C2 (CORE_C2 + SENS_IDLE + H5 C2)", 570,
-         "n/a (identity)", "seed-matched where contrasted"],
+         "Holm within H1 (3 ordered contrasts)",
+         "seed-cluster: 150 physical pairs -> 30 independent seed clusters (uncertainty "
+         "from 30 clusters, not 150); N-specific 30 pairs each as robustness"],
+        ["H3", "confirmatory", "preregistered per-miner idle-saving identity (direct) + "
+         "decomposition identity + magnitude",
+         "active/idle/total energy; Sum idle_time*(P_active-P_idle)/3.6e6", 570,
+         "n/a (identity)", "per-miner records; seed-matched where contrasted"],
         ["H4", "confirmatory", "equivalence-to-zero (dispersion, idle)",
          "completion_time_std_s, total_idle_time_s", "homogeneous+equal (incl C2 CORE)",
          "varies", "n/a", "n/a"],
@@ -86,10 +89,12 @@ def t3():
          "accepted_blocks, total_energy_kwh, energy_per_accepted_block_kwh",
          "H6 SENS_INACTIVE vs H1;A1 baseline", 180,
          "Holm within H6", "seed-matched vs inactive=0 baseline"],
-        ["H7", "SECONDARY DIAGNOSTIC (amended 5B1G)", "descriptive sensitivity + "
-         "rule-of-three / Wilson", "single_height_stales_per_accepted_block",
+        ["H7", "SECONDARY DIAGNOSTIC (amended 5B1G)", "count-rate descriptives + seed/run"
+         "-cluster bootstrap (NO binomial/Wilson on stale_count); separate binary "
+         "any-stale-height diagnostic", "single_height_stales_per_accepted_block; "
+         "heights_with_any_stale/accepted_heights",
          "H7 SENS_DELAY vs H1;A1 baseline", 240,
-         "not confirmatory", "delay-matched to baseline"],
+         "not confirmatory", "N kept separate (100,500); delay-matched to baseline"],
         ["H8", "confirmatory", "paired permutation + bootstrap CI + Wilcoxon",
          "exhausted_rounds, template refreshes, effective_block_interval_s",
          "H8 SENS_MU vs H1;A1 baseline", 120,
@@ -251,27 +256,35 @@ def t11():
     write("table11_zero_block.csv", rows, cols)
 
 
-# T12 secondary stale diagnostic (H7)
+# T12 secondary stale diagnostic (H7) — corrected count-rate framework, N kept separate
 def t12():
     rows = []
     for lv in bundle["H7_secondary"]["levels"]:
-        d = lv["sh_stales_per_block"]
-        rows.append({"delay_s": lv["delay_s"], "physical_runs": lv["n_runs"],
-                     "sh_stales_per_block_mean": d["mean"], "sh_stales_per_block_median": d["median"],
-                     "sh_stales_per_block_max": d["max"],
-                     "sh_stale_count_total": lv["sh_stale_count_total"],
-                     "accepted_block_total": lv["accepted_block_total"],
-                     "zero_obs_upper_bound_rule_of_three":
-                         lv.get("zero_obs_upper_bound_rule_of_three"),
-                     "zero_obs_exact_binomial_upper_95":
-                         lv.get("zero_obs_exact_binomial_upper_95"),
-                     "wilson_ci_95": lv.get("wilson_ci_95"),
-                     "classification": "SECONDARY_DIAGNOSTIC_ONLY (single-height stale-race)"})
-    cols = ["delay_s", "physical_runs", "sh_stales_per_block_mean",
-            "sh_stales_per_block_median", "sh_stales_per_block_max",
-            "sh_stale_count_total", "accepted_block_total",
-            "zero_obs_upper_bound_rule_of_three", "zero_obs_exact_binomial_upper_95",
-            "wilson_ci_95", "classification"]
+        lo, hi = lv["mean_count_rate_cluster_boot_ci95"]
+        alo, ahi = lv["any_stale_height_fraction_cluster_boot_ci95"]
+        rows.append({
+            "delay_s": lv["delay_s"], "miner_count": lv["miner_count"],
+            "physical_runs": lv["n_runs"],
+            "sh_stales_per_block_mean": lv["mean"],
+            "sh_stales_per_block_median": lv["median"],
+            "sh_stales_per_block_sd": lv["sd"], "sh_stales_per_block_iqr": lv["iqr"],
+            "sh_stales_per_block_min": lv["min"], "sh_stales_per_block_max": lv["max"],
+            "mean_count_rate_cluster_boot_lo": lo, "mean_count_rate_cluster_boot_hi": hi,
+            "sh_stale_block_count_total": lv["sh_stale_block_count_total"],
+            "accepted_heights_total": lv["accepted_heights_total"],
+            "any_stale_height_fraction_mean": lv["any_stale_height_fraction_mean"],
+            "any_stale_height_fraction_cluster_boot_lo": alo,
+            "any_stale_height_fraction_cluster_boot_hi": ahi,
+            "interval_method": "run-level count-rate; seed/run-cluster bootstrap (NO "
+                               "binomial/Wilson/Clopper on stale_count/accepted_blocks)",
+            "classification": "SECONDARY_DIAGNOSTIC_ONLY (single-height stale-race)"})
+    cols = ["delay_s", "miner_count", "physical_runs", "sh_stales_per_block_mean",
+            "sh_stales_per_block_median", "sh_stales_per_block_sd",
+            "sh_stales_per_block_iqr", "sh_stales_per_block_min", "sh_stales_per_block_max",
+            "mean_count_rate_cluster_boot_lo", "mean_count_rate_cluster_boot_hi",
+            "sh_stale_block_count_total", "accepted_heights_total",
+            "any_stale_height_fraction_mean", "any_stale_height_fraction_cluster_boot_lo",
+            "any_stale_height_fraction_cluster_boot_hi", "interval_method", "classification"]
     write("table12_secondary_stale.csv", rows, cols)
 
 

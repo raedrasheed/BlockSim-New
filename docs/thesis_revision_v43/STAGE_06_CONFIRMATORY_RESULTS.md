@@ -13,30 +13,46 @@ Independent of miner count and search discipline. **Confirmed as a deterministic
 — not an empirical superiority claim. Search discipline changes coverage and
 energy-per-accepted-block, never total energy. (`fig02`, `table07`.)
 
-## H1 — Duplicate coverage: B1 > B2 > B3/C1 — SUPPORTED
+## H1 — Duplicate coverage: B1 > B2 > B3/C1 — SUPPORTED (seed-cluster inference)
 
-Paired (150 pairs each, pooled over 5 miner counts):
+**Dependence correction (Stage 6A §6).** The same 30 master seeds recur across the five
+miner-count levels, so the 150 matched differences are **not** 150 independent
+replications. Uncertainty is computed from **30 independent seed clusters**: for each
+seed, the five per-N differences are aggregated by their direction-preserving mean, and
+the seed-cluster bootstrap / sign-flip permutation / Hodges-Lehmann operate on the 30
+cluster values. Physical run pairs = 150; independent clusters for uncertainty = 30. The
+N-specific analyses (30 matched pairs at each N) are retained as robustness.
 
-| Contrast | mean Δ (rate) | HL Δ | 95% CI | Holm p | note |
-|----------|--------------:|-----:|--------|-------:|------|
-| B1 − B2 | +0.395 | +0.392 | [0.374, 0.416] | 3e-4 | stochastic |
-| B2 − B3/C1 | +0.600 | +0.603 | [0.579, 0.621] | 3e-4 | stochastic |
-| B1 − B3/C1 | +0.995 | +0.996 | [0.995, 0.996] | — | design-deterministic |
+| Contrast | mean Δ (rate) | HL Δ | 95% cluster CI | Holm p | note |
+|----------|--------------:|-----:|----------------|-------:|------|
+| B1 − B2 | +0.395 | +0.390 | [0.355, 0.437] | 2e-4 | stochastic (30 clusters) |
+| B2 − B3/C1 | +0.600 | +0.606 | [0.558, 0.640] | 2e-4 | stochastic (30 clusters) |
+| B1 − B3/C1 | +0.995 | +0.995 | [0.995, 0.995] | — | design-deterministic |
 
-Ordering holds; direction met for all three; the two stochastic contrasts survive Holm.
+Ordering holds; direction met for all three; the two stochastic contrasts survive Holm
+with cluster CIs excluding 0. **The corrected conclusion is unchanged** — the cluster CIs
+are appropriately wider than the earlier pooled intervals but still exclude 0.
 **Bounded wording:** duplication ordering applies under an immutable common template and
 disjoint assigned ranges; the exact-zero B3/C1 duplication does **not** generalize to
-independently changing real-world headers. (`fig01`, `table08`.)
+independently changing real-world headers. (`fig01`, `table08`; `STAGE_06A_DEPENDENCE_AUDIT.md`.)
 
-## H3 — C2 idle energy decomposition — SUPPORTED (identity)
+## H3 — C2 idle energy decomposition — SUPPORTED (preregistered identity verified)
 
-`active_energy + idle_energy + coordination_energy = total_energy` exactly (max residual
-0 kWh across all 570 C2 runs). Under **homogeneous + equal** ranges the idle policy never
-activates (max idle time 0 s for every `idle_power_ratio`), so the saving is **exactly 0**
-and total energy = anchor. Idle-driven savings appear only under **heterogeneity-induced
-early completion** (H5 C2 equal: mean saving +3.38 kWh at N=100, +3.81 kWh at N=500).
-The saving equals `Σ idle_time·(P_active − P_idle)`; energy reduction is attributable to
-reduced **active power-time**, never to partitioning. (`fig05`, `table07`.)
+**Direct identity verification (Stage 6A §4).** The preregistered identity
+`saving_i = Σ_j idle_time_ij·(P_active_j − P_idle_j)/3.6e6` is verified **directly from the
+per-miner records** for **all 570 C2 runs**, with `P_active_j` from the frozen
+hash-rate × efficiency and `P_idle_j = idle_power_ratio·P_active_j`, compared against
+`anchor − total_energy` (accounting for coordination energy). Result: **max absolute
+residual 7.1e-15 kWh** (tolerance 1e-9), **0 failures** (`h3_idle_saving_identity.csv`,
+`STAGE_06A_H3_IDENTITY_AUDIT.md`).
+
+Separately, `active_energy + idle_energy + coordination_energy = total_energy` exactly
+(max residual 0 kWh). Under **homogeneous + equal** ranges the idle policy never activates
+(max idle time 0 s for every `idle_power_ratio`), so the saving is **exactly 0** and total
+energy = anchor. Idle-driven savings appear only under **heterogeneity-induced early
+completion** (H5 C2 equal: mean saving +3.38 kWh at N=100, +3.81 kWh at N=500). Energy
+reduction is attributable to reduced **active power-time**, never to partitioning.
+(`fig05`, `table07`.)
 
 ## H4 — Homogeneous completion symmetry — SUPPORTED
 
@@ -44,7 +60,7 @@ With homogeneous rates and equal ranges, `completion_time_std_s` is exactly 0 (m
 over all homogeneous-equal runs) and C2 `total_idle_time_s` is exactly 0 → post-range
 idle opportunity = 0. (`fig03` context, `descriptive_long.csv`.)
 
-## H5 — Heterogeneity & allocation — SUPPORTED (fairness) + documented TRADE-OFF (energy)
+## H5 — Heterogeneity & allocation — SUPPORTED for reduced modeled completion-time imbalance and idle; documented energy TRADE-OFF
 
 Seed-matched weighted vs equal (hetero_moderate; 30 pairs per config; Holm within H5):
 
@@ -57,9 +73,11 @@ Seed-matched weighted vs equal (hetero_moderate; 30 pairs per config; Holm withi
   the anchor.
 - On continuous B3/C1 there is no idle to remove and energy is invariant either way.
 
-Weighted allocation improves fairness (completion symmetry, no idle) but **eliminates the
-C2 idle energy saving** — a trade-off, not guaranteed PoCol superiority. (`fig03`, `fig04`,
-`table09`.)
+Hash-rate-weighted allocation improves **modeled range-completion balance** (completion
+symmetry, no idle) but **eliminates the C2 idle energy saving** — a completion-balance
+versus idle-energy trade-off, not guaranteed PoCol superiority and **not** a reward,
+incentive, participation, economic, Sybil-resistance, or proof-of-effort result. (`fig03`,
+`fig04`, `table09`.)
 
 ## H6 — Inactive miners — SUPPORTED (primary directions); one INCONCLUSIVE sub-claim
 
