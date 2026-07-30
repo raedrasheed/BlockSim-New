@@ -1,0 +1,10 @@
+# Stage-0 governance document checksums
+d9c86c5aafb05e7638a4c9c8523328cb116e9070e805b2472ddb3b27d4b76e52  docs/thesis_revision_v45/STAGE_00_CHANGE_MAP.md
+95fe827fc462adf1126b6cb550ecbf59c26c8319de58cbaedf1157fff8af77dd  docs/thesis_revision_v45/STAGE_00_GOVERNANCE.md
+0c1e2564026c31e4b37e0720bd73bb08602eeff017c9b4b4c373b6a329de61a6  docs/thesis_revision_v45/STAGE_00_PROTECTED_ARTIFACTS.md
+e0768377c3486a616e6524b7b6dc0fef6fb5dbe2799fee3daac76d009d6d7f9b  docs/thesis_revision_v45/STAGE_00_RISK_REGISTER.md
+
+# Protected-artifact reference hashes (read-only, verification anchors)
+2c3afdc5739109d0ea12ada96c3115d626a2188c1acbaeaa4b6020974884cbda  docs/Raed-Rasheed-draft-42-00.docx
+b53e5eb74aaff713cc3348b2945935f4015db0368654a5db097a3cc15eedfead  docs/Raed-Rasheed-draft-43-00.docx (on integration-1)
+a31400bce212585df8197ee3d63e4eb887b5f5d0f2f8a65b916b2489dbc12340  docs/Raed-Rasheed-draft-44-00.docx
