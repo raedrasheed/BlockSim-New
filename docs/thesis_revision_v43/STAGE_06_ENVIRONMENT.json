@@ -1,0 +1,25 @@
+{
+ "stage": "6",
+ "purpose": "preregistered statistical analysis (analysis-only environment)",
+ "python_version": "3.11.15",
+ "platform": "Linux-6.18.5-x86_64-with-glibc2.39",
+ "packages": {
+  "numpy": "2.4.6",
+  "scipy": "1.17.1",
+  "matplotlib": "3.11.1",
+  "mpmath": "1.4.1",
+  "pandas": "3.0.5"
+ },
+ "note": "matplotlib is an ANALYSIS-ONLY dependency used for figure rendering; it is not part of the frozen scientific-engine environment. The frozen dependency lock, engine, seeds, matrix, and preregistration are unchanged in Stage 6. numpy/scipy versions match the frozen scientific environment.",
+ "analysis_rng": {
+  "bootstrap_seed": 6060601,
+  "permutation_seed": 6060602,
+  "describe_bootstrap_seed": 6060600,
+  "generator": "numpy.random.default_rng (PCG64); no global default RNG used",
+  "n_bootstrap": 10000,
+  "n_permutation": 10000
+ },
+ "alpha": 0.05,
+ "confidence_level": 0.95,
+ "multiplicity_procedure": "Holm within each confirmatory hypothesis family"
+}

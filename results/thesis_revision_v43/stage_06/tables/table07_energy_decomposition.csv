@@ -1,0 +1,7 @@
+config,physical_runs,active_energy_kwh_mean,idle_energy_kwh_mean,coord_energy_kwh_mean,total_energy_kwh_mean,saving_vs_anchor_kwh_mean,note
+continuous full-participation (B0/B1/B2/B3;C1),1140,8.420833333333333,0.0,0.0,8.420833333333333,0.0,accounting invariant; total = P_total*T exactly
+C2 hetero equal N=100 (idle triggers),30,4.6621585571144415,0.3758674776218891,0.0,5.0380260347363315,3.382807298597001,"idle-driven saving; energy reduction attributable to reduced active power-time, not partitioning"
+C2 hetero equal N=500 (idle triggers),30,4.189788641932109,0.4231044691401224,0.0,4.612893111072233,3.8079402222610996,"idle-driven saving; energy reduction attributable to reduced active power-time, not partitioning"
+C2 hetero weighted N=100 (idle ~ 0),30,8.420833333331627,1.7050861666666667e-13,0.0,8.420833333331798,1.5347723092418164e-12,"idle-driven saving; energy reduction attributable to reduced active power-time, not partitioning"
+C2 hetero weighted N=500 (idle ~ 0),30,8.42083333332,1.3334323092592593e-12,0.0,8.420833333321331,1.2001066806988092e-11,"idle-driven saving; energy reduction attributable to reduced active power-time, not partitioning"
+"C2 homogeneous equal (idle policy, no early finishers)",150,8.420833333333333,0.0,0.0,8.420833333333333,0.0,idle never triggers under homogeneous+equal; saving = 0

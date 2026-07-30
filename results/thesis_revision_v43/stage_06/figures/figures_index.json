@@ -1,0 +1,102 @@
+[
+ {
+  "figure": "fig01_h1_duplicate_rate",
+  "tag": "CONFIRMATORY",
+  "caption": "Duplicate-evaluation rate by scenario; black bar = median, whisker = IQR; each point is one run. Under the idealized immutable-common-template / disjoint-allocation assumptions only. No zero/NA (rate defined for all).",
+  "files": [
+   "fig01_h1_duplicate_rate.pdf",
+   "fig01_h1_duplicate_rate.png"
+  ],
+  "plot_data": "fig01_h1_duplicate_rate.csv"
+ },
+ {
+  "figure": "fig02_a1_energy_invariant",
+  "tag": "INVARIANT",
+  "caption": "Total energy per run vs the deterministic accounting anchor; all continuous full-participation runs coincide with 8.420833333 kWh (max deviation < 1e-6 relative). Invariant, not an empirical test.",
+  "files": [
+   "fig02_a1_energy_invariant.pdf",
+   "fig02_a1_energy_invariant.png"
+  ],
+  "plot_data": "fig02_a1_energy_invariant.csv"
+ },
+ {
+  "figure": "fig03_h5_completion_dispersion",
+  "tag": "CONFIRMATORY",
+  "caption": "Seed-matched equal\u2192weighted completion-time dispersion. Weighted ranges drive dispersion to ~0 in both scenarios. No NA.",
+  "files": [
+   "fig03_h5_completion_dispersion.pdf",
+   "fig03_h5_completion_dispersion.png"
+  ],
+  "plot_data": "fig03_h5_completion_dispersion.csv"
+ },
+ {
+  "figure": "fig04_h5_c2_energy_tradeoff",
+  "tag": "CONFIRMATORY",
+  "caption": "Seed-matched C2 total energy: equal allocation lets fast miners idle (energy < anchor); weighted removes idle so energy returns to the anchor. The saving is idle-driven, not from partitioning.",
+  "files": [
+   "fig04_h5_c2_energy_tradeoff.pdf",
+   "fig04_h5_c2_energy_tradeoff.png"
+  ],
+  "plot_data": "fig04_h5_c2_energy_tradeoff.csv"
+ },
+ {
+  "figure": "fig05_h3_energy_decomposition",
+  "tag": "CONFIRMATORY",
+  "caption": "Per-run C2 energy decomposition (idle-bearing, heterogeneous equal ranges). active+idle energy plus the idle-driven saving reconstruct the accounting anchor exactly. This bar stack shows a deterministic identity per run, not a sample summary.",
+  "files": [
+   "fig05_h3_energy_decomposition.pdf",
+   "fig05_h3_energy_decomposition.png"
+  ],
+  "plot_data": "fig05_h3_energy_decomposition.csv"
+ },
+ {
+  "figure": "fig06_h6_inactive",
+  "tag": "CONFIRMATORY",
+  "caption": "Effective block interval and accepted blocks vs inactive_fraction; baseline (0) from the H1;A1 continuous runs. Points are runs; bar=median, whisker=IQR. No zero-block runs in this family, so block interval is defined throughout.",
+  "files": [
+   "fig06_h6_inactive.pdf",
+   "fig06_h6_inactive.png"
+  ],
+  "plot_data": "fig06_h6_inactive.csv"
+ },
+ {
+  "figure": "fig07_h8_mu",
+  "tag": "CONFIRMATORY",
+  "caption": "Range exhaustion and template refreshes vs \u03bc; baseline \u03bc=2.0 from the H1;A1 continuous runs. Points are runs; bar=median, whisker=IQR. Monotone increase as \u03bc falls.",
+  "files": [
+   "fig07_h8_mu.pdf",
+   "fig07_h8_mu.png"
+  ],
+  "plot_data": "fig07_h8_mu.csv"
+ },
+ {
+  "figure": "fig08_h7_delay_singleheight",
+  "tag": "SECONDARY",
+  "caption": "Single-height stales per accepted block vs propagation delay (B3/C1, N\u2208{100,500}, n=60 per level). Secondary diagnostic only; energy, candidate counts, accepted blocks and active time are identical across delays. Delay=0 has zero observed stales (see report for the rule-of-three upper bound).",
+  "files": [
+   "fig08_h7_delay_singleheight.pdf",
+   "fig08_h7_delay_singleheight.png"
+  ],
+  "plot_data": "fig08_h7_delay_singleheight.csv"
+ },
+ {
+  "figure": "fig09_zero_block",
+  "tag": "DESCRIPTIVE",
+  "caption": "Zero-block probability per scenario with Wilson 95% intervals. Zero-block runs are retained, never discarded; block-normalised metrics stay NA for them.",
+  "files": [
+   "fig09_zero_block.pdf",
+   "fig09_zero_block.png"
+  ],
+  "plot_data": "fig09_zero_block.csv"
+ },
+ {
+  "figure": "fig10_h5x_exploratory",
+  "tag": "EXPLORATORY",
+  "caption": "Exploratory completion-time dispersion under high heterogeneity with equal ranges (B3/C1, equal). Exploratory only \u2014 not used to confirm any hypothesis.",
+  "files": [
+   "fig10_h5x_exploratory.pdf",
+   "fig10_h5x_exploratory.png"
+  ],
+  "plot_data": "fig10_h5x_exploratory.csv"
+ }
+]

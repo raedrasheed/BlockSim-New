@@ -1,0 +1,13 @@
+{
+ "statement": "For continuous full-participation scenarios (B0,B1,B2,B3/C1; inactive_fraction=0; idle_policy off), total energy = P_total*T = 8.420833333 kWh exactly, independent of miner count and search discipline. Verified as a deterministic accounting identity, not an empirical test.",
+ "anchor_kwh": 8.420833333333333,
+ "P_total_W": 3031.5,
+ "horizon_s": 10000.0,
+ "n_continuous_full_participation": 1140,
+ "max_abs_deviation_kwh": 3.552713678800501e-15,
+ "all_equal_to_anchor": false,
+ "tolerance_band_rel": 1e-06,
+ "within_tolerance": true,
+ "n_c2_no_idle_at_anchor": 450,
+ "classification": "ACCOUNTING_INVARIANT_CONFIRMED_BY_IDENTITY"
+}

@@ -1,0 +1,202 @@
+{
+ "classification": "SECONDARY_DIAGNOSTIC_ONLY",
+ "levels": [
+  {
+   "delay_s": 0,
+   "n_runs": 60,
+   "sh_stales_per_block": {
+    "n": 60,
+    "mean": 0.0,
+    "sd": 0.0,
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "iqr": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "ci_lo": 0.0,
+    "ci_hi": 0.0
+   },
+   "sh_stale_count_total": 0,
+   "accepted_block_total": 1043,
+   "sh_fraction_of_valid_proposals": {
+    "n": 60,
+    "mean": 0.0,
+    "sd": 0.0,
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "iqr": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "ci_lo": 0.0,
+    "ci_hi": 0.0
+   },
+   "zero_obs_upper_bound_rule_of_three": 0.0028763183125599234,
+   "zero_obs_exact_binomial_upper_95": 0.0035305500755128906
+  },
+  {
+   "delay_s": 0.42,
+   "n_runs": 60,
+   "sh_stales_per_block": {
+    "n": 60,
+    "mean": 0.0011111111111111111,
+    "sd": 0.008606629658238708,
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "iqr": 0.0,
+    "min": 0.0,
+    "max": 0.06666666666666667,
+    "ci_lo": 0.0,
+    "ci_hi": 0.0033333333333333335
+   },
+   "sh_stale_count_total": 1,
+   "accepted_block_total": 1043,
+   "sh_fraction_of_valid_proposals": {
+    "n": 60,
+    "mean": 0.0010416666666666667,
+    "sd": 0.008068715304598786,
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "iqr": 0.0,
+    "min": 0.0,
+    "max": 0.0625,
+    "ci_lo": 0.0,
+    "ci_hi": 0.003125
+   },
+   "wilson_ci_95": [
+    0.0001692669904208989,
+    0.005410812754677032
+   ]
+  },
+  {
+   "delay_s": 5,
+   "n_runs": 60,
+   "sh_stales_per_block": {
+    "n": 60,
+    "mean": 0.005041238717709307,
+    "sd": 0.017008605677156122,
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "iqr": 0.0,
+    "min": 0.0,
+    "max": 0.07142857142857142,
+    "ci_lo": 0.0011111111111111111,
+    "ci_hi": 0.009696292405851221
+   },
+   "sh_stale_count_total": 5,
+   "accepted_block_total": 1043,
+   "sh_fraction_of_valid_proposals": {
+    "n": 60,
+    "mean": 0.004749547479810638,
+    "sd": 0.01600914935458679,
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "iqr": 0.0,
+    "min": 0.0,
+    "max": 0.06666666666666667,
+    "ci_lo": 0.0010416666666666667,
+    "ci_hi": 0.009124547479810638
+   },
+   "wilson_ci_95": [
+    0.0020493382185187243,
+    0.011172777417106792
+   ]
+  },
+  {
+   "delay_s": 30,
+   "n_runs": 60,
+   "sh_stales_per_block": {
+    "n": 60,
+    "mean": 0.04709573679076641,
+    "sd": 0.05190223810588068,
+    "median": 0.044466403162055336,
+    "q1": 0.0,
+    "q3": 0.0728021978021978,
+    "iqr": 0.0728021978021978,
+    "min": 0.0,
+    "max": 0.18181818181818182,
+    "ci_lo": 0.03446633736025184,
+    "ci_hi": 0.06024588821625981
+   },
+   "sh_stale_count_total": 47,
+   "accepted_block_total": 1043,
+   "sh_fraction_of_valid_proposals": {
+    "n": 60,
+    "mean": 0.04274535443405749,
+    "sd": 0.045842328100913425,
+    "median": 0.04257246376811594,
+    "q1": 0.0,
+    "q3": 0.06785714285714285,
+    "iqr": 0.06785714285714285,
+    "min": 0.0,
+    "max": 0.15384615384615385,
+    "ci_lo": 0.03159939671412279,
+    "ci_hi": 0.05436084988233325
+   },
+   "wilson_ci_95": [
+    0.034055197839120345,
+    0.05940829464704483
+   ]
+  },
+  {
+   "delay_s": 60,
+   "n_runs": 60,
+   "sh_stales_per_block": {
+    "n": 60,
+    "mean": 0.10051499920190188,
+    "sd": 0.08782441404739598,
+    "median": 0.06904761904761905,
+    "q1": 0.045454545454545456,
+    "q3": 0.1548582995951417,
+    "iqr": 0.10940375414059623,
+    "min": 0.0,
+    "max": 0.3333333333333333,
+    "ci_lo": 0.07956701529920714,
+    "ci_hi": 0.12328319387974748
+   },
+   "sh_stale_count_total": 104,
+   "accepted_block_total": 1043,
+   "sh_fraction_of_valid_proposals": {
+    "n": 60,
+    "mean": 0.08594123063338302,
+    "sd": 0.06897977498662773,
+    "median": 0.06458333333333333,
+    "q1": 0.043478260869565216,
+    "q3": 0.1340909090909091,
+    "iqr": 0.09061264822134388,
+    "min": 0.0,
+    "max": 0.25,
+    "ci_lo": 0.06938241499879001,
+    "ci_hi": 0.10360586635192867
+   },
+   "wilson_ci_95": [
+    0.08297207028891729,
+    0.11939043363726598
+   ]
+  }
+ ],
+ "primary_invariance_across_delay": {
+  "total_energy_kwh": {
+   "max_abs_dev_vs_baseline": 0.0,
+   "invariant": true
+  },
+  "accepted_blocks": {
+   "max_abs_dev_vs_baseline": 0.0,
+   "invariant": true
+  },
+  "total_candidate_evaluations": {
+   "max_abs_dev_vs_baseline": 0.0,
+   "invariant": true
+  },
+  "total_active_time_s": {
+   "max_abs_dev_vs_baseline": 0.0,
+   "invariant": true
+  }
+ },
+ "note": "H7 is the single-height stale-race diagnostic (amended 5B1G): one accepted height in isolation, no fork resolution, energy/evaluations not integrated into primary metrics. Reported as a descriptive sensitivity, never as a confirmatory or chain-wide fork-rate claim."
+}

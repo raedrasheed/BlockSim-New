@@ -1,0 +1,87 @@
+{
+ "stage": "6",
+ "generated_for_results_commit_base": "278af17e76416c6018df6ffa23795904ae5a4e89",
+ "sources": {
+  "freeze6_commit": "45361674e6278971d430a79531f7aaac5cae3281",
+  "results1_commit": "d2ef6012afc8275c108ef56737a54a156abe5ceb",
+  "results2_commit": "9347ec969bd59a3337582571668ae2140c40485b",
+  "results3_commit": "278af17e76416c6018df6ffa23795904ae5a4e89",
+  "bulk_data_branch": "thesis-v43-stage5b2-data-1",
+  "bulk_data_commit": "b44975dd0803e3912f6151398a5a93c34eb95082",
+  "matrix_sha256": "9cb7297e7418a96fbaeb7f06c162bc8bdea1c1e049002a40344cab16cf5f6fcb",
+  "engine_version": "5b1g.2",
+  "output_schema_version": "5b1g.2"
+ },
+ "expected": {
+  "runs": 1890,
+  "groups": 63,
+  "seeds_per_group": 30,
+  "zero_block": 142
+ },
+ "input_checksums": {
+  "matrix_csv": "9cb7297e7418a96fbaeb7f06c162bc8bdea1c1e049002a40344cab16cf5f6fcb",
+  "summary_jsonl_gz": "4749ed3f92d8477f19af4feff877e7c860a2be81c25312db7dbe574272aba153",
+  "results_manifest": "928ce2773235289eccbd897d027dcae9bded210d0c325bf9c7332cedbd9c1a26",
+  "execution_ledger": "db885dc988feb21fd6277cfc2d07bc8f2493af383752bbc349038134c3ee66b6",
+  "field_authority_map": "3b3d0d25f32e41d9e9bdf2fece6b30602a92a1c9011bc35fc612b5ea34cfe7b9"
+ },
+ "analysis_script_checksums": {
+  "s6_analysis.py": "8c2fd9ee2926bbdba9048892e06179db1d6a460a21c67babe0ff8d6b1e8fff53",
+  "s6_claims.py": "40b1490c54007ec8efca54550401dbdfb212c204bee14980168d8b7e1f59c59f",
+  "s6_common.py": "d0a6f95632f4c9b14ee7d94352d46035e85c8f4abc937e825a3ba217723ccdd2",
+  "s6_figures.py": "5af8f48c9042ced16e5ce731c9837288991514020376e8a4ed860aa28e729347",
+  "s6_integrity_gate.py": "150c66437f77b4e49af031aa8bc0ff1ed11dd4c132c9819b06e242fdae6464d7",
+  "s6_manifests.py": "2662cc9ee167d1ce3bb5fc543a32e737e8ddb961a2d1e0ababfcda634d67d512",
+  "s6_run_all.py": "8c405005c24ea55c5384cc00ecedffa8ee86e5f804c657a9db85efc4c7972838",
+  "s6_stats.py": "8a51c0992864b3463f358b571ae373ce0b6021dd95e14b94894056a97d0af226",
+  "s6_tables.py": "9ffdacbb3ec9e0f91ba82b524f48f5a3ac25dc4626caab90824e024c530640b9"
+ },
+ "test_checksums": {
+  "test_stage6.py": "80a6f09a0134a98d1406db1b3a22c4f7cd16e21bd615ed4d64a997e875d7bcd9"
+ },
+ "statistics": {
+  "unit": "one physical run per frozen master seed",
+  "pairing": "seed-matched on (miner_count, seed)",
+  "alpha": 0.05,
+  "confidence_level": 0.95,
+  "n_bootstrap": 10000,
+  "n_permutation": 10000,
+  "rng_seed_bootstrap": 6060601,
+  "rng_seed_permutation": 6060602,
+  "multiplicity": "Holm within each confirmatory family (H1,H5,H6,H8)",
+  "deterministic_output_ordering": true
+ },
+ "confirmatory_hypotheses": [
+  "H1",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
+  "H8"
+ ],
+ "accounting_invariant": [
+  "A1 (former H2)"
+ ],
+ "secondary_diagnostic": [
+  "H7 (single-height stale-race)"
+ ],
+ "exploratory": [
+  "H5x"
+ ],
+ "reproduce": "python3 analysis/thesis_revision_v43/stage_06/s6_run_all.py",
+ "deliverable_docs": [
+  "docs/thesis_revision_v43/STAGE_06_ANALYSIS_PLAN.md",
+  "docs/thesis_revision_v43/STAGE_06_PREREGISTRATION_MAP.md",
+  "docs/thesis_revision_v43/STAGE_06_FIELD_USAGE_AUDIT.md",
+  "docs/thesis_revision_v43/STAGE_06_DESCRIPTIVE_RESULTS.md",
+  "docs/thesis_revision_v43/STAGE_06_CONFIRMATORY_RESULTS.md",
+  "docs/thesis_revision_v43/STAGE_06_ROBUSTNESS_RESULTS.md",
+  "docs/thesis_revision_v43/STAGE_06_SECONDARY_DIAGNOSTICS.md",
+  "docs/thesis_revision_v43/STAGE_06_CLAIM_CLASSIFICATION.md",
+  "docs/thesis_revision_v43/STAGE_06_LIMITATIONS.md",
+  "docs/thesis_revision_v43/STAGE_06_RESULTS_REPORT.md",
+  "docs/thesis_revision_v43/STAGE_06_ENVIRONMENT.json",
+  "docs/thesis_revision_v43/STAGE_06_ANALYSIS_MANIFEST.json",
+  "docs/thesis_revision_v43/STAGE_06_CHECKSUM_MANIFEST.sha256"
+ ]
+}

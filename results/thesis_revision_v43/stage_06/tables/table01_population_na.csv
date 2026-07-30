@@ -1,0 +1,6 @@
+scenario_label,scenario_id,physical_runs,distinct_physical_seeds_note,zero_block_runs,effective_block_interval_s__defined,effective_block_interval_s__undefined,energy_per_accepted_block_kwh__defined,energy_per_accepted_block_kwh__undefined,confirmation_time_proxy_s__defined,confirmation_time_proxy_s__undefined,single_height_stales_per_accepted_block__defined,single_height_stales_per_accepted_block__undefined
+B0,B0,150,one physical run per seed; B3;C1 is one dataset with two interpretation labels (never double-counted),0,150,0,150,0,150,0,150,0
+B1,B1,150,one physical run per seed; B3;C1 is one dataset with two interpretation labels (never double-counted),138,12,138,12,138,12,138,12,138
+B2,B2,150,one physical run per seed; B3;C1 is one dataset with two interpretation labels (never double-counted),0,150,0,150,0,150,0,150,0
+B3;C1,B3_C1_CONTINUOUS_DISJOINT,870,one physical run per seed; B3;C1 is one dataset with two interpretation labels (never double-counted),4,866,4,866,4,866,4,866,4
+C2,C2,570,one physical run per seed; B3;C1 is one dataset with two interpretation labels (never double-counted),0,570,0,570,0,570,0,570,0

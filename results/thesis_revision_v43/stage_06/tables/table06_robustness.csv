@@ -1,0 +1,68 @@
+hypothesis,label,outcome,mean_diff,hl_median_diff,perm_p,wilcoxon_p,p_holm,deterministic,mean_vs_median_direction_agree,robustness
+H1,H1: B1>B2 (duplicate_evaluation_rate),duplicate_evaluation_rate,0.3953936750765925,0.3919527427850048,9.999000099990002e-05,2.2996057560669792e-26,0.00029997000299970003,False,True,stable
+H1,H1: B2>B3/C1 (duplicate_evaluation_rate),duplicate_evaluation_rate,0.6000396582567409,0.6033097113793894,9.999000099990002e-05,2.2996057560669792e-26,0.00029997000299970003,False,True,stable
+H1,H1: B1>B3/C1 (duplicate_evaluation_rate),duplicate_evaluation_rate,0.9954333333333335,0.9962500000000001,9.999000099990002e-05,1.302296550044173e-26,0.00029997000299970003,False,True,stable
+H5,H5 B3 N=100: weighted vs equal (completion_time_std_s),completion_time_std_s,-769.4470361195255,-767.309853615003,9.999000099990002e-05,1.862645149230957e-09,0.0007999200079992001,False,True,stable
+H5,H5 B3 N=100: weighted vs equal (total_idle_time_s),total_idle_time_s,0.0,0.0,,,,True,,deterministic (design identity)
+H5,H5 B3 N=100: weighted vs equal (total_energy_kwh),total_energy_kwh,0.0,0.0,,,,True,,deterministic (design identity)
+H5,H5 B3 N=500: weighted vs equal (completion_time_std_s),completion_time_std_s,-800.3310489279258,-800.0491781848583,9.999000099990002e-05,1.862645149230957e-09,0.0007999200079992001,False,True,stable
+H5,H5 B3 N=500: weighted vs equal (total_idle_time_s),total_idle_time_s,0.0,0.0,,,,True,,deterministic (design identity)
+H5,H5 B3 N=500: weighted vs equal (total_energy_kwh),total_energy_kwh,0.0,0.0,,,,True,,deterministic (design identity)
+H5,H5 C2 N=100: weighted vs equal (completion_time_std_s),completion_time_std_s,-769.4470361195255,-767.309853615003,9.999000099990002e-05,1.862645149230957e-09,0.0007999200079992001,False,True,stable
+H5,H5 C2 N=100: weighted vs equal (total_idle_time_s),total_idle_time_s,-386840.83375000115,-383255.5760746051,9.999000099990002e-05,1.862645149230957e-09,0.0007999200079992001,False,True,stable
+H5,H5 C2 N=100: weighted vs equal (total_energy_kwh),total_energy_kwh,3.382807298595467,3.359235256867712,9.999000099990002e-05,1.862645149230957e-09,0.0007999200079992001,False,True,stable
+H5,H5 C2 N=500: weighted vs equal (completion_time_std_s),completion_time_std_s,-800.3310489279258,-800.0491781848583,9.999000099990002e-05,1.862645149230957e-09,0.0007999200079992001,False,True,stable
+H5,H5 C2 N=500: weighted vs equal (total_idle_time_s),total_idle_time_s,-2231372.894630727,-2277931.2502160836,9.999000099990002e-05,1.862645149230957e-09,0.0007999200079992001,False,True,stable
+H5,H5 C2 N=500: weighted vs equal (total_energy_kwh),total_energy_kwh,3.8079402222491012,3.890452221552605,9.999000099990002e-05,1.862645149230957e-09,0.0007999200079992001,False,True,stable
+H6,H6 N=100 inact=0.05: vs baseline (inactive_domain),inactive_domain,8460000000000000.0,8460000000000000.0,,4.320463057827488e-08,,True,,deterministic (design identity)
+H6,H6 N=100 inact=0.05: vs baseline (exhausted_rounds),exhausted_rounds,0.26666666666666666,0.5,0.0367963203679632,0.03857421875,0.2943705629437056,False,True,stable
+H6,H6 N=100 inact=0.05: vs baseline (effective_block_interval_s),effective_block_interval_s,52.714901558958644,49.34210526315792,0.00019998000199980003,0.0004348772241765822,0.0029997000299970007,False,True,stable
+H6,H6 N=100 inact=0.05: vs baseline (accepted_blocks),accepted_blocks,-1.1333333333333333,-1.0,0.00019998000199980003,0.0003823271468924732,0.0029997000299970007,False,True,stable
+H6,H6 N=100 inact=0.05: vs baseline (total_energy_kwh),total_energy_kwh,-0.42104166666666565,-0.42104166666666565,,4.320463057827488e-08,,True,,deterministic (design identity)
+H6,H6 N=100 inact=0.05: vs baseline (energy_per_accepted_block_kwh),energy_per_accepted_block_kwh,0.01656056699834406,0.01335541000939855,0.08539146085391461,0.2987775961294449,0.426957304269573,False,True,stable
+H6,H6 N=100 inact=0.15: vs baseline (inactive_domain),inactive_domain,2.538e+16,2.538e+16,,4.320463057827488e-08,,True,,deterministic (design identity)
+H6,H6 N=100 inact=0.15: vs baseline (exhausted_rounds),exhausted_rounds,0.4,0.5,0.0547945205479452,0.040019580330901354,0.3835616438356164,False,True,check
+H6,H6 N=100 inact=0.15: vs baseline (effective_block_interval_s),effective_block_interval_s,102.48412434944946,83.33333333333331,9.999000099990002e-05,8.832385863081277e-05,0.0023997600239976003,False,True,stable
+H6,H6 N=100 inact=0.15: vs baseline (accepted_blocks),accepted_blocks,-2.3,-2.0,9.999000099990002e-05,8.058194031965037e-05,0.0023997600239976003,False,True,stable
+H6,H6 N=100 inact=0.15: vs baseline (total_energy_kwh),total_energy_kwh,-1.2631249999999998,-1.2631249999999996,,4.320463057827488e-08,,True,,deterministic (design identity)
+H6,H6 N=100 inact=0.15: vs baseline (energy_per_accepted_block_kwh),energy_per_accepted_block_kwh,-0.0034756209760789156,-0.017093571937321916,0.8468153184681532,0.28938779296386474,1.0,False,True,stable
+H6,H6 N=100 inact=0.3: vs baseline (inactive_domain),inactive_domain,5.076e+16,5.076e+16,,4.320463057827488e-08,,True,,deterministic (design identity)
+H6,H6 N=100 inact=0.3: vs baseline (exhausted_rounds),exhausted_rounds,0.6666666666666666,0.5,0.012898710128987101,0.010244215445594517,0.128987101289871,False,True,stable
+H6,H6 N=100 inact=0.3: vs baseline (effective_block_interval_s),effective_block_interval_s,210.15933384354443,185.60606060606062,9.999000099990002e-05,2.5561870245802228e-06,0.0023997600239976003,False,True,stable
+H6,H6 N=100 inact=0.3: vs baseline (accepted_blocks),accepted_blocks,-4.1,-4.0,9.999000099990002e-05,2.3968694110205443e-06,0.0023997600239976003,False,True,stable
+H6,H6 N=100 inact=0.3: vs baseline (total_energy_kwh),total_energy_kwh,-2.5262499999999997,-2.526249999999999,,4.320463057827488e-08,,True,,deterministic (design identity)
+H6,H6 N=100 inact=0.3: vs baseline (energy_per_accepted_block_kwh),energy_per_accepted_block_kwh,-0.029781365468383298,-0.04125357744107744,0.09729027097290271,0.11556968139882542,0.426957304269573,False,True,stable
+H6,H6 N=500 inact=0.05: vs baseline (inactive_domain),inactive_domain,8460000000000000.0,8460000000000000.0,,4.320463057827488e-08,,True,,deterministic (design identity)
+H6,H6 N=500 inact=0.05: vs baseline (exhausted_rounds),exhausted_rounds,0.23333333333333334,0.0,0.0165983401659834,0.015625,0.1493850614938506,False,True,stable
+H6,H6 N=500 inact=0.05: vs baseline (effective_block_interval_s),effective_block_interval_s,25.36461602789507,18.382352941176464,0.0005999400059994001,0.000244140625,0.007799220077992201,False,True,stable
+H6,H6 N=500 inact=0.05: vs baseline (accepted_blocks),accepted_blocks,-0.7,-0.5,0.0005999400059994001,0.000244140625,0.007799220077992201,False,True,stable
+H6,H6 N=500 inact=0.05: vs baseline (total_energy_kwh),total_energy_kwh,-0.42104166666666565,-0.42104166666666565,,4.320463057827488e-08,,True,,deterministic (design identity)
+H6,H6 N=500 inact=0.05: vs baseline (energy_per_accepted_block_kwh),energy_per_accepted_block_kwh,-0.004701693287241591,-0.009253663003662926,0.4814518548145185,0.0976746213491496,1.0,False,True,stable
+H6,H6 N=500 inact=0.15: vs baseline (inactive_domain),inactive_domain,2.538e+16,2.538e+16,,4.320463057827488e-08,,True,,deterministic (design identity)
+H6,H6 N=500 inact=0.15: vs baseline (exhausted_rounds),exhausted_rounds,0.36666666666666664,0.5,0.0115988401159884,0.007632881787792299,0.1275872412758724,False,True,stable
+H6,H6 N=500 inact=0.15: vs baseline (effective_block_interval_s),effective_block_interval_s,77.72194172618187,74.4047619047619,9.999000099990002e-05,2.6929243565254072e-05,0.0023997600239976003,False,True,stable
+H6,H6 N=500 inact=0.15: vs baseline (accepted_blocks),accepted_blocks,-2.1666666666666665,-2.0,9.999000099990002e-05,2.424200943694308e-05,0.0023997600239976003,False,True,stable
+H6,H6 N=500 inact=0.15: vs baseline (total_energy_kwh),total_energy_kwh,-1.2631249999999998,-1.2631249999999996,,4.320463057827488e-08,,True,,deterministic (design identity)
+H6,H6 N=500 inact=0.15: vs baseline (energy_per_accepted_block_kwh),energy_per_accepted_block_kwh,-0.019347474042537394,-0.02008257949561404,0.0694930506949305,0.08214978612203794,0.416958304169583,False,True,stable
+H6,H6 N=500 inact=0.3: vs baseline (inactive_domain),inactive_domain,5.076e+16,5.076e+16,,4.320463057827488e-08,,True,,deterministic (design identity)
+H6,H6 N=500 inact=0.3: vs baseline (exhausted_rounds),exhausted_rounds,1.0666666666666667,1.0,9.999000099990002e-05,0.0001779070634859494,0.0023997600239976003,False,True,stable
+H6,H6 N=500 inact=0.3: vs baseline (effective_block_interval_s),effective_block_interval_s,284.5354360346284,242.91497975708512,9.999000099990002e-05,3.786882511451119e-06,0.0023997600239976003,False,True,stable
+H6,H6 N=500 inact=0.3: vs baseline (accepted_blocks),accepted_blocks,-5.3,-5.5,9.999000099990002e-05,3.6335474873107828e-06,0.0023997600239976003,False,True,stable
+H6,H6 N=500 inact=0.3: vs baseline (total_energy_kwh),total_energy_kwh,-2.5262499999999997,-2.526249999999999,,4.320463057827488e-08,,True,,deterministic (design identity)
+H6,H6 N=500 inact=0.3: vs baseline (energy_per_accepted_block_kwh),energy_per_accepted_block_kwh,0.017764637818902602,-0.0009010145556198057,0.4851514848515148,0.9913735067882429,1.0,False,False,check
+H8,H8 N=100 mu=1.0: vs baseline mu=2.0 (exhausted_rounds),exhausted_rounds,6.9,7.0,9.999000099990002e-05,1.5942375258103098e-06,0.0015998400159984002,False,True,stable
+H8,H8 N=100 mu=1.0: vs baseline mu=2.0 (coord_template_refresh_count),coord_template_refresh_count,6.9,7.0,9.999000099990002e-05,1.5942375258103098e-06,0.0015998400159984002,False,True,stable
+H8,H8 N=100 mu=1.0: vs baseline mu=2.0 (template_generations),template_generations,6.866666666666666,6.5,9.999000099990002e-05,1.679483202276532e-06,0.0015998400159984002,False,True,stable
+H8,H8 N=100 mu=1.0: vs baseline mu=2.0 (effective_block_interval_s),effective_block_interval_s,8.500081789555486,7.249694749694754,0.7654234576542346,0.7006408979922842,0.7685231476852316,False,True,stable
+H8,H8 N=100 mu=0.5: vs baseline mu=2.0 (exhausted_rounds),exhausted_rounds,23.066666666666666,23.0,9.999000099990002e-05,1.6249951586519442e-06,0.0015998400159984002,False,True,stable
+H8,H8 N=100 mu=0.5: vs baseline mu=2.0 (coord_template_refresh_count),coord_template_refresh_count,23.066666666666666,23.0,9.999000099990002e-05,1.6249951586519442e-06,0.0015998400159984002,False,True,stable
+H8,H8 N=100 mu=0.5: vs baseline mu=2.0 (template_generations),template_generations,22.266666666666666,22.0,9.999000099990002e-05,1.6752383396794872e-06,0.0015998400159984002,False,True,stable
+H8,H8 N=100 mu=0.5: vs baseline mu=2.0 (effective_block_interval_s),effective_block_interval_s,39.31498784439961,32.05128205128199,0.3575642435756424,0.4754442113748394,0.7685231476852316,False,True,stable
+H8,H8 N=500 mu=1.0: vs baseline mu=2.0 (exhausted_rounds),exhausted_rounds,7.133333333333334,7.0,9.999000099990002e-05,1.6416009966164372e-06,0.0015998400159984002,False,True,stable
+H8,H8 N=500 mu=1.0: vs baseline mu=2.0 (coord_template_refresh_count),coord_template_refresh_count,7.133333333333334,7.0,9.999000099990002e-05,1.6416009966164372e-06,0.0015998400159984002,False,True,stable
+H8,H8 N=500 mu=1.0: vs baseline mu=2.0 (template_generations),template_generations,6.366666666666666,6.5,9.999000099990002e-05,1.8454744786905325e-06,0.0015998400159984002,False,True,stable
+H8,H8 N=500 mu=1.0: vs baseline mu=2.0 (effective_block_interval_s),effective_block_interval_s,33.566497565689914,27.31092436974788,0.25617438256174385,0.2918561106111549,0.7685231476852316,False,True,stable
+H8,H8 N=500 mu=0.5: vs baseline mu=2.0 (exhausted_rounds),exhausted_rounds,23.1,23.0,9.999000099990002e-05,1.5820715270325305e-06,0.0015998400159984002,False,True,stable
+H8,H8 N=500 mu=0.5: vs baseline mu=2.0 (coord_template_refresh_count),coord_template_refresh_count,23.1,23.0,9.999000099990002e-05,1.5820715270325305e-06,0.0015998400159984002,False,True,stable
+H8,H8 N=500 mu=0.5: vs baseline mu=2.0 (template_generations),template_generations,21.933333333333334,22.0,9.999000099990002e-05,1.6805458207281375e-06,0.0015998400159984002,False,True,stable
+H8,H8 N=500 mu=0.5: vs baseline mu=2.0 (effective_block_interval_s),effective_block_interval_s,50.113351411305366,43.6507936507937,0.15658434156584342,0.1753935456315695,0.6263373662633737,False,True,stable

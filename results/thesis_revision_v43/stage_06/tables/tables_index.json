@@ -1,0 +1,44 @@
+[
+ {
+  "table": "table01_population_na.csv",
+  "n_rows": 5
+ },
+ {
+  "table": "table03_hypothesis_test_map.csv",
+  "n_rows": 9
+ },
+ {
+  "table": "table06_robustness.csv",
+  "n_rows": 67
+ },
+ {
+  "table": "table07_energy_decomposition.csv",
+  "n_rows": 6
+ },
+ {
+  "table": "table08_candidate_redundancy.csv",
+  "n_rows": 4
+ },
+ {
+  "table": "table09_allocation_policy.csv",
+  "n_rows": 12
+ },
+ {
+  "table": "table10_inactive_miners.csv",
+  "n_rows": 36
+ },
+ {
+  "table": "table11_zero_block.csv",
+  "n_rows": 5
+ },
+ {
+  "table": "table12_secondary_stale.csv",
+  "n_rows": 5
+ },
+ {
+  "table": "table02 = descriptive_long.csv (by s6_analysis)"
+ },
+ {
+  "table": "table04/05 = confirmatory_effects.csv (by s6_analysis)"
+ }
+]

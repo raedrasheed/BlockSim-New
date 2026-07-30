@@ -1,0 +1,21 @@
+{
+ "stage": "6",
+ "base_results_commit": "278af17e76416c6018df6ffa23795904ae5a4e89",
+ "gates": [
+  {"n": 1, "gate": "rerun all frozen scientific source tests", "result": "444 passed, 0 failed, 0 error", "duration_s": 1286},
+  {"n": 2, "gate": "Stage-5B2 data-integrity tests", "result": "10 passed"},
+  {"n": 3, "gate": "all Stage-6 analysis tests", "result": "14 passed"},
+  {"n": 4, "gate": "all 1,890 runs represented", "result": "PASS (1890 loaded; integrity gate + test_population_1890)"},
+  {"n": 5, "gate": "no seed removed or replaced", "result": "PASS (63 groups x 30 seeds; no same-seed duplicate)"},
+  {"n": 6, "gate": "zero-block runs represented", "result": "PASS (142 retained; block-normalised metrics NA not imputed)"},
+  {"n": 7, "gate": "no B3/C1 double counting", "result": "PASS (870 one physical dataset, label B3;C1)"},
+  {"n": 8, "gate": "every result table reproducible from scripts", "result": "PASS (full pipeline re-run: 27 numeric outputs byte-identical)"},
+  {"n": 9, "gate": "every figure reproducible from plotting data", "result": "PASS (10 figures regenerate from committed plot_data via s6_figures.py; plot_data byte-identical on re-run)"},
+  {"n": 10, "gate": "all p-values have matching effect estimates and intervals", "result": "PASS (each contrast row carries mean_diff, HL, bootstrap CI, perm_p, Holm p, Wilcoxon p)"},
+  {"n": 11, "gate": "multiplicity adjustments reproduce exactly", "result": "PASS (deterministic Holm; identical on re-run)"},
+  {"n": 12, "gate": "no Stage-5B2 scientific result file changed", "result": "PASS (0-diff vs results-3 for summary/per_miner/per_template/block_log/stale_race/full_logs/manifests/logs)"},
+  {"n": 13, "gate": "thesis DOCX/PDF byte-identical", "result": "PASS (docx 2c3afdc5..., pdf 131412bb...)"},
+  {"n": 14, "gate": "Stage-6 branch vs results-3 = analysis-only additions", "result": "PASS (72 files added, 0 modified, 0 deleted; all under docs/STAGE_06*, results/stage_06/, analysis/stage_06/)"}
+ ],
+ "all_pass": true
+}

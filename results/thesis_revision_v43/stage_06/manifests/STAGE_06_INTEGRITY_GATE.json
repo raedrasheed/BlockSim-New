@@ -1,0 +1,117 @@
+{
+ "gate": "STAGE_06_INPUT_INTEGRITY",
+ "results3_commit": "278af17e76416c6018df6ffa23795904ae5a4e89",
+ "all_pass": true,
+ "checks": [
+  {
+   "n": 1,
+   "name": "results-3 commit matches expected",
+   "pass": true,
+   "detail": {
+    "head": "278af17e76416c6018df6ffa23795904ae5a4e89",
+    "expected": "278af17e76416c6018df6ffa23795904ae5a4e89"
+   }
+  },
+  {
+   "n": 2,
+   "name": "matrix SHA-256 matches",
+   "pass": true,
+   "detail": {
+    "sha256": "9cb7297e7418a96fbaeb7f06c162bc8bdea1c1e049002a40344cab16cf5f6fcb"
+   }
+  },
+  {
+   "n": 3,
+   "name": "results manifest has exactly 1890 identities",
+   "pass": true,
+   "detail": {
+    "entries": 1890,
+    "distinct_run_ids": 1890
+   }
+  },
+  {
+   "n": 4,
+   "name": "final status = 1890 COMPLETED_VALID",
+   "pass": true,
+   "detail": {
+    "distinct_runs": 1890,
+    "completed_valid": 1890
+   }
+  },
+  {
+   "n": 5,
+   "name": "63 scientific groups exist",
+   "pass": true,
+   "detail": {
+    "groups": 63
+   }
+  },
+  {
+   "n": 6,
+   "name": "each group has 30 seeds",
+   "pass": true,
+   "detail": {
+    "distribution": {
+     "30": 63
+    }
+   }
+  },
+  {
+   "n": 7,
+   "name": "no same-seed scientific duplicate",
+   "pass": true,
+   "detail": {
+    "groups_with_dup_seed": 0
+   }
+  },
+  {
+   "n": 8,
+   "name": "B3/C1 dual labels = one physical dataset",
+   "pass": true,
+   "detail": {
+    "labels": [
+     "B3;C1"
+    ],
+    "physical_runs": 870
+   }
+  },
+  {
+   "n": 9,
+   "name": "142 zero-block runs present",
+   "pass": true,
+   "detail": {
+    "zero_block": 142
+   }
+  },
+  {
+   "n": 10,
+   "name": "no scientific output differs from results-1",
+   "pass": true,
+   "detail": {
+    "changed_files": 0
+   }
+  },
+  {
+   "n": 11,
+   "name": "bulk archive manifest 42/2196/ROUNDTRIP_OK/AVAILABLE_REMOTE_GIT",
+   "pass": true,
+   "detail": {
+    "chunks": 42,
+    "files": 2196,
+    "roundtrip": "ROUNDTRIP_OK",
+    "availability": [
+     "AVAILABLE_REMOTE_GIT"
+    ]
+   }
+  },
+  {
+   "n": 12,
+   "name": "thesis DOCX/PDF checksums unchanged",
+   "pass": true,
+   "detail": {
+    "docx_ok": true,
+    "pdf_ok": true
+   }
+  }
+ ]
+}
