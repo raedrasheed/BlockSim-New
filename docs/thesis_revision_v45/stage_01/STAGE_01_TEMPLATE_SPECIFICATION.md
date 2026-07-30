@@ -521,9 +521,11 @@ it is not, and MUST NOT become, a difficulty controller.
   `TEMPLATE_REFRESH`, `ROUND_ABORTED`.
 - **Invariants referenced:** I1 (no two valid active assignments overlap); I2 (an accepted
   solution lies in the signer's valid current assignment); I3 (an accepted solution matches the
-  current RoundID and TemplateID); I8 (assignment accounting reconciles
-  searched + unsearched + inactive + reassigned); I12 (difficulty constant in the confirmatory
-  protocol). I1, I2, and I8 are specified operationally in
+  current RoundID and TemplateID); I8a (coverage-state partition:
+  searched + active_unsearched + inactive_unsearched = assigned_domain) with I8b (orthogonal
+  custody model {original, renewed, reassigned, revoked, expired, abandoned}, non-additive);
+  I12 (difficulty constant in the confirmatory
+  protocol). I1, I2, I8a, and I8b are specified operationally in
   `STAGE_01_RANGE_ASSIGNMENT_SPECIFICATION.md`.
 - **Accounting invariant A1:** continuous full-participation energy is fixed at
   **8.420833333 kWh** (141 TH/s, 21.5 J/TH, 3031.5 W active power, 10,000 s horizon), invariant

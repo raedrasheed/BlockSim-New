@@ -125,6 +125,12 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
   checked to lie within the signer's valid current assignment (I2) and to match the current
   `RoundID`+`TemplateID` (I3), using target validation as the acceptance predicate
   (scope §A.5).
+- **Miner-state note (CR2).** While a round is in `SOLUTION_PROPAGATION`, certificate
+  verification does **not** remove verifying miners from `ACTIVE_HASHING` or from `H_active(t)`:
+  each miner remains in `ACTIVE_HASHING` and continues hashing until it has itself completed all
+  certificate-validation steps (`STAGE_01_EARLY_STOP_CERTIFICATE.md`, Section 3), with
+  verification energy recorded separately as `E_verification`. No `VERIFYING` miner state exists,
+  and a failed certificate produces no hashing-state transition.
 - **Entry condition.** From `HASHING` when a miner submits a candidate digest satisfying the
   target.
 - **Exit condition(s).** To `ROUND_ACCEPTED` when the solution validates (I2 ∧ I3 hold and
@@ -290,6 +296,21 @@ following is preserved:
 A **new** `TemplateID` is minted per round (or per refresh); template content is NOT carried
 across a completed round except as the historical accepted block.
 
+### 3.13 What happens when multiple valid solutions compete
+
+Two or more distinct valid solutions may arrive for the same round. Competing valid solutions
+are resolved by **network-arrival semantics** (CR6), consistent with
+`STAGE_01_EARLY_STOP_CERTIFICATE.md` (Section 4.5):
+
+1. Each valid solution receives a reproducible propagation/arrival time.
+2. Local acceptance (`SOLUTION_PROPAGATION → ROUND_ACCEPTED`) uses the **earliest valid arrival**.
+3. Other valid solutions are recorded as competing/stale proposals.
+4. Only exact arrival-time ties use a deterministic secondary rule: smallest `candidate_hash`,
+   then smallest `MinerID`.
+
+No global-oracle "smallest `(TemplateID, nonce, MinerID)`" primary rule is used, and **no
+chain-wide fork-choice proof** is claimed.
+
 ---
 
 ## 4. Round-transition table
@@ -306,7 +327,7 @@ the notes and specified in `STAGE_01_MINER_STATE_MACHINE.md`.
 | R3 | `TEMPLATE_COMMITMENT` | TemplateCommitted | Immutable template finalised; difficulty fixed (I12) | Publish `TemplateID` | `ASSIGNMENT` | Template content frozen until `TEMPLATE_REFRESH` |
 | R4 | `ASSIGNMENT` | AssignmentSetValid | Ranges pairwise disjoint (I1), bound to `RoundID`+`TemplateID` (I3), leased with `lease_start`/`lease_expiry` | Distribute range leases; emit assignment offers | `HASHING` | Emits miner offers → `REGISTERED/RESERVE/… → WAKING → ACTIVE_HASHING`; hashing may begin (§3.2–3.3) |
 | R5 | `HASHING` | CandidateSolution | A submitted digest satisfies the fixed target | Begin propagation/validation | `SOLUTION_PROPAGATION` | Validation checks I2 (in signer's assignment) and I3 (current round/template) |
-| R6 | `SOLUTION_PROPAGATION` | SolutionValid | Target satisfied AND I2 ∧ I3 hold | Accepted-block handling: record block, credit solver, close round | `ROUND_ACCEPTED` | Solver is the `ACTIVE_HASHING` miner whose assignment contained the solution (I2) |
+| R6 | `SOLUTION_PROPAGATION` | SolutionValid | Target satisfied AND I2 ∧ I3 hold | Accepted-block handling: record block, credit solver, close round | `ROUND_ACCEPTED` | Solver is the `ACTIVE_HASHING` miner whose assignment contained the solution (I2); competing valid solutions resolved by earliest valid arrival, ties by `candidate_hash` then `MinerID` (§3.13, CR6) |
 | R7 | `SOLUTION_PROPAGATION` | SolutionInvalidOrWithheld | Candidate fails validation or was not propagated; floor still satisfied | Discard candidate; resume searching | `HASHING` | Withheld/invalid solution does not advance the round (§3.8) |
 | R8 | `SOLUTION_PROPAGATION` | InvalidWithFloorBreach | Candidate invalid AND `H_honest(t)` below floor | Enter remediation | `SECURITY_RECOVERY` | Coverage shortfall handled by reserve activation |
 | R9 | `HASHING` | AllActiveRangesExhausted | Every active range reached verified exhaustion (I11) and `EXHAUSTED_PENDING` | Close current template's search | `ROUND_EXHAUSTED` | Only verified exhaustion counts (§3.5, §3.9) |

@@ -29,7 +29,7 @@ PoCol partitions the nonce domain into **disjoint ranges** and assigns each part
 miner one or more ranges that do not overlap any other miner's ranges for the same committed
 template. This document specifies the assignment object that records such a grant and the
 exact, deterministic, integer rules by which ranges are allocated, prevented from overlapping
-(I1), cancelled, reassigned with provenance (I8), and used to decide whether a solution is
+(I1), cancelled, reassigned with provenance (I8b), and used to decide whether a solution is
 protocol-valid (I2).
 
 Per the accepted A1 baseline, partitioning ALONE does not reduce total fixed-horizon energy
@@ -53,11 +53,11 @@ under one committed template, for a bounded lease interval. Its normative fields
 | `MinerID` | miner identifier | The registered miner granted the range. |
 | `range_start` | integer nonce | The starting nonce of the granted range (inclusion rule in Section 4). |
 | `range_end` | integer nonce | The ending nonce of the granted range (inclusion rule in Section 4). |
-| `range_size` | integer count | The exact count of nonces in the range. A derived integer (Section 4) recorded explicitly so accounting (I8) never re-derives it from endpoints via floating point. |
+| `range_size` | integer count | The exact count of nonces in the range. A derived integer (Section 4) recorded explicitly so coverage accounting (I8a) never re-derives it from endpoints via floating point. |
 | `lease_start` | time | Start of the time-bounded lease during which the grant is active. |
 | `lease_expiry` | time | End of the lease; after it the range MAY be reclaimed, renewed, or reassigned (Sections 14, 15). |
 | `assignment_version` | integer | Monotonic version of this assignment lineage; incremented on renewal/reassignment so a stale grant cannot be mistaken for the current one. |
-| `previous_assignment_reference` | assignment identifier or null | The `AssignmentID` this assignment supersedes (reassignment provenance, I8); null for an original grant. |
+| `previous_assignment_reference` | assignment identifier or null | The `AssignmentID` this assignment supersedes (reassignment provenance, I8b); null for an original grant. |
 | `signature` / authentication field | authentication token | Authenticates the assignment's issuance under the deployment's fixed authority model. Treated as an authentication field only; Stage 1 makes NO claim that it provides unforgeability, non-repudiation, or any security property. |
 
 **Field-consistency requirements.**
@@ -69,7 +69,7 @@ under one committed template, for a bounded lease interval. Its normative fields
 - An assignment is a **valid current assignment** for a miner when: its `RoundID`/`TemplateID`
   match the round's committed template; the wall-clock time lies in `[lease_start,
   lease_expiry]`; it has not been cancelled (Section 14); and its `assignment_version` is the
-  latest in its lineage. Validity is defined precisely so that I1, I2, and I8 are checkable.
+  latest in its lineage. Validity is defined precisely so that I1, I2, and I8a/I8b are checkable.
 - The `signature`/authentication field authenticates issuance only. Its presence is required by
   the schema; its cryptographic strength is out of scope at Stage 1.
 
@@ -87,7 +87,7 @@ differ between them.
 The domain is the ordered integer interval `[0, N-1]` with **no wrap-around**. A range is a
 contiguous sub-interval `[range_start, range_end]` with `0 ≤ range_start ≤ range_end ≤ N-1`. A
 range never crosses the top boundary; the successor of `N-1` does not exist. This is the
-default model and the simplest to reconcile for accounting (I8).
+default model and the simplest to reconcile for coverage accounting (I8a).
 
 ### 3.2 Circular model
 
@@ -105,7 +105,7 @@ reassignment of a partially searched region near the boundary.
   invalid.
 - **Circular:** a grant with `range_start > range_end` is a wrap range (Section 5); its size
   and overlap tests use modular arithmetic (Sections 4, 5, 12).
-- Overlap (I1), size, and accounting (I8) MUST be computed under the model in force; mixing
+- Overlap (I1), size, and coverage accounting (I8a) MUST be computed under the model in force; mixing
   models within one TemplateID is prohibited.
 
 ---
@@ -160,7 +160,7 @@ All range boundaries, sizes, counts, shares, and apportionment results are **exa
 - Comparisons that decide apportionment (Section 11) and overlap (Section 12) MUST be exact
   integer comparisons.
 - `Σ range_size` over a partition MUST equal `N` exactly. Exact integer arithmetic is what
-  makes the accounting invariant I8 (Section 15) reconcile without residue.
+  makes the coverage-accounting invariant I8a (Section 15) reconcile without residue.
 
 ---
 
@@ -254,7 +254,7 @@ Given integer weights `w_i` (from Section 9 or the scaled weights of Section 10)
 
 The result satisfies `Σ_i L_i = N` exactly, every `L_i` is a non-negative integer, and the
 outcome is identical on every host. No floating point participates in steps 1–4. This is the
-exact remainder distribution referenced by I8 (Section 15): allocated counts reconcile with the
+exact remainder distribution referenced by I8a (Section 15): allocated counts reconcile with the
 domain size with zero residue.
 
 ---
@@ -288,17 +288,17 @@ disjoint ranges.
 
 A miner that is not actively searching (e.g. in `RESERVE`, `LOW_POWER_LISTEN`, `WAKING`,
 `OFFLINE`, `EXHAUSTED_PENDING`, or `DISQUALIFIED`) is handled explicitly so the domain remains
-accounted for (I8):
+accounted for (I8a):
 
 - A `RESERVE` miner holds no active range and draws no active hashing power; it is not
   allocated a range until promoted to `ACTIVE_HASHING`.
 - A range whose owner ceases active search (miner departs, goes `OFFLINE`, enters
   `LOW_POWER_LISTEN`, is `DISQUALIFIED`, or reaches `EXHAUSTED_PENDING`) becomes eligible for
   cancellation (Section 14) and/or reassignment (Section 15). Until reassigned, the region it
-  covered is recorded in the accounting as **inactive** (unsearched-and-unassigned) rather than
-  silently dropped.
-- Inactive regions MUST appear in the I8 accounting (Section 15) so that
-  searched + unsearched + inactive + reassigned reconciles to the full domain. An inactive
+  covered is recorded in the coverage accounting as **inactive_unsearched**
+  (unsearched-and-unassigned) rather than silently dropped.
+- Inactive regions MUST appear in the I8a coverage accounting (Section 15) so that
+  searched + active_unsearched + inactive_unsearched reconciles to the full domain. An inactive
   miner's former range is never both "assigned to it" and "available for reassignment"
   simultaneously; the assignment lineage (Section 15) records the transition.
 - Nothing here claims that inactive-miner handling preserves the security floor or any
@@ -315,7 +315,7 @@ expiry) — e.g. on miner departure, disqualification, lease reclamation, or `TE
   after cancellation the miner has no authority to search that range, and a solution it finds
   there is not protocol-valid (I2, Section 16).
 - Cancellation MUST be explicit and recorded (with the point of cancellation), so that overlap
-  checking (I1) and accounting (I8) can exclude the cancelled assignment and, where applicable,
+  checking (I1) and coverage accounting (I8a) can exclude the cancelled assignment and, where applicable,
   admit a successor.
 - Cancellation of an assignment under a committed template does not by itself change the
   committed template or the target; template/target changes occur only through
@@ -323,11 +323,11 @@ expiry) — e.g. on miner departure, disqualification, lease reclamation, or `TE
   `STAGE_01_TEMPLATE_SPECIFICATION.md`, Section 14; I12).
 - On `TEMPLATE_REFRESH`, all assignments of the prior TemplateID are void with respect to the
   new candidate-identity domain; they need not be individually cancelled to lose validity in
-  the new domain, but the accounting for the old domain MUST still reconcile (I8).
+  the new domain, but the coverage accounting for the old domain MUST still reconcile (I8a).
 
 ---
 
-## 15. Reassignment provenance (previous_assignment_reference; I8)
+## 15. Reassignment provenance (previous_assignment_reference; I8a/I8b)
 
 When a range (or part of a range) is granted to a new miner after cancellation, lease expiry,
 exhaustion, or departure, the successor assignment records its origin via
@@ -339,16 +339,22 @@ exhaustion, or departure, the successor assignment records its origin via
   from stale ones. Only the latest version in a lineage can be a valid current assignment
   (Section 2); this prevents a superseded grant and its successor from both appearing active
   and violating I1 (Section 12).
-- **Invariant I8: assignment accounting reconciles searched + unsearched + inactive +
-  reassigned.** For each committed template, every nonce of the domain MUST be classifiable
-  into exactly one of:
+- **Invariant I8a: coverage states partition the domain.** For each committed template, every
+  nonce of the domain MUST be classifiable into exactly one **coverage state**:
   - **searched** — covered by (portions of) assignments whose owners searched them;
-  - **unsearched** — covered by a valid current assignment but not yet searched;
-  - **inactive** — not covered by any valid current assignment and not reassigned (Section 13);
-  - **reassigned** — moved along a provenance lineage from a prior assignment to a successor.
-  The four classes MUST be disjoint and exhaustive, summing exactly to `N` (exact integer
-  arithmetic, Section 6). `previous_assignment_reference` is the link that lets reassigned
-  regions be traced to their origin so the accounting closes without double-counting.
+  - **active_unsearched** — covered by a valid current (live) assignment but not yet searched;
+  - **inactive_unsearched** — not searched and not covered by any valid current assignment
+    (Section 13).
+  The three coverage states MUST be disjoint and exhaustive, summing exactly to `N` (exact
+  integer arithmetic, Section 6).
+- **Invariant I8b: custody/provenance, orthogonal to coverage.** Independently of its coverage
+  state, each assignment carries a custody status in
+  `{original, renewed, reassigned, revoked, expired, abandoned}`. These are custody/lineage
+  properties and MUST NOT appear as additive terms in the I8a coverage equation: **`reassigned`
+  is a custody status, not a coverage class.** A reassigned position still has an independent
+  coverage state (`searched`, `active_unsearched`, or `inactive_unsearched`).
+  `previous_assignment_reference` is the link that lets reassigned regions be traced to their
+  origin so the coverage accounting closes without double-counting.
 - Provenance is **per TemplateID**: a lineage lives within one candidate-identity domain and
   does not cross a `TEMPLATE_REFRESH`.
 
@@ -398,7 +404,7 @@ This is the structural change that makes per-template non-duplication (the H1-re
 property: no duplicate serialized candidate-header evaluations among honest miners under one
 committed template, since candidate-header identity holds iff all fields are equal) well
 defined, because each nonce is searched by at most one miner within one candidate-identity
-domain (I1, I2). It also makes the domain fully accountable (I8) under exact integer
+domain (I1, I2). It also makes the domain fully accountable (I8a) under exact integer
 arithmetic.
 
 This consequence is a statement **about the specified model only**. It is NOT a claim about the
@@ -419,9 +425,12 @@ under the idle policy, specified elsewhere and not claimed here.
   `TEMPLATE_REFRESH`, `ROUND_ABORTED`.
 - **Invariants referenced:** I1 (no two valid active assignments overlap; Section 12); I2 (an
   accepted solution lies in the signer's valid current assignment; Section 16); I3 (an accepted
-  solution matches the current RoundID and TemplateID; Section 16); I8 (assignment accounting
-  reconciles searched + unsearched + inactive + reassigned; Section 15); I12 (difficulty
-  constant in the confirmatory protocol; referenced via the target rule of
+  solution matches the current RoundID and TemplateID; Section 16); I8a (coverage states
+  partition the assigned domain: searched + active_unsearched + inactive_unsearched =
+  assigned_domain; Section 15); I8b (custody/provenance model
+  `{original, renewed, reassigned, revoked, expired, abandoned}`, orthogonal to coverage —
+  `reassigned` is custody, not a coverage class; Section 15); I12 (difficulty constant in the
+  confirmatory protocol; referenced via the target rule of
   `STAGE_01_TEMPLATE_SPECIFICATION.md`).
 - **Accounting invariant A1:** continuous full-participation energy is fixed at
   **8.420833333 kWh** (141 TH/s, 21.5 J/TH, 3031.5 W active power, 10,000 s horizon), invariant

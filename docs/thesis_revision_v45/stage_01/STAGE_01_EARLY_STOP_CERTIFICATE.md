@@ -26,6 +26,15 @@ abstraction (`STAGE_01_PROGRESS_VERIFICATION_ABSTRACTION.md`), which concerns ho
 was searched. A certificate asserts "a solution exists and is valid", not "a range was
 exhausted".
 
+**Generation rule (CR1, binding).** An early-stop certificate is generated **ONLY** after a
+miner finds a valid candidate solution satisfying the current target. It **MUST** contain
+exactly: `RoundID`, `TemplateID`, `AssignmentID`, `MinerID`, `nonce`, `candidate_hash`,
+`target`, `signature/authentication`. It **MUST NOT** be generated from: aggregated progress
+commitments; searched-domain coverage; claimed exhaustion; sufficient coverage; or a progress
+frontier. Progress verification and early-stop certification are **completely separate
+mechanisms**. A progress commitment says "I claim to have searched up to this frontier." An
+early-stop certificate says "I found this exact valid solution."
+
 ---
 
 ## 2. Certificate fields
@@ -93,10 +102,12 @@ work.
 ### 4.1 Verification latency
 
 Validation is not instantaneous. Each miner incurs a **verification latency** — the time to run
-steps 1–7, dominated by hash recomputation (step 5). During this interval the miner is *verifying*,
-not yet stopped: it continues to be accountable for its state, and the interval is energy-accounted
-per Section 5. A miner MUST NOT anticipate the outcome and stop before verification completes
-(I11).
+steps 1–7, dominated by hash recomputation (step 5). During this interval the miner **remains in
+`ACTIVE_HASHING`**: it continues hashing while verifying, it remains included in `H_active(t)`,
+and **no `VERIFYING` miner state is introduced**. The verification work is energy-accounted
+separately as `E_verification` per Section 5. A miner MUST NOT anticipate the outcome and stop
+before verification completes; only after **all** of steps 1–7 pass may it leave `ACTIVE_HASHING`,
+and a failed certificate produces **no** hashing-state transition (I11).
 
 ### 4.2 Invalid-certificate behaviour
 
@@ -125,11 +136,21 @@ additional state change and no double credit. Duplicate suppression keys on
 Two or more *distinct* certificates may each pass steps 1–7 for the same round (for example
 different nonces, possibly from different assignments, each satisfying target). Stage 1 specifies
 that all such certificates are individually valid early-stop triggers — each independently
-authorises halting active hashing — and that selection among competing valid solutions for the
-accepted block is a round-progression/fork-choice concern handled under `SOLUTION_PROPAGATION`
-toward `ROUND_ACCEPTED`. Stage 1 does NOT claim a resolution rule, a fairness property, or a
-tie-break guarantee; it records only that early-stop authorisation and accepted-block selection are
-separate decisions.
+authorises halting active hashing — and that early-stop authorisation and accepted-block
+selection are separate decisions.
+
+Selection among competing valid solutions for the accepted block follows **network-arrival
+semantics** (CR6), consistent with `STAGE_01_ROUND_STATE_MACHINE.md`:
+
+1. Each valid solution receives a reproducible propagation/arrival time.
+2. Local acceptance uses the **earliest valid arrival**.
+3. Other valid solutions are recorded as competing/stale proposals.
+4. Only exact arrival-time ties use a deterministic secondary rule: smallest `candidate_hash`,
+   then smallest `MinerID`.
+
+No global-oracle "smallest `(TemplateID, nonce, MinerID)`" primary rule is used, and **no
+chain-wide fork-choice proof** is claimed. Stage 1 makes no fairness or tie-break guarantee
+beyond this recorded ordering.
 
 ### 4.6 Delayed full-block propagation
 
@@ -147,16 +168,19 @@ specifies the ordering and does not claim a liveness guarantee for it.
 
 Verification is not free and MUST be accounted in the energy model of `STAGE_01_PROTOCOL_SCOPE.md`.
 
-- **Listening/verification time.** The interval a miner spends receiving a certificate and running
-  steps 1–7 is modeled time. It is attributed to the listening/verification term
-  (`P_listen,i · t_listen,i`) — the miner is monitoring and checking, not producing active hash
-  rate — with any hash recomputation cost of step 5 included in that verification term. It does NOT
-  contribute to the active hash rate.
+- **Verification energy.** The interval a miner spends receiving a certificate and running
+  steps 1–7 is modeled time during which the miner **remains in `ACTIVE_HASHING` and continues
+  hashing**, so it stays included in `H_active(t)` and continues to accrue its `ACTIVE_HASHING`
+  residency energy. The verification work (including the hash recomputation of step 5) is recorded
+  **separately** as `E_verification` — a clearly identified coordination/verification energy
+  increment added on top of the `ACTIVE_HASHING` residency energy and **not double-counted**. It
+  is NOT folded into a listening term, and the miner does NOT leave `ACTIVE_HASHING` for
+  verification.
 - **Transition on stop.** A miner that, after successful verification, leaves `ACTIVE_HASHING` for
   a reduced-power state incurs the relevant transition term `E_transition,i` (and, on any later
   resumption, the `WAKING` term `P_wake,i · t_wake,i`).
 - **Net effect.** Early stop reduces active power-time by ending `ACTIVE_HASHING` sooner, at the
-  cost of the (smaller) verification/listening and transition terms. Any ΔE benefit claimed at
+  cost of the (smaller) verification and transition terms. Any ΔE benefit claimed at
   later stages must be net of these verification and transition costs, and must arise from reduced
   active power-time, never from partitioning (baseline A1). Stage 1 defines these terms; it claims
   no particular ΔE.

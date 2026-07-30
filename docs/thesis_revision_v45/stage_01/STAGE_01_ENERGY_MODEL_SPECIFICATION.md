@@ -39,17 +39,48 @@ to the active hash rate (and hence to `P_hash,i * t_hash,i`).
 
 ## 1. Normative per-miner energy model
 
-For each miner `i`, the modeled energy over the fixed horizon is
+For each miner `i`, the modeled energy over the fixed horizon is the **state-complete
+sum** over the eight miner states
 
-    E_i = P_hash,i    * t_hash,i
-        + P_listen,i  * t_listen,i
-        + P_wake,i    * t_wake,i
-        + P_offline,i * t_offline,i
+    E_i = Σ_{s∈States} (P_{i,s} · t_{i,s})
         + E_transition,i
-        + E_coordination,i.                                            (E-1)
+        + E_coordination,i
+        + E_verification,i                                            (E-1)
+
+where `States = {REGISTERED, RESERVE, ACTIVE_HASHING, EXHAUSTED_PENDING,
+LOW_POWER_LISTEN, WAKING, OFFLINE, DISQUALIFIED}`, `P_{i,s}` is the single residency
+power of miner `i` in state `s` fixed by the canonical state-to-power mapping (§1.0),
+and `t_{i,s}` is the time miner `i` spends in state `s` over the horizon.
+`E_verification,i` is a **separate event-energy term** (§1.0), not folded into
+`P_hash·t_hash`.
 
 This is the normative accounting model. Every energy statement about PoCol at Stage 1 is
 expressed through (E-1), through the network total (E-2), or through the saving (E-3).
+
+### 1.0 Canonical state-to-power mapping (single reusable mapping)
+
+The following is the **single, canonical state-to-power mapping** reused across every
+Stage-1 document. Each of the eight states has exactly **one** residency power (no numeric
+values at Stage 1; ordering `P_offline ≤ P_listen = P_reserve = P_registered ≤ P_hash`,
+with `P_wake` a transient):
+
+| Miner state | Residency power | Contributes to `H_active(t)`? | Reward-eligible? |
+|-------------|-----------------|:-----------------------------:|:----------------:|
+| REGISTERED | `P_registered` (= `P_listen`) | No | No |
+| RESERVE | `P_reserve` (= `P_listen`; low-power standby, **not** `P_offline`) | No | Availability only |
+| ACTIVE_HASHING | `P_hash` | **Yes** | Yes |
+| EXHAUSTED_PENDING | `P_hash` (short transient; no idle saving credited here) | No | Yes |
+| LOW_POWER_LISTEN | `P_listen` | No | Yes (idle credit) |
+| WAKING | `P_wake` | No | Yes |
+| OFFLINE | `P_offline` | No | No |
+| DISQUALIFIED | `P_offline` | No | No |
+
+This table is the **single reusable mapping**: every other Stage-1 document that assigns a
+residency power to a state, or states which states contribute to `H_active(t)`, defers to
+it. `E_verification,i` is a **separate event-energy term** (not folded into
+`P_hash·t_hash`): `t_hash` still counts the full active duration and `E_verification` is the
+incremental cost of validating a **received** early-stop certificate while the miner remains
+in `ACTIVE_HASHING` (CR2), so it is not double-counted.
 
 ### 1.1 Term-by-term definitions and units
 
@@ -59,33 +90,39 @@ power–time product `P × t` is in **joules (J)**. Energy is converted to **kil
 non-negative; all durations are non-negative (invariant **I5**). Each miner is in exactly
 one state at any instant, so the duration terms partition the horizon (Section 3).
 
-| Term | Meaning | Unit | Contributing state | Contributes to active hash rate? |
+| Term | Meaning | Unit | Contributing state(s) | Contributes to active hash rate? |
 |---|---|---|---|---|
-| `P_hash,i` | Power drawn while actively hashing | W | `ACTIVE_HASHING` | — |
-| `t_hash,i` | Total time miner `i` spends actively hashing | s | `ACTIVE_HASHING` | Yes |
-| `P_listen,i` | Power drawn while low-power listening | W | `LOW_POWER_LISTEN` | — |
+| `P_hash,i` | Power drawn while actively hashing; also the residency power of the short `EXHAUSTED_PENDING` transient | W | `ACTIVE_HASHING`, `EXHAUSTED_PENDING` | — |
+| `t_hash,i` | Total time miner `i` spends actively hashing (full active duration) | s | `ACTIVE_HASHING` | Yes |
+| `P_listen,i` | Power drawn while low-power listening; also the residency power of `REGISTERED` (`P_registered`) and `RESERVE` (`P_reserve`) | W | `LOW_POWER_LISTEN`, `REGISTERED`, `RESERVE` | — |
 | `t_listen,i` | Total time miner `i` spends low-power listening | s | `LOW_POWER_LISTEN` | No |
 | `P_wake,i` | Power drawn while waking (resuming to hash) | W | `WAKING` | — |
 | `t_wake,i` | Total time miner `i` spends waking | s | `WAKING` | No |
-| `P_offline,i` | Power drawn while offline/reserve-idle | W | `OFFLINE` (and idle-reserve draw) | — |
-| `t_offline,i` | Total time miner `i` spends offline/reserve-idle | s | `OFFLINE` / `RESERVE` | No |
+| `P_offline,i` | Power drawn while offline; also the residency power of `DISQUALIFIED` | W | `OFFLINE`, `DISQUALIFIED` | — |
+| `t_offline,i` | Total time miner `i` spends offline | s | `OFFLINE` | No |
 | `E_transition,i` | Fixed/aggregate transition energy for state changes not fully captured by a single `P×t` term (spin-up/down, mode switches) | J (→ kWh via /3.6×10⁶) | transitions | No |
 | `E_coordination,i` | Modeled energy of coordination for miner `i` (progress commitments, assignment/lease messaging, security-floor participation, reserve activation signalling) | J (→ kWh via /3.6×10⁶) | coordination | No |
+| `E_verification,i` | Modeled incremental energy of validating a **received** early-stop certificate while the miner remains in `ACTIVE_HASHING`; a clearly identified coordination/verification increment added on top of the `ACTIVE_HASHING` residency energy, **not** double-counted (CR2) | J (→ kWh via /3.6×10⁶) | verification | No |
 
 Notes on conventions:
 
 - **Product terms** (`P_hash,i * t_hash,i`, etc.) are computed in joules and summed with the
-  two lump terms `E_transition,i` and `E_coordination,i`, which are **already energies** (J),
-  before any conversion to kWh. Do NOT double-convert.
-- **`REGISTERED`, `EXHAUSTED_PENDING`, `WAKING` accounting.** `REGISTERED` (admitted,
-  pre-assignment) and `EXHAUSTED_PENDING` (assertion pending adjudication) draw their modeled
-  power through the applicable term; where a design treats their draw as a distinct level,
-  it is represented via `E_transition,i` or a state-specific power at the same units.
-  `WAKING` is charged through `P_wake,i * t_wake,i`. `DISQUALIFIED` miners contribute no
-  active hash rate and their residual draw, if any, is accounted as offline draw.
-- **`RESERVE` draw** is accounted as offline-class idle draw (`P_offline,i * t_offline,i`)
-  because a held-out reserve draws no active hashing power. Its later activation cost is the
-  wake and transition terms.
+  lump terms `E_transition,i`, `E_coordination,i`, and `E_verification,i`, which are
+  **already energies** (J), before any conversion to kWh. Do NOT double-convert.
+- **`REGISTERED`, `EXHAUSTED_PENDING`, `WAKING`, `DISQUALIFIED` accounting.** Per the
+  canonical mapping (§1.0), `REGISTERED` draws `P_registered` (= `P_listen`);
+  `EXHAUSTED_PENDING` draws `P_hash` for its short transient (no idle saving is credited
+  there); `WAKING` is charged through `P_wake,i * t_wake,i`; and `DISQUALIFIED` draws
+  `P_offline`. Each state has exactly one residency power — there is no "distinct level"
+  fallback and no residual bucket.
+- **`RESERVE` draw** is accounted at `P_reserve` (= `P_listen`; low-power standby), **not**
+  as offline-class draw: a held-out reserve draws no active hashing power but does draw the
+  low-power standby power while listening for its activation signal. Its later activation
+  cost is the wake and transition terms.
+- **`E_verification` accounting.** A miner validating a received early-stop certificate stays
+  in `ACTIVE_HASHING` and keeps drawing `P_hash`; the incremental verification cost is
+  charged **separately** as `E_verification,i`, not folded into `P_hash·t_hash` and not
+  double-counted (CR2).
 - **Sign conventions.** No term is negative. A "saving" is never represented as a negative
   energy term; it is the *difference of two totals* (Section 4).
 
@@ -94,14 +131,17 @@ Notes on conventions:
 ## 2. Per-miner state–energy conservation (I6)
 
 **Invariant I6:** for each miner `i`, the sum of the state-attributed energies equals that
-miner's total energy `E_i`. That is, the six contributions on the right-hand side of (E-1)
+miner's total energy `E_i`. That is, the eight state-residency energies plus the three event
+terms `E_transition,i + E_coordination,i + E_verification,i` on the right-hand side of (E-1)
 are exhaustive and mutually exclusive by state/category, so no energy is created or lost in
 attribution:
 
     E_i = Σ over states/categories of (state energy of miner i).       (I6)
 
-There is no residual, unattributed energy bucket. Every joule miner `i` draws is charged to
-exactly one term of (E-1).
+**Energy invariant.** `E_i` equals the sum of the eight state-residency energies plus
+`E_transition,i + E_coordination,i + E_verification,i` exactly, with **no residual bucket**.
+Every joule miner `i` draws is charged to exactly one term of (E-1); there is no residual,
+unattributed energy bucket.
 
 ---
 
@@ -111,12 +151,15 @@ exactly one term of (E-1).
 occupies exactly one state at a time over `[0, T]`, the state durations partition the
 horizon for each miner `i`:
 
-    t_hash,i + t_listen,i + t_wake,i + t_offline,i + t_other,i = T,     (I5)
+    Σ_{s∈States} t_{i,s} = T,                                          (I5)
 
-with every term `≥ 0`, where `t_other,i` collects any residual admitted-state time
-(`REGISTERED`, `EXHAUSTED_PENDING`, `DISQUALIFIED`) so the accounting is complete. No
-duration may be negative, and the durations for a miner may not sum to more than the horizon
-(no double-counted time) nor be silently truncated below it (no vanished time).
+summed over all eight miner states, with every term `≥ 0`. **There is NO residual /
+`t_other` bucket:** every instant of the horizon is charged to exactly one of the eight
+state durations (`REGISTERED`, `RESERVE`, `ACTIVE_HASHING`, `EXHAUSTED_PENDING`,
+`LOW_POWER_LISTEN`, `WAKING`, `OFFLINE`, `DISQUALIFIED`), so the accounting is complete
+without an "other" catch-all. No duration may be negative, and the durations for a miner may
+not sum to more than the horizon (no double-counted time) nor be silently truncated below it
+(no vanished time).
 
 ---
 
@@ -148,8 +191,27 @@ comparison across different settings, difficulties, or horizons.
 
 A positive `ΔE` (a saving) MUST be attributable to **reduced active power-time**
 (`Σ_i P_hash,i * t_hash,i` smaller than in the control) net of the listening, wake,
-transition, and coordination terms — NEVER to partitioning, which A1 holds fixed. At Stage 1,
-`ΔE` is **defined but not assigned any value**; no saving is claimed as achieved or validated.
+transition, coordination, and verification terms — NEVER to partitioning, which A1 holds
+fixed. At Stage 1, `ΔE` is **defined but not assigned any value**; no saving is claimed as
+achieved or validated.
+
+### 4.3 Energy-reduction attribution (CR8)
+
+The saving decomposes into named, separately-attributed effects minus their costs:
+
+    Delta_E_total = Delta_E_range_idle + Delta_E_reserve + Delta_E_early_stop
+                    − Delta_E_transition_and_wake − Delta_E_coordination_and_verification
+
+- `Delta_E_range_idle`: saving from miners exhausting their assigned ranges and entering
+  `LOW_POWER_LISTEN`.
+- `Delta_E_reserve`: saving from holding reserve miners outside active hashing (at
+  `P_reserve`).
+- `Delta_E_early_stop`: a propagation/termination optimisation (stopping once a valid
+  solution arrives); **not unique to nonce-domain partitioning**.
+- `Delta_E_transition_and_wake`, `Delta_E_coordination_and_verification`: **costs**.
+
+Total saving must be net of wake, transition, coordination, and verification energy. These
+effects are **not** attributed generically to nonce partitioning.
 
 ---
 
@@ -167,7 +229,7 @@ model, not a claim that they hold.
 3. **Overhead below gross saving.** The overhead incurred to realise and reverse the idle
    period is smaller than the gross active-power-time reduction:
 
-        Σ_i (P_wake,i * t_wake,i + E_transition,i + E_coordination,i)
+        Σ_i (P_wake,i * t_wake,i + E_transition,i + E_coordination,i + E_verification,i)
             < gross reduction in Σ_i P_hash,i * t_hash,i.
 
    If overhead meets or exceeds the gross reduction, `ΔE ≤ 0`.
@@ -188,7 +250,7 @@ saving arises.
 | **Idle draw equals hashing draw** | `P_listen = P_hash` for the idling miners | Gross saving is zero ⇒ `ΔE ≤ 0` (overhead only) |
 | **Zero idle duration** | `t_listen = 0` (no miner idles; reserves never held out) | No active-power-time reduction ⇒ `ΔE = 0` |
 | **No idle opportunity** | Homogeneous rates with equal ranges sized so every miner hashes the full horizon | No miner reaches `LOW_POWER_LISTEN`/`RESERVE` early ⇒ possibly `ΔE = 0` |
-| **Overhead-dominated** | `Σ (P_wake·t_wake + E_transition + E_coordination) ≥` gross reduction | Wake + transition (+ coordination) costs eliminate the gross saving ⇒ `ΔE ≤ 0` |
+| **Overhead-dominated** | `Σ (P_wake·t_wake + E_transition + E_coordination + E_verification) ≥` gross reduction | Wake + transition + coordination (+ verification) costs eliminate the gross saving ⇒ `ΔE ≤ 0` |
 
 In the "no idle opportunity" case, note that partitioning has been applied but no saving
 results — consistent with the accepted baseline that partitioning alone changes nothing.

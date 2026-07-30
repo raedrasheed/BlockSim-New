@@ -65,13 +65,15 @@ Contribution to the hash-rate quantities is determined **solely by state**:
 | `OFFLINE` | No |
 | `DISQUALIFIED` | No |
 | `REGISTERED` | No |
-| `EXHAUSTED_PENDING` | No (assertion pending; not credited as active hashing) |
+| `EXHAUSTED_PENDING` | No (short `P_hash` transient per CR3, but **not** credited as active hashing; assertion pending) |
 
-Only `ACTIVE_HASHING` contributes, unless explicitly stated otherwise. A miner in
-`LOW_POWER_LISTEN`, `RESERVE`, `WAKING`, `OFFLINE`, or `DISQUALIFIED` adds **nothing** to any
-of `H_active`, `H_honest`, or `H_adversarial`. This is the crux of Section 3: honest miners
-that go idle stop contributing to `H_honest` while any always-on adversary keeps
-contributing to `H_adversarial`.
+Only `ACTIVE_HASHING` contributes. A miner in `REGISTERED`, `RESERVE`, `EXHAUSTED_PENDING`,
+`LOW_POWER_LISTEN`, `WAKING`, `OFFLINE`, or `DISQUALIFIED` adds **nothing** to any of
+`H_active`, `H_honest`, or `H_adversarial` — this holds even though `EXHAUSTED_PENDING` draws
+the `P_hash` transient (CR3): drawing hashing power is not the same as contributing to the
+active hash-rate census. This is the crux of Section 3: honest miners that go idle stop
+contributing to `H_honest` while any always-on adversary keeps contributing to
+`H_adversarial`.
 
 ---
 

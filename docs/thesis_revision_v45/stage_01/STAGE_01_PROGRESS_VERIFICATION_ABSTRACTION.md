@@ -93,6 +93,23 @@ The mapping is one-directional: the simulator *consumes* the outcomes (detection
 invocation, accounting effects) that a real implementation would have to *produce*. Stage 1 does
 not close list (b).
 
+### 3.1 Simulator ground truth vs protocol-level claim (CR5, two layers)
+
+The abstraction is represented at two distinct layers, which MUST NOT be conflated:
+
+- **Simulator ground truth:** `actual_frontier`, `actual_positions_evaluated`,
+  `actual_solution_positions`, `actual_exhaustion`. The simulator **may** know actual exhaustion
+  exactly.
+- **Protocol-level claim:** `reported_frontier`, `reported_exhaustion`, `audit_selected`,
+  `audit_result`, `claim_accepted_or_rejected`.
+
+The modeled progress-verification abstraction does **not** prove actual exhaustion, and **no**
+progress commitment verifies that no valid solution exists in the whole range. In **honest**
+simulations, `EXHAUSTED_PENDING` eligibility **may** use actual cursor completion (ground truth).
+In **adversarial** simulations, reported exhaustion is compared with ground truth and passed
+through the modeled audit/detection abstraction. All findings are **modeled, not cryptographically
+proven**.
+
 ---
 
 ## 4. Relationship to assignment accounting and to the early-stop path
@@ -103,11 +120,14 @@ not close list (b).
   as unreliable: its positions are NOT counted as searched and MAY be re-searched (lease document,
   Section 7, rule 2).
 - This abstraction concerns **progress** (how much of a range was searched). It does NOT decide
-  round termination on its own. Halting active hashing for a round on the basis of a found
-  solution is governed separately by the early-stop certificate and its strict validation order,
-  including invariant I11 (no miner stops hashing on an unauthenticated message). See
-  `STAGE_01_EARLY_STOP_CERTIFICATE.md`. Progress verification and early-stop are distinct
-  mechanisms and MUST NOT be conflated.
+  round termination on its own. A progress commitment only claims a searched frontier: it is
+  **NOT** an early-stop trigger, and it **never** means "found a solution" (CR1). Halting active
+  hashing for a round on the basis of a found solution is governed separately by the early-stop
+  certificate and its strict validation order, including invariant I11 (no miner stops hashing on
+  an unauthenticated message). See `STAGE_01_EARLY_STOP_CERTIFICATE.md`. Progress verification and
+  early-stop certification are **completely separate mechanisms** and MUST NOT be conflated. A
+  progress commitment says "I claim to have searched up to this frontier"; an early-stop
+  certificate says "I found this exact valid solution".
 
 ---
 

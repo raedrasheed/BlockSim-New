@@ -17,9 +17,11 @@ Companion documents: `STAGE_01_PROTOCOL_SCOPE.md`, `STAGE_01_IDLE_POLICY_SPECIFI
 The algorithm is ALWAYS **PoCol**; the mechanism is **the idle policy within PoCol**.
 Partitioning alone does not reduce fixed-horizon energy; savings arise only from reduced
 active power-time. Reserves are one such source: a held-out reserve draws no active hashing
-power (its idle draw is accounted as offline-class draw,
-`P_offline,i * t_offline,i`; see `STAGE_01_ENERGY_MODEL_SPECIFICATION.md`) until it is
-activated to restore hash rate.
+power — its residency draw is the low-power standby power `P_reserve` (= `P_listen`), **not**
+`P_offline` (canonical state-to-power mapping, CR3;
+`STAGE_01_ENERGY_MODEL_SPECIFICATION.md` §1.0) — until it is activated to restore hash rate.
+Activation passes the reserve through `WAKING`, charging wake energy `P_wake,i * t_wake,i`
+plus any `E_transition,i` (Section 4).
 
 Miner states (8): `REGISTERED`, `RESERVE`, `ACTIVE_HASHING`, `EXHAUSTED_PENDING`,
 `LOW_POWER_LISTEN`, `WAKING`, `OFFLINE`, `DISQUALIFIED`. A reserve is a `REGISTERED` miner
@@ -33,7 +35,8 @@ held in `RESERVE`; activation passes it through `WAKING` into `ACTIVE_HASHING`. 
 ### 1.1 The reserve set
 
 Registered miners not currently assigned an active range may be held in `RESERVE`: admitted
-and available, drawing no active hashing power. From this reserve set the protocol draws
+and available, drawing no active hashing power but the low-power standby power `P_reserve`
+(= `P_listen`, **not** `P_offline`; CR3). From this reserve set the protocol draws
 activations when the security-floor policy calls for recovery
 (`STAGE_01_SECURITY_FLOOR_SPECIFICATION.md`).
 

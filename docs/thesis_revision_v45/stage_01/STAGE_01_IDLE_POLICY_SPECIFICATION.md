@@ -166,9 +166,10 @@ The exhaustion-driven low-power path is the ordered chain
   active hash rate. Its energy accrues to `P_hash,i * t_hash,i`.
 - **`EXHAUSTED_PENDING`** — the miner has *asserted* completion of its assignment and is
   awaiting adjudication of that assertion against the evidence requirements of Section 5.
-  `EXHAUSTED_PENDING` is a holding state: the assertion is pending verification and has NOT
-  been accepted. The miner may already have reduced hashing, but it is NOT yet in
-  `LOW_POWER_LISTEN` and is NOT yet credited as exhausted.
+  `EXHAUSTED_PENDING` is a **short transient holding state** whose residency power is `P_hash`
+  (CR3): the assertion is pending verification and has NOT been accepted, so **no idle saving is
+  credited here**. The idle saving is credited **only** in `LOW_POWER_LISTEN`. The miner is NOT
+  yet in `LOW_POWER_LISTEN` and is NOT yet credited as exhausted.
 - **`LOW_POWER_LISTEN`** — the miner monitors round progress at reduced power. Its energy
   accrues to `P_listen,i * t_listen,i`, NOT to the active hash rate. This is the state in
   which the idle policy realises reduced active power-time.
@@ -216,8 +217,15 @@ assignment and `TemplateID`. Concretely, the abstraction consists of:
 
 1. a **progress commitment** binding the assignment identity (`MinerID`, range identity,
    `TemplateID`) to the claimed progress marker; and, where the design forms one,
-2. an **early-stop / exhaustion summary** attesting sufficient covered progress to justify
-   halting active hashing for the assignment.
+2. an **exhaustion summary** attesting that the progress marker has reached `N` (full traversal)
+   for the asserted assignment and `TemplateID`.
+
+**Exhaustion is not an early-stop trigger (CR1).** Reaching exhaustion and entering the idle
+path does **NOT** generate an early-stop certificate. An early-stop certificate is generated
+**ONLY** after a miner finds a valid candidate solution satisfying the target
+(`STAGE_01_EARLY_STOP_CERTIFICATE.md`); it MUST NOT be generated from claimed exhaustion,
+sufficient coverage, or a progress frontier. Progress/exhaustion verification and early-stop
+certification are completely separate mechanisms.
 
 This abstraction is explicitly a **modeled progress-verification abstraction — NOT a
 cryptographic proof** and **NOT a complete proof of range exhaustion**. Stage 1 does not
@@ -241,6 +249,16 @@ opens — so that "the miner said so" alone can never open it.
 Because exhaustion is `TemplateID`-scoped (Section 2), a `TEMPLATE_REFRESH` invalidates
 outstanding progress commitments: after refresh, `p` resets to `0` for the new `TemplateID`
 and no miner may carry an exhaustion adjudication across templates.
+
+### 5.4 Honest vs adversarial adjudication (CR5)
+
+Adjudication is represented at two layers (`STAGE_01_PROGRESS_VERIFICATION_ABSTRACTION.md`,
+CR5). In **honest** simulations, `EXHAUSTED_PENDING` eligibility **may** use actual cursor
+completion — the simulator's ground-truth `actual_exhaustion` / `actual_frontier` — to establish
+`p = N`. In **adversarial** simulations, the miner's `reported_exhaustion` is compared against
+ground truth through the modeled audit/detection abstraction. Either way the outcome is
+**modeled, not cryptographically proven**: the modeled abstraction does not prove actual
+exhaustion, and no progress commitment verifies that no valid solution exists in the whole range.
 
 ---
 
@@ -272,6 +290,12 @@ A saving is possible only when **all** of the following hold:
 4. **The saving is not an artefact of hidden deletion.** Failed runs, zero-block runs, and
    uncovered tails MUST remain in the accounting (invariants I5–I7); a "saving" produced by
    dropping unfavourable runs is not a saving.
+
+The saving from miners exhausting their assigned ranges and entering `LOW_POWER_LISTEN` is the
+`Delta_E_range_idle` component of the energy-reduction decomposition
+(`STAGE_01_ENERGY_MODEL_SPECIFICATION.md`, CR8) — the range-idle effect net of wake, transition,
+coordination, and verification costs. It MUST be attributed to that component and **NOT**
+attributed generically to nonce-domain partitioning (baseline A1).
 
 ### 6.2 Conditions under which NO saving arises
 

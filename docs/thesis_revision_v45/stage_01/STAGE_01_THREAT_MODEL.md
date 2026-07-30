@@ -108,14 +108,19 @@ single classification label.
 ### 3.3 False completion (false exhaustion)
 - **Actor(s).** Byzantine, rational.
 - **Manifestation.** Claiming a range is exhausted while a remainder is unsearched, to idle
-  early. Caught by progress/exhaustion accounting (`I8`) under the modeled abstraction.
+  early. Adversarial **reported exhaustion** is compared against **simulator ground truth**
+  (`actual_exhaustion`) through the modeled audit/detection abstraction (`I8`); false-exhaustion
+  detection is **modeled, not proven** (CR5).
 - **Coupled invariants.** I8, I4.
 - **Classification.** **SPECIFIED_FOR_LATER_TEST** (Stage 2 accounting + Stage 4 adversarial).
 
 ### 3.4 Solution withholding
 - **Actor(s).** Rational, Byzantine.
 - **Manifestation.** Finding a valid block and not propagating it. Not directly detectable at
-  Stage 1 (no proof-of-possession); prolongs honest active power-time.
+  Stage 1 (no proof-of-possession); prolongs honest active power-time. Where competing valid
+  solutions do arrive, they are resolved by **network-arrival semantics** (earliest valid
+  arrival; ties by `candidate_hash` then `MinerID`; others recorded competing/stale), consistent
+  with `STAGE_01_EARLY_STOP_CERTIFICATE.md`; **no chain-wide fork-choice proof** is claimed (CR6).
 - **Coupled invariants.** none directly enforceable at Stage 1.
 - **Classification.** **UNRESOLVED** (detection/mitigation design not fixed; tracked in Open
   Questions).

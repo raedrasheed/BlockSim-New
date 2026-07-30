@@ -44,16 +44,24 @@ properties. Those properties are out of scope at Stage 1 (Section C).
 
 ### 0.3 Energy model (normative)
 
-Per-miner energy is
+Per-miner energy is the **state-complete sum** over the eight miner states
 
-    E_i = P_hash,i * t_hash,i
-        + P_listen,i * t_listen,i
-        + P_wake,i * t_wake,i
-        + P_offline,i * t_offline,i
+    E_i = Σ_{s∈States} (P_{i,s} · t_{i,s})
         + E_transition,i
         + E_coordination,i
+        + E_verification,i
 
-with total energy `E_total = Σ_i E_i` and the Stage-1 comparison quantity
+where `States = {REGISTERED, RESERVE, ACTIVE_HASHING, EXHAUSTED_PENDING, LOW_POWER_LISTEN,
+WAKING, OFFLINE, DISQUALIFIED}` and each state has exactly one residency power `P_{i,s}` per
+the canonical state-to-power mapping of `STAGE_01_ENERGY_MODEL_SPECIFICATION.md` §1.0
+(`REGISTERED = P_registered = P_listen`; `RESERVE = P_reserve = P_listen`, **not**
+`P_offline`; `ACTIVE_HASHING = P_hash`; `EXHAUSTED_PENDING = P_hash`;
+`LOW_POWER_LISTEN = P_listen`; `WAKING = P_wake`; `OFFLINE = P_offline`;
+`DISQUALIFIED = P_offline`). `E_verification,i` is a **separate event-energy term**
+(validating a received early-stop certificate while the miner remains in `ACTIVE_HASHING`;
+CR2), not folded into `P_hash·t_hash`. The durations satisfy `Σ_{s∈States} t_{i,s} = T` with
+**no** residual / `t_other` bucket. With total energy `E_total = Σ_i E_i` and the Stage-1
+comparison quantity
 
     ΔE = E_continuous_control − E_idle_policy.
 
@@ -169,8 +177,8 @@ partitioned**. Consequently:
 - Therefore the idle policy within PoCol targets the ONLY term that A1 leaves free: the
   **active power-time**. It seeks to reduce `Σ_i P_hash,i * t_hash,i` by moving miners into
   `LOW_POWER_LISTEN`, holding them in `RESERVE`, or otherwise reducing participation, while
-  paying the smaller listening, wake, transition, and coordination terms of the energy
-  model.
+  paying the smaller listening, wake, transition, coordination, and verification terms of the
+  energy model.
 - The comparison quantity is `ΔE = E_continuous_control − E_idle_policy`, where
   `E_continuous_control` is exactly the A1 value (8.420833333 kWh) under continuous full
   participation, and `E_idle_policy` is the modeled total under PoCol with the idle policy

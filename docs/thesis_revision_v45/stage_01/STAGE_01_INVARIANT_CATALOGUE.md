@@ -19,16 +19,22 @@ power-time, never from partitioning.
 - **Round states (10):** `ROUND_INITIALISING`, `TEMPLATE_COMMITMENT`, `ASSIGNMENT`,
   `HASHING`, `SECURITY_RECOVERY`, `SOLUTION_PROPAGATION`, `ROUND_ACCEPTED`,
   `ROUND_EXHAUSTED`, `TEMPLATE_REFRESH`, `ROUND_ABORTED`.
-- **Energy model (per miner):**
-  `E_i = P_hash,i·t_hash,i + P_listen,i·t_listen,i + P_wake,i·t_wake,i + P_offline,i·t_offline,i + E_transition,i + E_coordination,i`.
+- **Energy model (per miner):** state-complete, one residency power per state, no residual
+  bucket —
+  `E_i = Σ_{s∈States} (P_{i,s} · t_{i,s}) + E_transition,i + E_coordination,i + E_verification,i`,
+  summed over the eight miner states, with `Σ_{s} t_{i,s} = T`. `E_verification,i` is a separate
+  event-energy term (verification of early-stop certificates), added on top of the residency
+  energies and not folded into `P_hash·t_hash`.
 - **Adversarial share:** `q_adv(t) = H_adversarial(t) / (H_honest(t) + H_adversarial(t))`.
 - **Progress evidence** is a **modeled progress-verification abstraction**, never a
   cryptographic proof of range exhaustion.
-- **Planned test stages** referenced below:
-  - **Stage 2** — structural / state-machine / assignment-accounting simulation.
-  - **Stage 3** — energy-accounting simulation.
-  - **Stage 4** — adversarial / security simulation.
-  - **Stage 5** — analysis, statistics, and reporting-integrity checks.
+- **Planned test stages** (approved stage map) referenced below:
+  - **Stage 2** — core miner states and complete energy accounting.
+  - **Stage 3** — time-varying hash rate, security floor, reserve activation.
+  - **Stage 4** — range leases, reassignment, and modeled progress verification.
+  - **Stage 5** — adversarial and incentive model.
+  - **Stage 7 / Stage 8** — scientific freeze and execution / statistical analysis (referenced by
+    the results-integrity invariants).
 
 Each entry lists the exact statement, a formal statement, scope, required inputs, enforcement
 point, planned test stage, and consequence of violation.
@@ -45,7 +51,7 @@ point, planned test stage, and consequence of violation.
   `(lease_start, lease_expiry)`; miner state; `(RoundID, TemplateID)`.
 - **Enforcement point.** Range-assignment and range-reassignment procedures (overlap guard
   evaluated before an assignment becomes active).
-- **Planned test stage.** Stage 2.
+- **Planned test stage.** Stage 2 (with Stage 4 lease / reassignment cases).
 - **Consequence of violation.** Duplicate coverage of a nonce region; ambiguous assignment
   provenance; unsound acceptance provenance (couples to I2); double-counting risk (couples to
   I13).
@@ -60,7 +66,8 @@ point, planned test stage, and consequence of violation.
   `(RoundID, TemplateID)`.
 - **Enforcement point.** Acceptance predicate (range-membership check) in the valid-block
   acceptance procedure.
-- **Planned test stage.** Stage 2 (structural) with Stage 4 adversarial out-of-range tests.
+- **Planned test stage.** Stage 2 (structural), with Stage 4 (acceptance under leases) and
+  Stage 5 (adversarial out-of-range tests).
 - **Consequence of violation.** Out-of-range acceptance; enables the mining-outside-range
   attack; coverage accounting becomes unsound.
 
@@ -71,7 +78,8 @@ point, planned test stage, and consequence of violation.
 - **Scope.** Acceptance; binding to the committed template.
 - **Required inputs.** Solution's `RoundID`/`TemplateID` fields; committed values.
 - **Enforcement point.** Acceptance predicate and template-commitment check.
-- **Planned test stage.** Stage 2.
+- **Planned test stage.** Stage 2, with Stage 4 (refresh / acceptance) and Stage 5 (adversarial
+  template tests).
 - **Consequence of violation.** Cross-round or stale-template acceptance; replay of prior
   work; template disagreement admitted into the chain.
 
@@ -83,56 +91,79 @@ point, planned test stage, and consequence of violation.
 - **Scope.** Idle-policy state transitions; transition to low-power listening.
 - **Required inputs.** Miner state; exhaustion/progress accounting; revocation records.
 - **Enforcement point.** Guard in the transition-to-low-power-listening procedure.
-- **Planned test stage.** Stage 2 (state machine) with Stage 3 (energy consequences).
+- **Planned test stage.** Stage 2 (state machine and complete energy accounting), with Stage 4
+  (exhaustion / reassignment cases).
 - **Consequence of violation.** Premature idling; coverage gap over an unsearched range;
   unaccounted reduction of active power-time; heightened floor-breach risk.
 
 ### I5 — State durations are non-negative and reconcile exactly with the observation horizon.
 
 - **Formal statement.** For each miner `i`, every `t_state,i ≥ 0` and
-  `Σ_states t_state,i = T` with `T = 10,000 s`; the per-miner state timeline has no gaps and
-  no overlaps.
-- **Scope.** Energy accounting; all miner states.
-- **Required inputs.** Per-miner state timeline; fixed horizon `T`.
+  `Σ_states t_state,i = T` with `T = 10,000 s`, summed over the **eight** miner states; the
+  per-miner state timeline has no gaps and no overlaps, and there is **no** residual / `t_other`
+  bucket.
+- **Scope.** Energy accounting; all eight miner states.
+- **Required inputs.** Per-miner state timeline (eight states); fixed horizon `T`.
 - **Enforcement point.** State-duration reconciliation step (post-round accounting).
-- **Planned test stage.** Stage 3.
+- **Planned test stage.** Stage 2 (complete energy accounting) with Stage 3 (wake / time-varying
+  energy).
 - **Consequence of violation.** Energy miscount; A1, I6, and I7 broken; results not auditable.
 
 ### I6 — Per-miner state energy components sum exactly to per-miner energy.
 
 - **Formal statement.**
-  `E_i = P_hash,i·t_hash,i + P_listen,i·t_listen,i + P_wake,i·t_wake,i + P_offline,i·t_offline,i + E_transition,i + E_coordination,i`
-  holds with exact equality (no residual term).
+  `E_i = Σ_{s∈States} (P_{i,s} · t_{i,s}) + E_transition,i + E_coordination,i + E_verification,i`
+  holds with exact equality, summed over the **eight** miner states, with **no** residual term.
+  `E_verification,i` is a separate event-energy increment (early-stop certificate verification),
+  added on top of the residency energies and not double-counted into `P_hash·t_hash`.
 - **Scope.** Per-miner energy accounting.
-- **Required inputs.** Per-state powers; per-state durations; `E_transition,i`;
-  `E_coordination,i`.
+- **Required inputs.** Per-state residency powers; per-state durations (eight states);
+  `E_transition,i`; `E_coordination,i`; `E_verification,i`.
 - **Enforcement point.** Per-miner energy aggregation.
-- **Planned test stage.** Stage 3.
+- **Planned test stage.** Stage 2 (complete energy accounting) with Stage 3 (wake energy).
 - **Consequence of violation.** Incorrect per-miner energy; unreliable ΔE.
 
 ### I7 — Per-miner energies sum exactly to network energy.
 
-- **Formal statement.** `E_total = Σ_i E_i` (exact).
+- **Formal statement.** `E_total = Σ_i E_i` (exact), each `E_i` being the state-complete
+  per-miner sum of I6.
 - **Scope.** Network-level energy accounting.
 - **Required inputs.** All per-miner energies `E_i`.
 - **Enforcement point.** Network energy aggregation.
-- **Planned test stage.** Stage 3.
+- **Planned test stage.** Stage 2 (complete energy accounting).
 - **Consequence of violation.** Incorrect network energy and ΔE; the A1 comparison
   (`ΔE = E_continuous_control − E_idle_policy`) becomes invalid.
 
-### I8 — Assignment accounting reconciles searched, unsearched, inactive, and reassigned portions.
+### I8a — Coverage-state partition of the assigned domain.
 
-- **Formal statement.** For the nonce domain of each round, the four measures
-  `searched`, `unsearched`, `inactive`, and `reassigned` partition the domain exactly: their
-  union is the whole domain and they are pairwise disjoint (measure-exact, no overlap, no
-  omission).
-- **Scope.** Range assignment, exhaustion, reassignment.
-- **Required inputs.** Per-range progress commitments; assignment/lease records; reassignment
-  provenance.
-- **Enforcement point.** Range-accounting reconciliation (per round and at exhaustion).
-- **Planned test stage.** Stage 2.
+- **Formal statement.** For every assignment, and in aggregate over a round's assigned domain,
+  `searched + active_unsearched + inactive_unsearched = assigned_domain`, and the three coverage
+  categories are **pairwise disjoint** and **collectively exhaustive** over `assigned_domain`.
+- **Scope.** Coverage-state accounting, per assignment and per round.
+- **Required inputs.** Per-range progress frontiers; live-lease (active vs. inactive) status;
+  `assigned_domain`.
+- **Enforcement point.** Coverage-state reconciliation (per round and at exhaustion).
+- **Planned test stage.** Stage 2 (assignment cover) with Stage 4 (lease / progress coverage
+  states).
 - **Consequence of violation.** Coverage over- or under-count; false exhaustion undetected;
   double-counting risk (couples to I13).
+
+### I8b — Custody / provenance model (orthogonal to coverage).
+
+- **Formal statement.** Each assignment carries a custody / lineage status in
+  `{original, renewed, reassigned, revoked, expired, abandoned}`. These are custody / provenance
+  properties and **MUST NOT** appear as additive terms in the coverage-state equation of I8a. A
+  `reassigned` position still has an **independent coverage state**
+  (`searched` / `active_unsearched` / `inactive_unsearched`); custody and coverage are two
+  orthogonal models of the same position.
+- **Scope.** Custody / lineage of assignments across renewal and reassignment.
+- **Required inputs.** Assignment / lease records; reassignment provenance; lineage links
+  (`previous_assignment_reference`, `assignment_version`).
+- **Enforcement point.** Custody / lineage tracking in the range-lease and reassignment
+  procedures.
+- **Planned test stage.** Stage 4 (range leases and reassignment).
+- **Consequence of violation.** Unauditable custody; conflation of custody status with a coverage
+  term (the removed `reassigned`-as-coverage error); broken provenance.
 
 ### I9 — Every reassignment has complete provenance.
 
@@ -142,9 +173,9 @@ point, planned test stage, and consequence of violation.
 - **Scope.** Range reassignment.
 - **Required inputs.** Reassignment events with all required fields.
 - **Enforcement point.** Logging inside the range-reassignment procedure.
-- **Planned test stage.** Stage 2.
-- **Consequence of violation.** Unauditable coverage; provenance gaps; I8 reconciliation
-  becomes impossible.
+- **Planned test stage.** Stage 4 (range leases and reassignment).
+- **Consequence of violation.** Unauditable coverage; provenance gaps; I8a/I8b (coverage /
+  custody) reconciliation becomes impossible.
 
 ### I10 — Reserve activation does not create overlap.
 
@@ -154,7 +185,7 @@ point, planned test stage, and consequence of violation.
 - **Required inputs.** Reserve-promotion request; current valid active-assignment set.
 - **Enforcement point.** Overlap guard in the reserve-activation procedure (shares the I1
   predicate).
-- **Planned test stage.** Stage 2.
+- **Planned test stage.** Stage 3 (reserve activation) with Stage 5 (adversarial reserve cases).
 - **Consequence of violation.** Overlap introduced during recovery; duplicate coverage; I1
   and I13 violated exactly when the protocol is under floor stress.
 
@@ -167,7 +198,8 @@ point, planned test stage, and consequence of violation.
 - **Required inputs.** Early-stop certificate; round target; retained progress commitments.
 - **Enforcement point.** Guard in the early-stop-verification procedure, evaluated before any
   transition out of `HASHING` toward stopping.
-- **Planned test stage.** Stage 4.
+- **Planned test stage.** Stage 4 (early-stop certificate verification) with Stage 5 (adversarial
+  false-certificate / halting tests).
 - **Consequence of violation.** Forced premature stop (a halting attack); coverage abandoned;
   direct security degradation.
 
@@ -179,7 +211,8 @@ point, planned test stage, and consequence of violation.
 - **Required inputs.** Difficulty parameter; round configuration.
 - **Enforcement point.** Set at round initialisation and template commitment; held constant
   thereafter.
-- **Planned test stage.** Stage 2 (configuration invariant), rechecked in every later stage.
+- **Planned test stage.** Stage 2 (configuration invariant), rechecked through the Stage 7 freeze
+  and execution and every later stage.
 - **Consequence of violation.** Difficulty variation confounds the energy and security
   comparison; A1 and ΔE are no longer comparable across rounds.
 
@@ -188,10 +221,11 @@ point, planned test stage, and consequence of violation.
 - **Formal statement.** Every physical hashing execution maps to at most one credited
   `(miner, range, nonce)` coverage record; shared or duplicated executions are de-duplicated
   so that neither coverage nor energy is credited twice.
-- **Scope.** Coverage accounting and energy accounting (couples to I1, I8, I10).
+- **Scope.** Coverage accounting and energy accounting (couples to I1, I8a, I10).
 - **Required inputs.** Execution-to-assignment mapping; de-duplication keys.
 - **Enforcement point.** De-duplication step in coverage/energy accounting.
-- **Planned test stage.** Stage 3 (energy) with Stage 2 (coverage).
+- **Planned test stage.** Stage 2 (coverage and complete energy accounting), with execution-level
+  de-duplication rechecked at Stage 7.
 - **Consequence of violation.** Inflated coverage or energy; ΔE and the A1 comparison
   corrupted.
 
@@ -203,7 +237,8 @@ point, planned test stage, and consequence of violation.
 - **Scope.** Results recording; dataset integrity.
 - **Required inputs.** Round outcome records.
 - **Enforcement point.** Results-recording / dataset-assembly step.
-- **Planned test stage.** Stage 5 (with Stage 3 accounting).
+- **Planned test stage.** Stage 8 (statistical analysis; dataset retention enforced from the
+  Stage 7 execution).
 - **Consequence of violation.** Survivorship bias; skewed energy and rate statistics.
 
 ### I15 — Undefined block-normalised metrics remain NA.
@@ -213,7 +248,7 @@ point, planned test stage, and consequence of violation.
 - **Scope.** Metrics computation and reporting.
 - **Required inputs.** Block counts; metric numerators.
 - **Enforcement point.** Metrics-computation step.
-- **Planned test stage.** Stage 5.
+- **Planned test stage.** Stage 8 (statistical analysis).
 - **Consequence of violation.** Fabricated or biased normalised metrics; misleading
   energy-per-block figures.
 
@@ -226,7 +261,8 @@ point, planned test stage, and consequence of violation.
 - **Required inputs.** Floor/threshold evaluations; breach events; recovery logs.
 - **Enforcement point.** Security-floor-evaluation step plus the results-recording step
   (pairs with the `SECURITY_RECOVERY` responses in the failure table).
-- **Planned test stage.** Stage 4 (breach behaviour) with Stage 5 (reporting integrity).
+- **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
+  Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest
   reporting of the reduced-participation regime.
 
@@ -236,22 +272,23 @@ point, planned test stage, and consequence of violation.
 
 | ID | one-line statement | primary test stage | primary enforcement point |
 |---|---|---|---|
-| I1 | No overlap among valid active assignments | Stage 2 | assignment / reassignment overlap guard |
-| I2 | Accepted solution lies in signer's valid assignment | Stage 2 (+4) | acceptance predicate |
-| I3 | Accepted solution matches current RoundID/TemplateID | Stage 2 | acceptance + commitment check |
-| I4 | No early LOW_POWER_LISTEN without exhaustion/revocation | Stage 2 (+3) | listen-transition guard |
-| I5 | Non-negative durations reconcile to horizon T | Stage 3 | duration reconciliation |
-| I6 | State energies sum to per-miner energy | Stage 3 | per-miner aggregation |
-| I7 | Per-miner energies sum to network energy | Stage 3 | network aggregation |
-| I8 | Range accounting partitions the domain exactly | Stage 2 | range reconciliation |
-| I9 | Reassignments carry complete provenance | Stage 2 | reassignment logging |
-| I10 | Reserve activation adds no overlap | Stage 2 | reserve-activation guard |
-| I11 | No termination without target verification | Stage 4 | early-stop verification guard |
+| I1 | No overlap among valid active assignments | Stage 2 (+4) | assignment / reassignment overlap guard |
+| I2 | Accepted solution lies in signer's valid assignment | Stage 2 (+4/5) | acceptance predicate |
+| I3 | Accepted solution matches current RoundID/TemplateID | Stage 2 (+4/5) | acceptance + commitment check |
+| I4 | No early LOW_POWER_LISTEN without exhaustion/revocation | Stage 2 (+4) | listen-transition guard |
+| I5 | Non-negative durations reconcile to horizon T | Stage 2 (+3) | duration reconciliation |
+| I6 | State energies sum to per-miner energy | Stage 2 (+3) | per-miner aggregation |
+| I7 | Per-miner energies sum to network energy | Stage 2 | network aggregation |
+| I8a | Coverage states partition the assigned domain exactly | Stage 2 (+4) | coverage-state reconciliation |
+| I8b | Custody / provenance model (orthogonal to coverage) | Stage 4 | custody / lineage tracking |
+| I9 | Reassignments carry complete provenance | Stage 4 | reassignment logging |
+| I10 | Reserve activation adds no overlap | Stage 3 (+5) | reserve-activation guard |
+| I11 | No termination without target verification | Stage 4 (+5) | early-stop verification guard |
 | I12 | Difficulty fixed in confirmatory design | Stage 2 (all) | round init / commitment |
-| I13 | No double-counting of shared executions | Stage 3 (+2) | accounting de-duplication |
-| I14 | Zero-block outcomes retained | Stage 5 (+3) | results recording |
-| I15 | Undefined block-normalised metrics are NA | Stage 5 | metrics computation |
-| I16 | Floor breaches recorded, never silently repaired | Stage 4 (+5) | floor eval + recording |
+| I13 | No double-counting of shared executions | Stage 2 (+7) | accounting de-duplication |
+| I14 | Zero-block outcomes retained | Stage 8 (+7) | results recording |
+| I15 | Undefined block-normalised metrics are NA | Stage 8 | metrics computation |
+| I16 | Floor breaches recorded, never silently repaired | Stage 3 (+5/8) | floor eval + recording |
 
 No invariant above is asserted to hold in any implementation at Stage 1; each is a
 specification target with a planned verification stage.

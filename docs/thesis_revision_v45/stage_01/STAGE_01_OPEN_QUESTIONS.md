@@ -82,19 +82,26 @@ the **Stage-2 default** where blocking.
 - **Stage-2 default.** After departure, the remaining horizon is counted as `OFFLINE` at
   `P_offline`, so every miner's durations sum exactly to `T` (`I5`).
 
-### Q5 — Lease-expiry effect on already-committed progress
-- **Why it matters.** Determines whether a range's searched measure survives lease expiry and
-  reassignment; drives `I8` accounting and possible re-search.
-- **Candidate options.** (a) retain last accepted progress commitment as searched; (b) reset
-  the range to unsearched on expiry; (c) retain only if renewed by the same miner.
+### Q5 — Lease-expiry effect on already-committed progress (coverage state vs. custody)
+- **Why it matters.** Determines whether a range's `searched` coverage state survives lease
+  expiry and reassignment; drives the `I8a` coverage-state partition
+  (`searched` / `active_unsearched` / `inactive_unsearched`), the `I8b` custody status of the
+  range (`{original, renewed, reassigned, revoked, expired, abandoned}`), and possible re-search.
+- **Candidate options.** (a) the `searched` coverage state persists across the custody change;
+  (b) reset the range to unsearched on expiry; (c) retain only if renewed by the same miner.
 - **Scientific risk.** Discarding valid progress double-charges active power-time; retaining
   unverifiable progress overstates coverage.
 - **Implementation dependency.** Assignment ledger; reassignment provenance.
-- **Stage where resolved.** Stage 2 (range accounting).
+- **Stage where resolved.** Stage 2 (coverage-state accounting; lease/reassignment cases at
+  Stage 4).
 - **Stage-2-blocking?** **YES** (range validity).
-- **Stage-2 default.** Adopt (a): retain the last *accepted* progress commitment as searched and
-  carry it as `prior_progress_commitment` in the reassignment record (`I9`); only the
-  uncommitted remainder returns to unsearched. No double credit (`I13`).
+- **Stage-2 default.** Adopt (a) under the `I8a`/`I8b` split: coverage and custody are
+  **orthogonal**, so a position's `searched` coverage state (`I8a`) persists when the range's
+  custody status becomes `expired` then `reassigned` (`I8b`); the last *accepted* progress
+  commitment is retained as `searched` and carried as `prior_progress_commitment` in the
+  reassignment record (`I9`). Only the uncommitted remainder is `active_unsearched` /
+  `inactive_unsearched`. `reassigned` is a custody status, never an additive coverage term. No
+  double credit (`I13`).
 
 ### Q6 — Overlap-resolution precedence for assignment conflicts
 - **Why it matters.** When two assignments would overlap, the protocol must deterministically
@@ -122,17 +129,25 @@ the **Stage-2 default** where blocking.
   `I12`); the zero-block outcome is still retained (`I14`) with `NA` block-normalised metrics
   (`I15`). `ROUND_ABORTED` is used only for unrecoverable conditions.
 
-### Q8 — Tie-break rule for conflicting valid solutions
+### Q8 — Accepted-solution rule for competing valid solutions (network arrival)
 - **Why it matters.** Determines which of several valid blocks is accepted, i.e. how the round
   terminates.
-- **Candidate options.** (a) first received; (b) deterministic order on
-  `(TemplateID, nonce, MinerID)`; (c) coordinator choice.
-- **Scientific risk.** "First received" is non-deterministic in simulation and irreproducible.
-- **Implementation dependency.** Valid-block acceptance procedure.
+- **Candidate options.** (a) network-arrival: accept the earliest valid arrival by a reproducible
+  propagation time; (b) a global-oracle deterministic order on `(TemplateID, nonce, MinerID)`;
+  (c) coordinator choice.
+- **Scientific risk.** A global-oracle ordering asserts a chain-wide fork-choice the model does
+  not establish; "first received" without a reproducible arrival time is non-deterministic in
+  simulation and irreproducible.
+- **Implementation dependency.** Valid-block acceptance procedure; reproducible
+  propagation/arrival-time model.
 - **Stage where resolved.** Stage 2.
 - **Stage-2-blocking?** **YES** (round termination).
-- **Stage-2 default.** Accept the solution with the smallest `(TemplateID, nonce, MinerID)`
-  tuple; record the others as `competing_valid`. Deterministic and satisfies `I2`/`I3`.
+- **Stage-2 default.** Adopt (a) **network-arrival semantics**: each valid solution receives a
+  reproducible propagation/arrival time; local acceptance takes the **earliest valid arrival**;
+  the other valid solutions are recorded as `competing`/`stale`. Only exact arrival-time ties
+  break deterministically by smallest `candidate_hash`, then smallest `MinerID`. Deterministic and
+  reproducible; satisfies `I2`/`I3`; **no chain-wide fork-choice proof is claimed**. The former
+  global-oracle rule ("smallest `(TemplateID, nonce, MinerID)`") is **not** used.
 
 ### Q9 — Definition and cadence of the security floors
 - **Why it matters.** Fixes when `SECURITY_RECOVERY` triggers; three distinct floors exist
@@ -176,8 +191,9 @@ the **Stage-2 default** where blocking.
   active assignments to it; a committed template is never mutated in place. Satisfies `I3`.
 
 ### Q12 — Progress-commitment granularity (interval between commitments)
-- **Why it matters.** Sets the resolution of the searched/unsearched measure and thus `I8`
-  accounting and reassignment carry-over.
+- **Why it matters.** Sets the resolution of the searched-vs-unsearched measure and thus the
+  `I8a` coverage-state accounting (`searched` / `active_unsearched` / `inactive_unsearched`) and
+  reassignment carry-over.
 - **Candidate options.** (a) fixed nonce-count interval; (b) fixed time interval; (c) adaptive.
 - **Scientific risk.** Too coarse a granularity loses coverage detail and can mask false
   exhaustion; adaptive granularity complicates reproducibility.

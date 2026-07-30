@@ -45,28 +45,33 @@ one of these states.
 
 ### 1.3 Energy accounting convention (normative)
 
-Per-miner energy follows the normative model of `STAGE_01_PROTOCOL_SCOPE.md` §0.3:
+Per-miner energy follows the normative state-complete model of
+`STAGE_01_PROTOCOL_SCOPE.md` §0.3 and the canonical state-to-power mapping of
+`STAGE_01_ENERGY_MODEL_SPECIFICATION.md` §1.0:
 
-    E_i = P_hash,i * t_hash,i
-        + P_listen,i * t_listen,i
-        + P_wake,i * t_wake,i
-        + P_offline,i * t_offline,i
+    E_i = Σ_{s∈States} (P_{i,s} · t_{i,s})
         + E_transition,i
         + E_coordination,i
+        + E_verification,i
 
-Each state maps to exactly one **residency power term** (the term whose duration variable
-accrues while the miner sits in that state). Crossing a state boundary may additionally
-charge a **one-shot** `E_transition,i` increment and/or an `E_coordination,i` increment for
-the messaging required to effect the transition. Per invariant **I5**, all state durations
-are ≥ 0 and reconcile to the fixed horizon `T`:
-`t_hash,i + t_listen,i + t_wake,i + t_offline,i = T` for each miner over the horizon (with
-`REGISTERED`, `RESERVE`, `EXHAUSTED_PENDING`, and `DISQUALIFIED` residency mapped onto these
-four terms as declared per state below).
+over the eight miner states. Each state maps to **exactly one residency power** per the
+canonical mapping: `REGISTERED = P_registered` (= `P_listen`); `RESERVE = P_reserve`
+(= `P_listen`; low-power standby, **not** `P_offline`); `ACTIVE_HASHING = P_hash`;
+`EXHAUSTED_PENDING = P_hash` (short transient); `LOW_POWER_LISTEN = P_listen`;
+`WAKING = P_wake`; `OFFLINE = P_offline`; `DISQUALIFIED = P_offline`. Crossing a state
+boundary may additionally charge a **one-shot** `E_transition,i` increment and/or an
+`E_coordination,i` increment for the messaging required to effect the transition;
+`E_verification,i` is a **separate event-energy term** for validating a received early-stop
+certificate (see §1.5). Per invariant **I5**, all state durations are ≥ 0 and reconcile to
+the fixed horizon `T`: `Σ_{s∈States} t_{i,s} = T` for each miner over the horizon, with **no
+residual / `t_other` bucket** — every instant is charged to exactly one of the eight states.
 
 **Only `ACTIVE_HASHING` contributes to the active hash rate.** No other state adds to
-`H_active(t)`. Consistent with the accepted baseline and A1, partitioning the nonce domain
-does not by itself reduce fixed-horizon energy; the idle policy reduces energy only by
-reducing summed active power-time `Σ_i P_hash,i * t_hash,i`.
+`H_active(t)` — in particular `EXHAUSTED_PENDING`, although it draws `P_hash` for its short
+transient, contributes **nothing** to `H_active(t)`. Consistent with the accepted baseline
+and A1, partitioning the nonce domain does not by itself reduce fixed-horizon energy; the
+idle policy reduces energy only by reducing summed active power-time
+`Σ_i P_hash,i * t_hash,i`.
 
 ### 1.4 Security accounting convention
 
@@ -85,6 +90,14 @@ certificates of scope §B). It is never a cryptographic proof of range exhaustio
 **I11** forbids any false or unverified early-stop message from ending hashing: a transition
 out of active hashing on grounds of exhaustion requires target verification over the
 assigned range and MUST NOT be effected by an unverified early-stop assertion.
+
+**Verification-time state rule (CR2).** A miner receiving an unverified early-stop
+certificate **remains in `ACTIVE_HASHING`**; it continues hashing while verifying; it
+remains included in `H_active(t)`; verification energy is recorded separately as
+`E_verification` (a clearly identified coordination/verification energy increment), added on
+top of the `ACTIVE_HASHING` residency energy and **not double-counted**; only after **all**
+certificate-validation steps pass may the miner leave `ACTIVE_HASHING`; a failed certificate
+produces **no** hashing-state transition. **No `VERIFYING` miner state is introduced.**
 
 ### 1.6 Difficulty convention
 
@@ -116,9 +129,9 @@ accounting model. No incentive-compatibility or fairness property is asserted (s
 - **Allowed network messages.** Registration acknowledgement, capability advertisement,
   heartbeat, and receipt of an assignment offer or reserve-admission notice. It may NOT
   emit solutions, progress commitments, or early-stop certificates.
-- **Residency power term.** `P_offline,i` (no active draw); registration messaging charges
-  `E_coordination,i`. (Mapped onto the offline duration term for I5 reconciliation as a
-  non-hashing, non-listening residency.)
+- **Residency power term.** `P_registered,i` (= `P_listen,i`; low-power admitted residency
+  per the canonical mapping, **not** `P_offline`); registration messaging charges
+  `E_coordination,i`.
 - **Active-hash-rate contribution.** None.
 - **May hold/act on a new range.** No. An assignment offer directed at a `REGISTERED` miner
   does not grant an active range in place; it triggers the transition to `WAKING`, where the
@@ -148,8 +161,8 @@ accounting model. No incentive-compatibility or fairness property is asserted (s
 - **Allowed network messages.** Reserve heartbeat/liveness, readiness advertisement, and
   receipt of an activation notice. No solutions, progress commitments, or early-stop
   certificates.
-- **Residency power term.** `P_listen,i` (light standby listening for the activation
-  signal); mapped onto the listening duration term for I5.
+- **Residency power term.** `P_reserve,i` (= `P_listen,i`; low-power standby listening for
+  the activation signal, **not** `P_offline`), per the canonical mapping.
 - **Active-hash-rate contribution.** None. Reserve residency is invisible to `H_active(t)`
   until promotion completes through `WAKING` into `ACTIVE_HASHING`.
 - **May hold/act on a new range.** No while in `RESERVE`; activation binds a pending range
@@ -174,12 +187,20 @@ accounting model. No incentive-compatibility or fairness property is asserted (s
   This is the ONLY hash-rate-bearing state.
 - **Allowed computation.** Nonce search over the assigned range under the committed
   template at fixed difficulty (I12); target validation of candidate digests; maintenance
-  of the modeled progress-verification abstraction over the covered portion of the range.
+  of the modeled progress-verification abstraction over the covered portion of the range;
+  validation of a **received** early-stop certificate while continuing to hash — the miner
+  **stays in `ACTIVE_HASHING`** throughout verification and keeps contributing to
+  `H_active(t)`, charging the separate `E_verification,i` term; it may leave `ACTIVE_HASHING`
+  only after **all** certificate-validation steps pass, and a failed certificate produces
+  **no** transition (CR2).
 - **Allowed network messages.** Candidate-solution submission, progress commitments,
   verified early-stop participation, lease renewal requests, and heartbeat. All references
   MUST carry the current `RoundID` and `TemplateID` (I3).
 - **Residency power term.** `P_hash,i` (accrues `t_hash,i`). Entry from `WAKING` closes the
-  wake boundary and charges one-shot `E_transition,i`.
+  wake boundary and charges one-shot `E_transition,i`. Validating a received early-stop
+  certificate does not change the residency: the miner keeps drawing `P_hash,i` and the
+  incremental verification cost is charged **separately** as `E_verification,i`, not folded
+  into `P_hash·t_hash` and not double-counted (CR2).
 - **Active-hash-rate contribution.** Yes — the miner's rate is added to `H_active(t)` (and
   to `H_honest(t)` or `H_adversarial(t)` per attribution).
 - **May hold/act on a new range.** Yes. It holds its current range and may accept a
@@ -224,8 +245,9 @@ accounting model. No incentive-compatibility or fairness property is asserted (s
 - **Allowed network messages.** Submission/repair of the final progress commitment, receipt
   of an exhaustion-confirmation or revocation, receipt of a reassignment offer, and
   heartbeat. No new solutions on the exhausted range.
-- **Residency power term.** `P_listen,i` (awaiting confirmation at reduced power); entry
-  from `ACTIVE_HASHING` charges one-shot `E_transition,i`.
+- **Residency power term.** `P_hash,i` (short transient awaiting confirmation; **no idle
+  saving is credited here**), per the canonical mapping; entry from `ACTIVE_HASHING` charges
+  one-shot `E_transition,i`.
 - **Active-hash-rate contribution.** None (search on the range has ceased).
 - **May hold/act on a new range.** Yes as an offer — a reassignment offer here binds a
   pending range and routes through `WAKING` (T9); it does not resume hashing in place.
@@ -371,37 +393,39 @@ transition is described informally: each row carries a guard and an action. Colu
 `current_state | event | guard | action | next_state | energy_accounting_effect |
 security_accounting_effect | failure_result`.
 
-Notation: `∅` = pre-registration external origin; `E_transition` / `E_coordination` refer to
-the one-shot terms of the energy model; "census +rate" / "census −rate" refer to the
-miner's contribution to `H_active(t)`.
+Notation: `∅` = pre-registration external origin; `E_transition` / `E_coordination` /
+`E_verification` refer to the event-energy terms of the energy model (`E_verification` is
+charged **in-state** while a miner validates a received early-stop certificate — it is **not**
+a transition and does **not** remove the miner from `H_active(t)`, per CR2); "census +rate" /
+"census −rate" refer to the miner's contribution to `H_active(t)`.
 
 | ID | current_state | event | guard | action | next_state | energy_accounting_effect | security_accounting_effect | failure_result |
 |----|---------------|-------|-------|--------|------------|--------------------------|----------------------------|----------------|
-| T1 | `∅` (external) | RegisterRequest | Valid registration payload; `MinerID` not already `DISQUALIFIED` | Create `MinerID` record; admit to participation | `REGISTERED` | Begin `P_offline` residency; `E_coordination` for registration handshake | No change to `H_active(t)` census | Malformed/duplicate registration rejected; origin stays external (no state created) |
-| T2 | `REGISTERED` | AdmitToReserve | Reserve-pool capacity available | Mark standby; enroll in reserve pool | `RESERVE` | Switch residency `P_offline → P_listen`; `E_coordination` | No census change | If pool full, guard fails; miner remains `REGISTERED` |
-| T3 | `REGISTERED` | AssignmentOffer (WakeForAssignment) | Committed `TemplateID` exists; offered range disjoint per I1 | Bind pending assignment; begin spin-up | `WAKING` | Switch residency `P_offline → P_wake`; entry `E_transition` | No census change (not yet hashing) | Overlapping/invalid range (I1): offer rejected, miner remains `REGISTERED` |
-| T4 | `RESERVE` | ReserveActivation | Round activation event (typically from `SECURITY_RECOVERY`); offered range disjoint per I1 | Bind pending assignment; begin spin-up | `WAKING` | Switch residency `P_listen → P_wake`; entry `E_transition` | No census change yet; activation is toward raising `H_active(t)` | Invalid range (I1) or no activation event: guard fails, miner remains `RESERVE` |
+| T1 | `∅` (external) | RegisterRequest | Valid registration payload; `MinerID` not already `DISQUALIFIED` | Create `MinerID` record; admit to participation | `REGISTERED` | Begin `P_registered` (= `P_listen`) residency; `E_coordination` for registration handshake | No change to `H_active(t)` census | Malformed/duplicate registration rejected; origin stays external (no state created) |
+| T2 | `REGISTERED` | AdmitToReserve | Reserve-pool capacity available | Mark standby; enroll in reserve pool | `RESERVE` | Switch residency `P_registered → P_reserve` (both = `P_listen`); `E_coordination` | No census change | If pool full, guard fails; miner remains `REGISTERED` |
+| T3 | `REGISTERED` | AssignmentOffer (WakeForAssignment) | Committed `TemplateID` exists; offered range disjoint per I1 | Bind pending assignment; begin spin-up | `WAKING` | Switch residency `P_registered → P_wake`; entry `E_transition` | No census change (not yet hashing) | Overlapping/invalid range (I1): offer rejected, miner remains `REGISTERED` |
+| T4 | `RESERVE` | ReserveActivation | Round activation event (typically from `SECURITY_RECOVERY`); offered range disjoint per I1 | Bind pending assignment; begin spin-up | `WAKING` | Switch residency `P_reserve → P_wake`; entry `E_transition` | No census change yet; activation is toward raising `H_active(t)` | Invalid range (I1) or no activation event: guard fails, miner remains `RESERVE` |
 | T5 | `WAKING` | RampComplete | Ramp complete AND bound assignment validated disjoint per I1 and bound to current `TemplateID` | Activate range lease; start `t_hash` accrual | `ACTIVE_HASHING` | End `P_wake`; exit `E_transition`; begin `P_hash` residency | Census +rate: add miner rate to `H_active(t)` (and `H_honest(t)`/`H_adversarial(t)` by attribution) | Validation failure → wake abort to `OFFLINE` (T12); range released |
 | T6 | `ACTIVE_HASHING` | RangeReassignment | New range disjoint from all valid active assignments (I1); bound to current or refreshed `TemplateID` (I3); difficulty unchanged (I12) | Atomically release old lease; bind new lease | `ACTIVE_HASHING` | Continue `P_hash`; one-shot `E_coordination` for reassignment; no wake term | Census unchanged in magnitude; audit log records lease change | Overlap (I1) or stale template (I3): reassignment rejected; miner keeps current range |
-| T7 | `ACTIVE_HASHING` | RangeExhausted | Entire assigned range searched AND target verification confirms no valid solution ≤ target in range (I11); modeled progress-verification abstraction finalised | Freeze final progress commitment; release range for reclamation | `EXHAUSTED_PENDING` | End `P_hash`; entry `E_transition`; begin `P_listen` residency | Census −rate: remove miner rate from `H_active(t)` | Unverified early-stop (I11 violation) → `DISQUALIFIED` (T18); exhaustion NOT recorded |
-| T8 | `EXHAUSTED_PENDING` | ExhaustionConfirmed | Valid exhaustion OR revocation confirmation for the range (I4) | Release range; record confirmed exhaustion in audit log | `LOW_POWER_LISTEN` | Continue `P_listen`; one-shot `E_coordination` | No census change (already removed at T7) | No confirmation before deadline → reassign (T9) or `OFFLINE` (T13); NEVER auto-drop here (I4) |
-| T9 | `EXHAUSTED_PENDING` | ReassignAfterExhaustion | Offered range disjoint per I1; committed `TemplateID` | Bind pending reassignment; begin spin-up | `WAKING` | Switch residency `P_listen → P_wake`; entry `E_transition` | No census change yet (toward re-raising `H_active(t)`) | Invalid range (I1): offer rejected; miner remains `EXHAUSTED_PENDING` |
+| T7 | `ACTIVE_HASHING` | RangeExhausted | Entire assigned range searched AND target verification confirms no valid solution ≤ target in range (I11); modeled progress-verification abstraction finalised | Freeze final progress commitment; release range for reclamation | `EXHAUSTED_PENDING` | Continue `P_hash` residency (short `EXHAUSTED_PENDING` transient; no idle saving credited); entry `E_transition` | Census −rate: remove miner rate from `H_active(t)` | Unverified early-stop (I11 violation) → `DISQUALIFIED` (T18); exhaustion NOT recorded |
+| T8 | `EXHAUSTED_PENDING` | ExhaustionConfirmed | Valid exhaustion OR revocation confirmation for the range (I4) | Release range; record confirmed exhaustion in audit log | `LOW_POWER_LISTEN` | End `P_hash` transient; begin `P_listen` residency; one-shot `E_coordination` | No census change (already removed at T7) | No confirmation before deadline → reassign (T9) or `OFFLINE` (T13); NEVER auto-drop here (I4) |
+| T9 | `EXHAUSTED_PENDING` | ReassignAfterExhaustion | Offered range disjoint per I1; committed `TemplateID` | Bind pending reassignment; begin spin-up | `WAKING` | Switch residency `P_hash → P_wake`; entry `E_transition` | No census change yet (toward re-raising `H_active(t)`) | Invalid range (I1): offer rejected; miner remains `EXHAUSTED_PENDING` |
 | T10 | `LOW_POWER_LISTEN` | WakeRequest | Wake trigger (new-round assignment, template refresh, or `SECURITY_RECOVERY`); offered range disjoint per I1 | Bind pending assignment; begin spin-up | `WAKING` | Switch residency `P_listen → P_wake`; entry `E_transition` | No census change yet; wake is toward raising `H_active(t)` | Invalid range (I1) or absent trigger: guard fails; miner remains `LOW_POWER_LISTEN` |
 | T11 | `ACTIVE_HASHING` | Departure / HeartbeatLoss / lease-timeout unresponsive | Liveness lost past heartbeat/`lease_expiry` bound, or voluntary shutdown | Release range lease for reclamation; stop `t_hash` accrual | `OFFLINE` | End `P_hash`; begin `P_offline` residency | Census −rate: remove miner rate from `H_active(t)` | If departure is attributable to a violation instead, route to `DISQUALIFIED` (T18) |
 | T12 | `WAKING` | Departure / WakeDeadlineExpiry / ValidationAbort | Ramp not completed or bound assignment fails I1/`TemplateID` validation within wake deadline, or liveness lost | Release bound range; stop wake accrual | `OFFLINE` | End `P_wake`; begin `P_offline` residency | No census change (never entered `H_active(t)`) | Attributable violation instead → `DISQUALIFIED` (T21) |
-| T13 | `EXHAUSTED_PENDING` | Departure / HeartbeatLoss / ConfirmDeadlineExpiry | Liveness lost, or confirmation deadline expired with no reassignment offer | Release range; stop accrual | `OFFLINE` | End `P_listen`; begin `P_offline` residency | No census change (already removed at T7) | Attributable violation instead → `DISQUALIFIED` (T19) |
+| T13 | `EXHAUSTED_PENDING` | Departure / HeartbeatLoss / ConfirmDeadlineExpiry | Liveness lost, or confirmation deadline expired with no reassignment offer | Release range; stop accrual | `OFFLINE` | End `P_hash` transient; begin `P_offline` residency | No census change (already removed at T7) | Attributable violation instead → `DISQUALIFIED` (T19) |
 | T14 | `LOW_POWER_LISTEN` | Departure / HeartbeatLoss | Liveness/heartbeat lost past bound | Stop listen accrual | `OFFLINE` | End `P_listen`; begin `P_offline` residency | No census change | Attributable violation instead → `DISQUALIFIED` (T20) |
-| T15 | `RESERVE` | Departure / LivenessLoss | Standby liveness lost past bound | Remove from reserve pool | `OFFLINE` | End `P_listen`; begin `P_offline` residency | No census change | Attributable violation instead → `DISQUALIFIED` (T22) |
-| T16 | `REGISTERED` | Departure / RegistrationTTLExpiry | Idle TTL expired without admission/offer, or liveness lost | Stop accrual | `OFFLINE` | Continue/hold `P_offline` residency | No census change | Attributable violation instead → `DISQUALIFIED` (T23) |
-| T17 | `OFFLINE` | Rejoin | Valid re-registration within rejoin window; `MinerID` not `DISQUALIFIED` | Re-establish `MinerID` record | `REGISTERED` | End `P_offline` absence; resume `P_offline`-mapped registered residency; `E_coordination` | No census change | Rejoin window expired or `MinerID` disqualified: guard fails; miner remains `OFFLINE` |
+| T15 | `RESERVE` | Departure / LivenessLoss | Standby liveness lost past bound | Remove from reserve pool | `OFFLINE` | End `P_reserve` (= `P_listen`); begin `P_offline` residency | No census change | Attributable violation instead → `DISQUALIFIED` (T22) |
+| T16 | `REGISTERED` | Departure / RegistrationTTLExpiry | Idle TTL expired without admission/offer, or liveness lost | Stop accrual | `OFFLINE` | End `P_registered` (= `P_listen`); begin `P_offline` residency | No census change | Attributable violation instead → `DISQUALIFIED` (T23) |
+| T17 | `OFFLINE` | Rejoin | Valid re-registration within rejoin window; `MinerID` not `DISQUALIFIED` | Re-establish `MinerID` record | `REGISTERED` | End `P_offline` absence; begin `P_registered` (= `P_listen`) residency; `E_coordination` | No census change | Rejoin window expired or `MinerID` disqualified: guard fails; miner remains `OFFLINE` |
 | T18 | `ACTIVE_HASHING` | ProtocolViolation | Recorded violation attributable to `MinerID` (e.g. solution outside assignment I2, stale round/template I3, unverified early-stop I11) | Release lease; void pending credit; append to audit log; remove from scheduling | `DISQUALIFIED` | End `P_hash`; `E_coordination` to record; begin `P_offline` (terminal) | Census −rate: remove miner rate from `H_active(t)`; violation logged against `q_adv(t)` accounting | Terminal — no recovery |
-| T19 | `EXHAUSTED_PENDING` | ProtocolViolation | Recorded attributable violation (e.g. fabricated exhaustion, I11) | Release range; void credit; append to audit log; remove from scheduling | `DISQUALIFIED` | End `P_listen`; `E_coordination`; begin `P_offline` (terminal) | No census change (already removed at T7); violation logged | Terminal — no recovery |
+| T19 | `EXHAUSTED_PENDING` | ProtocolViolation | Recorded attributable violation (e.g. fabricated exhaustion, I11) | Release range; void credit; append to audit log; remove from scheduling | `DISQUALIFIED` | End `P_hash` transient; `E_coordination`; begin `P_offline` (terminal) | No census change (already removed at T7); violation logged | Terminal — no recovery |
 | T20 | `LOW_POWER_LISTEN` | ProtocolViolation | Recorded attributable violation (e.g. hashing-only message while listening) | Void credit; append to audit log; remove from scheduling | `DISQUALIFIED` | End `P_listen`; `E_coordination`; begin `P_offline` (terminal) | No census change; violation logged | Terminal — no recovery |
 | T21 | `WAKING` | ProtocolViolation | Recorded attributable violation | Release bound range; void credit; append to audit log | `DISQUALIFIED` | End `P_wake`; `E_coordination`; begin `P_offline` (terminal) | No census change; violation logged | Terminal — no recovery |
-| T22 | `RESERVE` | ProtocolViolation | Recorded attributable violation | Remove from reserve pool; append to audit log | `DISQUALIFIED` | End `P_listen`; `E_coordination`; begin `P_offline` (terminal) | No census change; violation logged | Terminal — no recovery |
-| T23 | `REGISTERED` | ProtocolViolation | Recorded attributable violation | Append to audit log; remove from scheduling | `DISQUALIFIED` | `E_coordination`; hold `P_offline` (terminal) | No census change; violation logged | Terminal — no recovery |
+| T22 | `RESERVE` | ProtocolViolation | Recorded attributable violation | Remove from reserve pool; append to audit log | `DISQUALIFIED` | End `P_reserve` (= `P_listen`); `E_coordination`; begin `P_offline` (terminal) | No census change; violation logged | Terminal — no recovery |
+| T23 | `REGISTERED` | ProtocolViolation | Recorded attributable violation | Append to audit log; remove from scheduling | `DISQUALIFIED` | End `P_registered` (= `P_listen`); `E_coordination`; begin `P_offline` (terminal) | No census change; violation logged | Terminal — no recovery |
 | T24 | `OFFLINE` | ViolationDiscovered | Attributable prior violation discovered while offline (e.g. equivocation) | Append to audit log; permanently bar `MinerID` | `DISQUALIFIED` | Continue `P_offline` (terminal); `E_coordination` to record | No census change; violation logged | Terminal — no recovery |
-| T25 | `RESERVE` | ReserveRelease | Administrative demotion; no active assignment held | Clear standby marker; return to neutral admitted pool | `REGISTERED` | Switch residency `P_listen → P_offline`; `E_coordination` | No census change | If a pending activation exists, release is deferred; miner remains `RESERVE` |
+| T25 | `RESERVE` | ReserveRelease | Administrative demotion; no active assignment held | Clear standby marker; return to neutral admitted pool | `REGISTERED` | Switch residency `P_reserve → P_registered` (both = `P_listen`); `E_coordination` | No census change | If a pending activation exists, release is deferred; miner remains `RESERVE` |
 
 ### 3.1 Explicitly prohibited (illegal) transitions
 

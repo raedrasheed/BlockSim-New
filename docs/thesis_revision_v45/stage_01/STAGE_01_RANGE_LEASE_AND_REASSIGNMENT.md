@@ -30,10 +30,11 @@ in reserve — and therefore the precondition for reducing active participation 
 regions of the nonce domain permanently unsearched.
 
 This document specifies the lifecycle of a lease and the provenance rules that make
-reassignment auditable. It defines the reconciliation invariant (I8), the provenance invariant
-(I9), and the rules governing whether previously searched positions may be searched again. It
-does NOT specify reward or penalty values (see `STAGE_01_REWARD_PENALTY_INTERFACE.md`), nor the
-progress-verification interface itself (see `STAGE_01_PROGRESS_VERIFICATION_ABSTRACTION.md`).
+reassignment auditable. It defines the coverage-state partition (I8a), the orthogonal
+custody/provenance model (I8b), the provenance invariant (I9), and the rules governing whether
+previously searched positions may be searched again. It does NOT specify reward or penalty values
+(see `STAGE_01_REWARD_PENALTY_INTERFACE.md`), nor the progress-verification interface itself (see
+`STAGE_01_PROGRESS_VERIFICATION_ABSTRACTION.md`).
 
 ---
 
@@ -210,47 +211,80 @@ coverage is counted at most once per position per `(RoundID, TemplateID)`.
 
 ---
 
-## 8. Reconciliation invariant (I8)
+## 8. Coverage-state partition (I8a) and custody/provenance model (I8b)
 
-**Invariant I8 — assignment accounting reconciles.** For every range within a
-`(RoundID, TemplateID)`, and in aggregate across the round's nonce domain, the assignment
+Assignment accounting uses **two orthogonal models** of every position: a **coverage state**
+(how far the position has been searched) and a **custody status** (the lineage/event history of
+the position's leases). They are reconciled **separately**; a custody status is NOT an additive
+term in the coverage equation.
+
+### 8.1 Coverage-state partition (I8a)
+
+**Invariant I8a — coverage states partition the assigned domain.** For every range within a
+`(RoundID, TemplateID)`, and in aggregate across the round's assigned domain, the coverage
 accounting MUST reconcile exactly:
 
 ```
-searched + unsearched + inactive + reassigned = assigned
+searched + active_unsearched + inactive_unsearched = assigned_domain
 ```
 
 where, for the scope being reconciled:
 
-- **assigned** — total positions placed under assignment (the union of leased ranges);
+- **assigned_domain** — total positions placed under assignment (the union of leased ranges);
 - **searched** — positions counted as searched under reliable, provenance-complete checkpoints
   (counted at most once per position per template, per Section 7);
-- **unsearched** — positions under a live lease not yet within a searched prefix;
-- **inactive** — positions whose custody has lapsed (expired, abandoned, or revoked) and that
-  are not currently under any live lease and not yet reassigned;
-- **reassigned** — positions currently transferred to a successor lease under a
-  provenance-complete reassignment (I9).
+- **active_unsearched** — positions under a **live** lease not yet within a searched prefix;
+- **inactive_unsearched** — positions not currently under any live lease and not yet searched
+  (their custody has lapsed — expired, abandoned, or revoked — or they await (re)assignment).
 
-The four right-hand terms MUST be mutually exclusive and collectively exhaustive over `assigned`
-at every reconciliation point. A position is in exactly one of the four categories at any instant.
+The three coverage categories MUST be **pairwise disjoint** and **collectively exhaustive** over
+`assigned_domain` at every reconciliation point. A position is in exactly one coverage state at
+any instant.
 
-### 8.1 No gap or overlap may be hidden by aggregate counts
+### 8.2 No gap or overlap may be hidden by aggregate counts
 
-The equality of I8 is necessary but NOT sufficient. Reconciliation MUST hold **positionally**,
+The equality of I8a is necessary but NOT sufficient. Reconciliation MUST hold **positionally**,
 not merely in aggregate:
 
-- **No hidden gap.** No position within `assigned` may be absent from all four categories. A
-  position that is neither searched, nor under a live lease (unsearched), nor inactive, nor
-  reassigned is an accounting gap and is prohibited — even if the aggregate totals happen to sum
-  correctly.
-- **No hidden overlap.** No position may be counted in more than one category, and no position
-  may be under two live leases at once (custody is exclusive, Section 3.1). In particular a
-  reassigned suffix MUST NOT remain counted as unsearched under the superseded lease.
+- **No hidden gap.** No position within `assigned_domain` may be absent from all three coverage
+  categories. A position that is neither searched, nor under a live lease (`active_unsearched`),
+  nor `inactive_unsearched` is an accounting gap and is prohibited — even if the aggregate totals
+  happen to sum correctly.
+- **No hidden overlap.** No position may be counted in more than one coverage category, and no
+  position may be under two live leases at once (custody is exclusive, Section 3.1). In particular
+  a reassigned suffix MUST NOT remain counted as `active_unsearched` under the superseded lease.
 
 Because compensating errors can make aggregate sums balance while a gap in one region is masked
-by an overlap in another, I8 is enforced against the position-level partition of each range —
+by an overlap in another, I8a is enforced against the position-level partition of each range —
 via `range_start`/`range_end` boundaries and the provenance lineage — and not against totals
 alone. Aggregate counts are a summary of the positional partition, never a substitute for it.
+
+### 8.3 Custody/provenance model (I8b), orthogonal to coverage
+
+**Invariant I8b — custody/provenance is orthogonal to coverage.** Independently of its coverage
+state, each assignment (and hence each position it covers) carries a custody/lineage status in:
+
+```
+{original, renewed, reassigned, revoked, expired, abandoned}
+```
+
+- **original** — the first assignment of the range in its lineage (`previous_assignment_reference
+  = null`);
+- **renewed** — custody extended to the **same** holder past `lease_expiry` (Section 3.3);
+- **reassigned** — custody transferred to a **different** holder (Section 5.3);
+- **revoked** — custody withdrawn by the authority before `lease_expiry` (Section 5.2);
+- **expired** — custody lapsed at `lease_expiry` without renewal (Section 3.2);
+- **abandoned** — custody relinquished by the holder ceasing sanctioned progress (Section 5.1).
+
+These are custody/lineage properties and **MUST NOT** appear as additive terms in the coverage
+equation of I8a. In particular, **`reassigned` is NOT a coverage term**: a reassigned position
+still has an **independent coverage state** (`searched`, `active_unsearched`, or
+`inactive_unsearched`). For example, a position searched under a prior holder whose custody is
+now `reassigned` to a successor remains `searched` in the coverage partition; a position whose
+unsearched suffix is `reassigned` to a live successor lease is `active_unsearched`. Custody
+explains *who holds (or held) the lease and why custody changed*; coverage explains *how much of
+the position has been searched*. The two models are reconciled separately and are never summed
+together.
 
 ---
 
@@ -261,9 +295,12 @@ alone. Aggregate counts are a summary of the positional partition, never a subst
 - **Assignment object fields:** `RoundID`, `TemplateID`, `AssignmentID`, `MinerID`,
   `range_start`, `range_end`, `range_size`, `lease_start`, `lease_expiry`, `assignment_version`,
   `previous_assignment_reference`, `signature/authentication`.
-- **Invariants used here:** **I8** (assignment accounting reconciles:
-  searched + unsearched + inactive + reassigned = assigned, positionally with no hidden gap or
-  overlap); **I9** (every reassignment has full provenance).
+- **Invariants used here:** **I8a** (coverage states partition the assigned domain:
+  searched + active_unsearched + inactive_unsearched = assigned_domain, positionally with no
+  hidden gap or overlap); **I8b** (custody/provenance model
+  `{original, renewed, reassigned, revoked, expired, abandoned}`, orthogonal to coverage — a
+  reassigned position keeps an independent coverage state, and `reassigned` is never an additive
+  coverage term); **I9** (every reassignment has full provenance).
 - **Related documents:** `STAGE_01_PROTOCOL_SCOPE.md`,
   `STAGE_01_PROGRESS_VERIFICATION_ABSTRACTION.md`, `STAGE_01_EARLY_STOP_CERTIFICATE.md`,
   `STAGE_01_REWARD_PENALTY_INTERFACE.md`.

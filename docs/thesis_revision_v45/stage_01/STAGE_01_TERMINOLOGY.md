@@ -36,6 +36,18 @@ Catalogue" denotes the separate document defining I1..I16.
 | lease_expiry | Timestamp | The time at which a range lease ceases to be effective, permitting reclamation or reassignment of the range. | Scope §B.5 |
 | Searched prefix | Subrange | The leading portion of an assigned range that a miner has already searched (covered), bounded above by the miner's progress frontier. | This document (§1) |
 | Unsearched suffix | Subrange | The trailing portion of an assigned range not yet searched, i.e. the complement of the searched prefix within the range. | This document (§1) |
+| assigned_domain | Position set | The positions placed under assignment for a `(RoundID, TemplateID)` (the union of leased ranges); the domain reconciled by the I8a coverage-state partition. | This document (§1) |
+| Coverage state | Per-position classification | Exactly one of `searched`, `active_unsearched`, or `inactive_unsearched`; the three partition `assigned_domain` exactly and are pairwise disjoint (I8a). Orthogonal to custody status (I8b). | This document (§1) |
+| searched | Coverage state | Positions counted as searched under reliable, provenance-complete checkpoints (counted at most once per position per template). A coverage state, not a custody status. | This document (§1) |
+| active_unsearched | Coverage state | Positions under a live lease not yet within a searched prefix. | This document (§1) |
+| inactive_unsearched | Coverage state | Positions not under any live lease and not yet searched (custody lapsed — expired, abandoned, or revoked — or awaiting (re)assignment). | This document (§1) |
+| Custody status | Per-assignment lineage status | Exactly one of `{original, renewed, reassigned, revoked, expired, abandoned}` (I8b): the lineage/event history of an assignment. Orthogonal to coverage state and NOT an additive coverage term. | This document (§1) |
+| original | Custody status | First assignment of a range in its lineage (`previous_assignment_reference = null`). | This document (§1) |
+| renewed | Custody status | Custody extended to the SAME holder past `lease_expiry`. | This document (§1) |
+| reassigned | Custody status | Custody transferred to a DIFFERENT holder. A custody status, never a coverage term; a reassigned position keeps its own independent coverage state. | This document (§1) |
+| revoked | Custody status | Custody withdrawn by the authority before `lease_expiry`. | This document (§1) |
+| expired | Custody status | Custody lapsed at `lease_expiry` without renewal. | This document (§1) |
+| abandoned | Custody status | Custody relinquished by the holder ceasing sanctioned progress on a live lease. | This document (§1) |
 | REGISTERED | Miner state (1 of 8) | Miner is admitted to PoCol with a MinerID but is not described by any more specific active/reserve/idle state. Mutually exclusive with the other seven miner states. | Preamble; Scope §E |
 | RESERVE | Miner state (2 of 8) | Registered and available but not currently assigned an active range; draws no active hashing power until promoted. | Preamble; Scope §B.2, §E |
 | ACTIVE_HASHING | Miner state (3 of 8) | Miner is actively hashing an assigned range. The ONLY state that contributes to the active hash rate and to the P_hash·t_hash term. | Preamble; Scope §0.3, §E |
@@ -62,16 +74,40 @@ Catalogue" denotes the separate document defining I1..I16.
 | Reserve miner | Miner in RESERVE | A registered miner held in RESERVE: available but not actively hashing, promotable to ACTIVE_HASHING when needed. | Scope §B.2 |
 | Wake latency | Duration [s] | The delay a miner incurs while in WAKING before it resumes ACTIVE_HASHING after leaving a reduced-power state. | Scope §B.3 |
 | Transition | Event / energy term | A change of miner state that carries a transition energy cost E_transition,i (e.g. entering/leaving low-power or waking). | Scope §0.3, §B.3 |
-| Coordination energy | E_coordination,i [J] | Per-miner energy attributed to protocol coordination (assignment, leasing, commitments, certificates), distinct from hashing, listening, wake, and offline terms. | Scope §0.3 |
+| Coordination energy | E_coordination,i [J] | Per-miner energy attributed to protocol coordination (assignment, leasing, commitments, certificates), distinct from the eight state-residency energies and from the transition (`E_transition`) and verification (`E_verification`) event terms. | Scope §0.3 |
+| E_verification | E_verification,i [J] | Separate per-miner event-energy term for verifying an early-stop certificate, added on top of the `ACTIVE_HASHING` residency energy and NOT folded into `P_hash·t_hash` (so not double-counted). A verifying miner remains in `ACTIVE_HASHING`; no `VERIFYING` state exists. | This document (§1) |
+| Residency power (per state) | P_state [W] | One residency power per miner state (state-to-power mapping): `P_registered`, `P_reserve`, `P_hash`, `P_listen`, `P_wake`, `P_offline`, ordered `P_offline ≤ P_listen = P_reserve = P_registered ≤ P_hash`, with `P_wake` a transient. No numeric values at Stage 1. Per-miner energy is `E_i = Σ_s (P_{i,s}·t_{i,s}) + E_transition,i + E_coordination,i + E_verification,i` over the eight states, `Σ_s t_{i,s} = T`, no residual. | This document (§1) |
+| P_registered | Residency power [W] | Residency power of a `REGISTERED` miner; equals `P_listen`. Does not contribute to `H_active(t)`. | This document (§1) |
+| P_reserve | Residency power [W] | Residency power of a `RESERVE` miner: low-power standby equal to `P_listen`, NOT `P_offline`. Does not contribute to `H_active(t)`. | This document (§1) |
+| P_hash | Residency power [W] | Residency power of an `ACTIVE_HASHING` miner (and of the transient `EXHAUSTED_PENDING`); the only residency power whose state contributes to `H_active(t)`. | This document (§1) |
+| P_listen | Residency power [W] | Residency power of a `LOW_POWER_LISTEN` miner, and the shared low-power level for `REGISTERED` and `RESERVE`. | This document (§1) |
+| P_wake | Residency power [W] | Transient residency power of a `WAKING` miner while resuming hashing. | This document (§1) |
+| P_offline | Residency power [W] | Residency power of an `OFFLINE` (or `DISQUALIFIED`) miner. | This document (§1) |
 | Progress commitment | Attestation object | A miner-emitted attestation of how far its assigned range has been searched. Treated ONLY as a modeled progress-verification abstraction. | Scope §B.7 |
-| Modeled progress-verification abstraction | Bounded term | The bounded, Stage-1 term for progress commitments and early-stop certificates. It is explicitly NOT a cryptographic proof and NOT a proof of range exhaustion. | Preamble; Scope §B.7, §C |
+| Modeled progress-verification abstraction | Bounded term | The bounded, Stage-1 term for progress commitments and reported range-exhaustion claims. It is explicitly NOT a cryptographic proof and NOT a proof of range exhaustion. Early-stop certificates are a SEPARATE mechanism (generated only from a found valid solution, CR1) and are NOT part of this abstraction. | Preamble; Scope §B.7, §C |
 | Checkpoint frontier | Progress marker | The boundary between the searched prefix and the unsearched suffix of a range, as attested by progress commitments; the modeled position up to which coverage is claimed. | This document (§1) |
-| Early-stop certificate | Certificate object | A modeled summary of sufficient covered progress justifying a halt to active hashing for a round before brute-force exhaustion. A modeled abstraction only; carries no security or soundness guarantee at Stage 1. | Scope §B.8, §C |
+| actual_frontier | Simulator ground truth | The true position up to which a range has actually been searched (simulator ground truth, CR5); distinct from `reported_frontier`. | This document (§1) |
+| actual_positions_evaluated | Simulator ground truth | The true count of nonce positions actually evaluated by a miner. | This document (§1) |
+| actual_solution_positions | Simulator ground truth | The true positions that actually satisfy the target within a range. | This document (§1) |
+| actual_exhaustion | Simulator ground truth | Whether a range was actually exhausted. The simulator MAY know this exactly; the modeled progress-verification abstraction does NOT prove it. | This document (§1) |
+| reported_frontier | Protocol-level claim | The frontier a miner reports having searched — a claim subject to audit, not ground truth. | This document (§1) |
+| reported_exhaustion | Protocol-level claim | A miner's reported claim of range exhaustion — subject to audit, not a proof that no valid solution exists in the range. | This document (§1) |
+| audit_selected | Protocol-level claim | Whether a reported claim was selected for audit under the modeled audit abstraction. | This document (§1) |
+| audit_result | Protocol-level claim | The outcome of the modeled audit of a reported claim (compared against ground truth in adversarial simulations). | This document (§1) |
+| claim_accepted_or_rejected | Protocol-level claim | Whether the reported claim was accepted or rejected after audit. All such findings are modeled, not cryptographically proven. | This document (§1) |
+| Early-stop certificate | Certificate object | A certificate generated ONLY after a miner finds a valid candidate solution satisfying the current target; it contains exactly RoundID, TemplateID, AssignmentID, MinerID, nonce, candidate_hash, target, signature/authentication. It is NOT generated from progress commitments, searched-domain coverage, claimed exhaustion, or a progress frontier (CR1); progress verification and early-stop certification are completely separate mechanisms. Carries no security or soundness guarantee at Stage 1. | Scope §B.8, §C |
 | Target | Threshold value | The acceptance threshold for a round: a solution is valid only if its digest satisfies the target under the committed template. | Scope §A.5 |
+| arrival_time | Reproducible time [s] | The reproducible propagation/arrival time assigned to a valid solution. Under network-arrival semantics (CR6) local acceptance takes the earliest valid arrival; only exact arrival-time ties break by smallest `candidate_hash`, then smallest `MinerID`. | This document (§1) |
+| Competing / stale proposal | Solution classification | A valid solution not accepted because another valid solution had an earlier arrival; recorded as `competing`/`stale`. No chain-wide fork-choice proof is claimed. | This document (§1) |
 | Difficulty | Fixed parameter | The parameter determining how hard the target is to satisfy. In the confirmatory design difficulty stays FIXED; dynamic-difficulty behavior is out of scope and not confirmed. | Preamble; Scope §C |
 | Template refresh | Procedure / round state | Replacement of the committed immutable template with a new immutable template (new TemplateID), transitioning through TEMPLATE_REFRESH. The only sanctioned way mined content changes. | Scope §A.7 |
 | Continuous full-participation control | Baseline scenario | The reference scenario in which all miners hash continuously over the fixed horizon. Its modeled energy is the A1 value, 8.420833333 kWh, and serves as E_continuous_control. | Preamble; Scope §0.2, §D |
-| ΔE | ΔE [kWh] | The Stage-1 comparison quantity ΔE = E_continuous_control − E_idle_policy. Defined at Stage 1; no particular achieved value is claimed. Any positive ΔE must arise from reduced active power-time, never from partitioning. | Preamble; Scope §0.3, §D |
+| ΔE | ΔE [kWh] | The Stage-1 comparison quantity ΔE = E_continuous_control − E_idle_policy. Defined at Stage 1; no particular achieved value is claimed. Any positive ΔE must arise from reduced active power-time, never from partitioning. It decomposes as `Delta_E_total = Delta_E_range_idle + Delta_E_reserve + Delta_E_early_stop − Delta_E_transition_and_wake − Delta_E_coordination_and_verification`. | Preamble; Scope §0.3, §D |
+| Delta_E_range_idle | Energy-reduction term [kWh] | Saving from miners exhausting their assigned ranges and entering `LOW_POWER_LISTEN`. | This document (§1) |
+| Delta_E_reserve | Energy-reduction term [kWh] | Saving from holding reserve miners outside active hashing (at `P_reserve`). | This document (§1) |
+| Delta_E_early_stop | Energy-reduction term [kWh] | A propagation/termination optimisation (stopping once a valid solution arrives); NOT unique to nonce-domain partitioning. | This document (§1) |
+| Delta_E_transition_and_wake | Energy-cost term [kWh] | Cost of wake and state transitions; subtracted from total saving. | This document (§1) |
+| Delta_E_coordination_and_verification | Energy-cost term [kWh] | Cost of coordination and early-stop verification (`E_coordination` + `E_verification`); subtracted from total saving. | This document (§1) |
 | Zero-block run | Run classification | A modeled run in which no block is accepted over the horizon (e.g. resolving to ROUND_EXHAUSTED without acceptance), so block-normalised metrics have no accepted block to normalise against. | This document (§1) |
 | NA (undefined block-normalised metric) | Sentinel value | The sentinel recorded for a block-normalised metric that is undefined because the run produced zero accepted blocks; NA denotes "undefined", not zero. | This document (§1) |
 | Physical run | Run classification | A modeled run evaluated under the physical/energy accounting (real-power-time terms of the energy model), as opposed to a purely abstract or block-normalised view. | This document (§1) |
@@ -87,13 +123,20 @@ Catalogue" denotes the separate document defining I1..I16.
   active-hashing population. `LOW_POWER_LISTEN`, `RESERVE`, `WAKING`, `OFFLINE`,
   `EXHAUSTED_PENDING`, `REGISTERED`, and `DISQUALIFIED` contribute nothing to the active
   hash rate.
-- **Energy attribution matches the normative model.** Each state maps to at most one power
-  term of the energy model of Scope §0.3: hashing → `P_hash·t_hash`; low-power listening →
-  `P_listen·t_listen`; waking → `P_wake·t_wake` (plus `E_transition`); offline →
-  `P_offline·t_offline`; coordination overhead → `E_coordination`.
-- **Modeled abstractions only.** "Progress commitment", "checkpoint frontier", and
-  "early-stop certificate" are all instances of the modeled progress-verification
-  abstraction. None is a cryptographic proof and none establishes range exhaustion,
+- **Energy attribution matches the state-complete model.** The energy model of Scope §0.3 is
+  state-complete: one residency power per miner state, summed over the **eight** states, with
+  `Σ_s t_{i,s} = T` and no residual bucket —
+  `E_i = Σ_s (P_{i,s}·t_{i,s}) + E_transition,i + E_coordination,i + E_verification,i`. Each state
+  maps to exactly one residency power: `REGISTERED → P_registered (= P_listen)`;
+  `RESERVE → P_reserve (= P_listen)`; `ACTIVE_HASHING → P_hash`;
+  `EXHAUSTED_PENDING → P_hash` (transient); `LOW_POWER_LISTEN → P_listen`; `WAKING → P_wake`;
+  `OFFLINE → P_offline`; `DISQUALIFIED → P_offline`. The event terms `E_transition`,
+  `E_coordination`, and `E_verification` are added on top of the residency energies and are not
+  double-counted.
+- **Modeled abstractions only.** "Progress commitment" and "checkpoint frontier" are instances of the modeled
+  progress-verification abstraction; neither is a cryptographic proof and neither establishes
+  range exhaustion. The "early-stop certificate" is a SEPARATE mechanism, generated only from a
+  found valid solution (CR1), and is NOT an instance of the progress-verification abstraction,
   security, or incentive properties at Stage 1 (Scope §C).
 - **A1 discipline.** `continuous full-participation control` equals the A1 value
   (8.420833333 kWh). `ΔE` is measured against this baseline and any reduction is

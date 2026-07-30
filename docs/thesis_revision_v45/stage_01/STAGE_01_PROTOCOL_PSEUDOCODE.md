@@ -121,7 +121,13 @@ PROCEDURE ActiveHashing
       ACCUMULATE t_hash for miner over this step               # supports I5, I6
       CONTRIBUTE this step to active hash rate                 # only ACTIVE_HASHING contributes
       IF hit:
-        candidate_solution <- (MinerID, cursor, RoundID, TemplateID)
+        # A valid candidate solution satisfying the fixed target D was found (active-hashing path).
+        candidate_hash <- modeled digest of TemplateID and cursor    # deterministic protocol logic
+        candidate_solution <- (RoundID, TemplateID, AssignmentID(assignment), MinerID,
+                               cursor AS nonce, candidate_hash, D AS target)
+        # CR1: an early-stop certificate is generated ONLY here, from a found valid solution --
+        #      NEVER from aggregated progress commitments, searched coverage, or claimed exhaustion.
+        CALL EarlyStopGenerate(RoundContext, candidate_solution)
         RETURN CALL ValidBlockAccept(RoundContext, candidate_solution)
       ADVANCE cursor
       DECREMENT step_budget
@@ -139,12 +145,33 @@ PROCEDURE RangeExhaust
   PRECONDITIONS: cursor has traversed all of range(assignment)
   EFFECTS:
     emit final ProgressCommit covering range(assignment)       # modeled progress abstraction
-    MARK range(assignment) as searched in assignment_ledger    # supports I8
-    ASSERT searched portion reconciles with progress commitments   # rejects false exhaustion
-    TRANSITION miner_state(MinerID) -> EXHAUSTED_PENDING
+    MARK range(assignment) as searched in assignment_ledger    # supports I8a
+    # CR5: separate simulator GROUND TRUTH from the PROTOCOL-LEVEL exhaustion claim.
+    SET reported_exhaustion <- miner's claim that range(assignment) is fully searched
+    # ---- honest path ----
+    # EXHAUSTED_PENDING eligibility uses ACTUAL cursor completion (simulator ground truth).
+    IF actual_exhaustion(assignment) is TRUE:                  # actual cursor completed the range
+      TRANSITION miner_state(MinerID) -> EXHAUSTED_PENDING
+    # ---- adversarial path ----
+    ELSE:
+      # reported_exhaustion is compared with ground truth through a modeled audit/detection
+      # abstraction -- NOT a cryptographic proof.
+      # ---- [SIMULATION SAMPLING] ----
+      audit_selected <- [SIMULATION SAMPLING] audit_selection_model(assignment)
+      # ---- deterministic protocol logic ----
+      IF audit_selected:
+        audit_result <- compare(reported_exhaustion, actual_exhaustion(assignment))
+        claim_accepted_or_rejected <- (audit_result = consistent)
+      ELSE:
+        claim_accepted_or_rejected <- reported_exhaustion       # unaudited claim taken as reported
+      IF claim_accepted_or_rejected:
+        TRANSITION miner_state(MinerID) -> EXHAUSTED_PENDING
+      ELSE:
+        RECORD false_exhaustion_detected(MinerID, assignment)   # NO transition to EXHAUSTED_PENDING
   RETURNS: exhaustion_record(MinerID, range, RoundID, TemplateID)
   NOTE: EXHAUSTED_PENDING is the ONLY legitimate precondition (besides explicit revocation)
-        for entering LOW_POWER_LISTEN -- see I4.
+        for entering LOW_POWER_LISTEN -- see I4. A progress commitment NEVER proves that no valid
+        solution exists in the whole range; exhaustion findings are modeled, not proven.
 ```
 
 ## 7. Transition to low-power listening
@@ -274,7 +301,13 @@ PROCEDURE RangeReassign
     CREATE assignment(to_miner, range, TemplateID, RoundID, new lease window)
     APPEND reassignment record
         (range, from_miner, to_miner, reason, timestamp, prior_pc)   # I9 complete provenance
-    UPDATE assignment_ledger so searched/unsearched/inactive/reassigned still partition domain  # I8
+    # CR4: coverage uses I8a; custody/provenance is tracked SEPARATELY as I8b.
+    UPDATE assignment_ledger so the coverage partition still holds (I8a):
+        searched + active_unsearched + inactive_unsearched = assigned_domain
+    # I8b custody/lineage status is orthogonal and is NEVER an additive coverage term.
+    SET custody_status(range) <- reassigned   # in {original, renewed, reassigned, revoked, expired, abandoned}
+    # The reassigned range retains an INDEPENDENT coverage state
+    # (searched / active_unsearched / inactive_unsearched).
   RETURNS: reassignment_record
 ```
 
@@ -285,53 +318,88 @@ PROCEDURE ProgressCommit
   INPUTS: RoundContext, assignment, cursor
   PRECONDITIONS: miner_state = ACTIVE_HASHING
   EFFECTS:
-    coverage <- portion of range(assignment) from lower bound up to cursor
-    CREATE progress_commitment(MinerID, range(assignment), coverage, RoundID, TemplateID, t)
+    # CR5: distinguish simulator GROUND TRUTH from the PROTOCOL-LEVEL claim.
+    # ---- simulator ground truth (known to the simulator, not asserted by the protocol) ----
+    actual_frontier            <- true cursor position reached in range(assignment)
+    actual_positions_evaluated <- true count of positions evaluated so far
+    actual_solution_positions  <- true set of solution-bearing positions in range (if any)
+    # ---- protocol-level claim (what the miner reports) ----
+    reported_frontier <- coverage the miner claims, from lower bound up to cursor
+    CREATE progress_commitment(MinerID, range(assignment), reported_frontier, RoundID, TemplateID, t)
     RECORD progress_commitment                                  # modeled progress-verification abstraction
-    UPDATE searched measure in assignment_ledger for this range # supports I8
+    UPDATE searched measure in assignment_ledger for this range # supports I8a
   RETURNS: progress_commitment
   NOTE: This is a MODELED PROGRESS-VERIFICATION ABSTRACTION, NOT a cryptographic proof of
-        range exhaustion. It cannot by itself justify stopping without target verification (I11).
+        range exhaustion. A progress commitment states "I claim to have searched up to this
+        frontier"; it NEVER proves that no valid solution exists in the whole range. It cannot
+        by itself justify stopping without target verification (I11).
 ```
 
 ## 15. Early-stop certificate generation
 
 ```
 PROCEDURE EarlyStopGenerate
-  INPUTS: RoundContext, coordinator_view
-  PRECONDITIONS: round_state in {HASHING, SECURITY_RECOVERY}
+  INPUTS: RoundContext, found_solution = (RoundID, TemplateID, AssignmentID, MinerID,
+          nonce, candidate_hash, target)
+  PRECONDITIONS: round_state in {HASHING, SECURITY_RECOVERY};
+                 found_solution is a valid candidate solution satisfying the current target,
+                 discovered in the ACTIVE_HASHING path (see ActiveHashing)
   EFFECTS:
-    aggregate <- combine accepted progress_commitments over nonce_domain
-    IF aggregate covers the domain sufficiently under the modeled abstraction:
-      CREATE early_stop_certificate(RoundID, TemplateID, aggregate summary, t)
-      RECORD early_stop_certificate (proposed, not yet honoured)
-    ELSE:
-      RETURN no_certificate
-  RETURNS: early_stop_certificate | no_certificate
-  NOTE: Generation alone NEVER stops hashing; it must pass EarlyStopVerify, which requires
-        target verification (I11).
+    # CR1: an early-stop certificate is generated ONLY after a miner finds a valid candidate
+    # solution satisfying the current target. It MUST NOT be generated from aggregated progress
+    # commitments, searched-domain coverage, claimed exhaustion, sufficient coverage, or a
+    # progress frontier. Progress verification and early-stop certification are completely
+    # separate mechanisms (see ProgressCommit, which is a distinct procedure).
+    ASSERT found_solution came from a found valid candidate solution     # NOT from coverage/frontier
+    CREATE early_stop_certificate CONTAINING EXACTLY:
+        RoundID                  <- found_solution.RoundID
+        TemplateID               <- found_solution.TemplateID
+        AssignmentID             <- found_solution.AssignmentID
+        MinerID                  <- found_solution.MinerID
+        nonce                    <- found_solution.nonce
+        candidate_hash           <- found_solution.candidate_hash
+        target                   <- found_solution.target
+        signature/authentication <- authenticate(found_solution.MinerID, the fields above)
+    RECORD early_stop_certificate (proposed, not yet honoured)
+  RETURNS: early_stop_certificate
+  NOTE: A progress commitment says "I claim to have searched up to this frontier." An early-stop
+        certificate says "I found this exact valid solution." Generation alone NEVER stops
+        hashing; it must pass EarlyStopVerify, which requires target verification (I11).
 ```
 
 ## 16. Early-stop verification
 
 ```
 PROCEDURE EarlyStopVerify
-  INPUTS: RoundContext, early_stop_certificate
-  PRECONDITIONS: round_state in {HASHING, SECURITY_RECOVERY}
+  INPUTS: RoundContext, early_stop_certificate, verifying_MinerID
+  PRECONDITIONS: round_state in {HASHING, SECURITY_RECOVERY};
+                 miner_state(verifying_MinerID) = ACTIVE_HASHING
   EFFECTS:
-    # I11: no termination of hashing without target verification
-    ASSERT certificate.RoundID = RoundID_current
-    ASSERT certificate.TemplateID = TemplateID_committed        # I3-style binding
-    consistent <- certificate.aggregate matches retained progress_commitments
-    target_ok  <- target verification over the certified coverage
-                  (modeled progress-verification abstraction)
-    IF consistent AND target_ok:
+    # CR2: the verifying miner REMAINS in ACTIVE_HASHING and CONTINUES hashing while verifying;
+    # it stays included in H_active(t). NO VERIFYING miner state is introduced.
+    # I11: no termination of hashing without target verification.
+    CONTINUE hashing throughout verification                    # verifier stays in H_active(t)
+    BEGIN accruing E_verification for verifying_MinerID
+        (separate coordination/verification energy increment, added ON TOP OF the ACTIVE_HASHING
+         residency energy and NOT double-counted -- t_hash still counts the full active duration)
+    step1 <- (certificate.RoundID = RoundID_current)            # I3
+    step2 <- (certificate.TemplateID = TemplateID_committed)    # I3-style binding
+    step3 <- (certificate.AssignmentID identifies a VALID CURRENT assignment held by
+              certificate.MinerID)
+    step4 <- (certificate.nonce in range(assignment(certificate.AssignmentID)))   # I2
+    step5 <- (certificate.candidate_hash is the modeled digest of TemplateID and nonce AND
+              satisfies certificate.target under fixed D)        # target verification (I11)
+    step6 <- (certificate.signature/authentication is valid for certificate.MinerID)
+    ADD the incremental verification cost to E_verification
+    IF step1 AND step2 AND step3 AND step4 AND step5 AND step6:
       MARK certificate VERIFIED
-      TRANSITION eligible ACTIVE_HASHING miners -> EXHAUSTED_PENDING (coverage complete)
+      # Only AFTER ALL certificate-validation steps pass may the verifier leave ACTIVE_HASHING.
+      TRANSITION miner_state(verifying_MinerID) -> EXHAUSTED_PENDING
       RETURN VERIFIED
     ELSE:
       RECORD false_early_stop_rejected(certificate)
-      DO NOT terminate hashing                                  # I11 upheld
+      # CR2: a failed certificate produces NO hashing-state transition; verifier stays ACTIVE_HASHING.
+      DO NOT terminate hashing; NO state transition              # I11 upheld
       RETURN REJECTED
   RETURNS: VERIFIED | REJECTED
 ```
@@ -340,26 +408,41 @@ PROCEDURE EarlyStopVerify
 
 ```
 PROCEDURE ValidBlockAccept
-  INPUTS: RoundContext, candidate_solution = (MinerID, nonce, RoundID, TemplateID)
+  INPUTS: RoundContext, candidate_solution = (RoundID, TemplateID, AssignmentID, MinerID,
+          nonce, candidate_hash, target)
   PRECONDITIONS: round_state in {HASHING, SECURITY_RECOVERY}
   EFFECTS:
-    A <- current assignment of MinerID
+    A <- assignment(candidate_solution.AssignmentID) of candidate_solution.MinerID
     ASSERT A is VALID and CURRENT
-    ASSERT nonce in range(A)                                    # I2
+    ASSERT candidate_solution.nonce in range(A)                 # I2
     ASSERT candidate_solution.RoundID = RoundID_current         # I3
     ASSERT candidate_solution.TemplateID = TemplateID_committed # I3
-    target_ok <- target verification of nonce under TemplateID and fixed D
+    target_ok <- target verification of nonce under TemplateID and fixed D, yielding
+                 candidate_hash that satisfies target
                  (modeled progress-verification abstraction)    # I11-consistent
     IF NOT target_ok:
       RETURN rejected
-    IF another VERIFIED solution already accepted this round:
-      RECORD competing_valid(candidate_solution)                # conflicting valid solutions
-      APPLY deterministic tie-break (smallest (TemplateID, nonce, MinerID))
-      IF candidate_solution not selected: RETURN not_selected
-    RECORD accepted_block(candidate_solution)
+    # CR6: competing valid solutions use NETWORK-ARRIVAL semantics.
+    # The global-oracle rule "smallest (TemplateID, nonce, MinerID)" is REMOVED as the primary
+    # accepted-solution rule.
+    SET arrival_time <- reproducible propagation/arrival time of candidate_solution
+                        (deterministic modeled propagation; reproducible)
+    RECORD candidate_solution WITH arrival_time in the round's valid-solution set
+    accepted <- the valid solution with the EARLIEST arrival_time
+    IF two or more valid solutions share the EXACT SAME earliest arrival_time:
+      # deterministic secondary rule used ONLY for exact arrival-time ties
+      accepted <- among the tied solutions, the one with smallest candidate_hash,
+                  then smallest MinerID
+    FOR EACH other valid solution s in the round's valid-solution set, s != accepted:
+      RECORD competing_valid(s)                                 # competing/stale proposals
+    IF candidate_solution != accepted:
+      RETURN not_selected
+    RECORD accepted_block(accepted)
     TRANSITION round_state -> SOLUTION_PROPAGATION
     TRANSITION round_state -> ROUND_ACCEPTED
   RETURNS: accepted_block | rejected | not_selected
+  NOTE: Local acceptance uses the earliest valid arrival; no chain-wide fork-choice proof is
+        claimed.
 ```
 
 ## 18. Full-range exhaustion without solution
@@ -367,9 +450,25 @@ PROCEDURE ValidBlockAccept
 ```
 PROCEDURE FullRangeExhaustNoSolution
   INPUTS: RoundContext
-  PRECONDITIONS: assignment_ledger shows entire nonce_domain searched (I8) AND no accepted_block
+  PRECONDITIONS: assignment_ledger shows the entire nonce_domain searched under the I8a
+                 coverage partition AND no accepted_block
   EFFECTS:
-    ASSERT searched measure = measure(nonce_domain)             # I8 reconciliation
+    # CR4: reconcile using the I8a coverage partition; custody status (I8b) is NOT a coverage term.
+    ASSERT searched measure = measure(nonce_domain)             # I8a reconciliation
+    # CR5: the protocol-level exhaustion claim (reported_exhaustion) is distinct from simulator
+    # ground truth (actual_exhaustion). No progress commitment proves that no valid solution
+    # exists in the whole range.
+    SET reported_exhaustion <- aggregate reported coverage of the nonce_domain
+    IF simulation = adversarial:
+      # ---- [SIMULATION SAMPLING] ----
+      audit_selected <- [SIMULATION SAMPLING] audit_selection_model(nonce_domain)
+      # ---- deterministic protocol logic ----
+      IF audit_selected:
+        audit_result <- compare(reported_exhaustion, actual_exhaustion(nonce_domain))
+        claim_accepted_or_rejected <- (audit_result = consistent)
+        IF NOT claim_accepted_or_rejected:
+          RECORD false_exhaustion_detected(RoundID, TemplateID)
+          RETURN CALL RoundAbort(RoundContext, reason=false_exhaustion_claim)
     TRANSITION round_state -> ROUND_EXHAUSTED
     RECORD zero_block_outcome(RoundID, TemplateID)              # retained (I14)
     MARK block-normalised metrics for this round as NA          # I15
@@ -424,6 +523,11 @@ The ONLY `[SIMULATION SAMPLING]` steps in the entire specification are:
 2. **ActiveHashRateUpdate** — the adversarial active-participation contribution
    `H_adversarial(t)`.
 3. **WakeComplete** — the wake latency draw.
+4. **RangeExhaust** and **FullRangeExhaustNoSolution** — the adversarial-path audit selection
+   (`audit_selection_model`) that decides whether a `reported_exhaustion` claim is audited
+   against simulator ground truth (`actual_exhaustion`). This is the modeled audit/detection
+   abstraction of CR5; the comparison itself (`audit_result`, `claim_accepted_or_rejected`) is
+   deterministic once the audit is selected.
 
 Every other step is deterministic protocol logic. This separation is deliberate: it keeps the
 protocol's decision logic reproducible and audit-checkable against `I1..I16`, while confining
