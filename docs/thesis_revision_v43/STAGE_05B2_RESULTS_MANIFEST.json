@@ -1,58 +1,107 @@
 {
-  "stage": "5B2",
-  "source_commit": "45361674e6278971d430a79531f7aaac5cae3281",
-  "freeze_branch": "thesis-v43-stage5b2-freeze-6",
-  "matrix_sha256": "9cb7297e7418a96fbaeb7f06c162bc8bdea1c1e049002a40344cab16cf5f6fcb",
-  "engine_version": "5b1g.2",
-  "output_schema_version": "5b1g.2",
-  "completion": {
-    "planned": 1890,
-    "completed_valid": 1890,
-    "failed_terminal": 0,
-    "invalidated_current": 0,
-    "not_started": 0
+ "stage": "5B2",
+ "source_commit": "45361674e6278971d430a79531f7aaac5cae3281",
+ "freeze_branch": "thesis-v43-stage5b2-freeze-6",
+ "matrix_sha256": "9cb7297e7418a96fbaeb7f06c162bc8bdea1c1e049002a40344cab16cf5f6fcb",
+ "engine_version": "5b1g.2",
+ "output_schema_version": "5b1g.2",
+ "completion": {
+  "planned": 1890,
+  "completed_valid": 1890,
+  "failed_terminal": 0,
+  "invalidated_current": 0,
+  "not_started": 0
+ },
+ "aggregation": {
+  "bundles": 1890,
+  "aggregated": 1890,
+  "qc_fail": 0,
+  "groups": 63,
+  "each_group_30": true,
+  "scenario_counts": {
+   "B0": 150,
+   "B1": 150,
+   "B2": 150,
+   "B3_C1_CONTINUOUS_DISJOINT": 870,
+   "C2": 570
   },
-  "aggregation": {
-    "bundles": 1890,
-    "aggregated": 1890,
-    "qc_fail": 0,
-    "groups": 63,
-    "each_group_30": true,
-    "scenario_counts": {
-      "B0": 150,
-      "B1": 150,
-      "B2": 150,
-      "B3_C1_CONTINUOUS_DISJOINT": 870,
-      "C2": 570
-    },
-    "stats": {
-      "pmg_rows": 12069400,
-      "stale_records": 26200,
-      "delivery_records": 7722695,
-      "partial_generation_runs": 1890,
-      "zero_block_runs": 142
-    },
-    "committed_output_files": 578
+  "stats": {
+   "pmg_rows": 12069400,
+   "stale_records": 26200,
+   "delivery_records": 7722695,
+   "partial_generation_runs": 1890,
+   "zero_block_runs": 142
   },
-  "group_crosschecks": {
-    "all_runs_present": true,
-    "groups_63": true,
-    "each_group_30": true,
-    "unique_run_execution": true,
-    "no_same_seed_dup": true,
-    "b3c1_shared": true,
-    "delay_only_primary_invariant": true,
-    "energy_anchor": true,
-    "zero_block_runs_present": true,
-    "no_removal": true
+  "committed_result_output_files": 462,
+  "committed_stage_docs_results1": 12,
+  "committed_total_git_files_results1": 474,
+  "committed_output_files_note": "Prior value 578 described a full-aggregate push ATTEMPT the remote rejected with HTTP 413; it never became branch history. Authoritative committed set on the results branch is 474 files (462 result outputs under results/.../stage_05b2/ + 12 stage docs under docs/thesis_revision_v43/)."
+ },
+ "group_crosschecks": {
+  "all_runs_present": true,
+  "groups_63": true,
+  "each_group_30": true,
+  "unique_run_execution": true,
+  "no_same_seed_dup": true,
+  "b3c1_shared": true,
+  "delay_only_primary_invariant": true,
+  "energy_anchor": true,
+  "zero_block_runs_present": true,
+  "no_removal": true
+ },
+ "per_run_manifest": "results/thesis_revision_v43/stage_05b2/manifests/results_manifest.json",
+ "bundle_manifest": "results/thesis_revision_v43/stage_05b2/manifests/bundle_manifest.json",
+ "output_index": "results/thesis_revision_v43/stage_05b2/manifests/output_index.csv",
+ "execution_ledger": "results/thesis_revision_v43/stage_05b2/logs/execution_ledger.jsonl",
+ "checksum_manifest": "docs/thesis_revision_v43/STAGE_05B2_CHECKSUM_MANIFEST.sha256",
+ "checksum_manifest_sha256": "349af886514c98281ecb4a40f4126ff346d66b52cfa669c2a7dee318582fe01a",
+ "results_manifest_sha256": "928ce2773235289eccbd897d027dcae9bded210d0c325bf9c7332cedbd9c1a26",
+ "thesis_docx_sha256": "2c3afdc5739109d0ea12ada96c3115d626a2188c1acbaeaa4b6020974884cbda",
+ "thesis_pdf_sha256": "131412bb2ce17ed97b98dfbefc136c7b5b226b9fd7372e79a25e4b0dc057e9c4",
+ "bulk_archive": {
+  "remote_branch": "thesis-v43-stage5b2-data-1",
+  "remote_commit": "b44975dd0803e3912f6151398a5a93c34eb95082",
+  "path_prefix": "results/thesis_revision_v43/stage_05b2/bulk_archives/",
+  "chunk_count": 42,
+  "chunk_max_bytes": 41943040,
+  "original_file_count": 2196,
+  "original_total_bytes": 1664030720,
+  "archives": {
+   "per_miner_generation": 15,
+   "delivery_delays": 5,
+   "run_bundles": 19,
+   "recovery_records": 3
   },
-  "per_run_manifest": "results/thesis_revision_v43/stage_05b2/manifests/results_manifest.json",
-  "bundle_manifest": "results/thesis_revision_v43/stage_05b2/manifests/bundle_manifest.json",
-  "output_index": "results/thesis_revision_v43/stage_05b2/manifests/output_index.csv",
-  "execution_ledger": "results/thesis_revision_v43/stage_05b2/logs/execution_ledger.jsonl",
-  "checksum_manifest": "docs/thesis_revision_v43/STAGE_05B2_CHECKSUM_MANIFEST.sha256",
-  "checksum_manifest_sha256": "65d14e7a387577270b13f96e1907a504e1a9f1cf9790e265b7abf34ac1692c24",
-  "results_manifest_sha256": "928ce2773235289eccbd897d027dcae9bded210d0c325bf9c7332cedbd9c1a26",
-  "thesis_docx_sha256": "2c3afdc5739109d0ea12ada96c3115d626a2188c1acbaeaa4b6020974884cbda",
-  "thesis_pdf_sha256": "131412bb2ce17ed97b98dfbefc136c7b5b226b9fd7372e79a25e4b0dc057e9c4"
+  "roundtrip_verified": true,
+  "manifest": "docs/thesis_revision_v43/STAGE_05B2A_BULK_ARCHIVE_MANIFEST.json"
+ },
+ "availability_class_manifests": {
+  "REMOTE_GIT": [
+   "docs/thesis_revision_v43/STAGE_05B2A_REMOTE_GIT_CHECKSUMS.sha256",
+   "docs/thesis_revision_v43/STAGE_05B2A_ARCHIVE_ASSET_CHECKSUMS.sha256"
+  ],
+  "REMOTE_RELEASE_ASSET": [],
+  "LOCAL_REDUNDANT": [
+   "docs/thesis_revision_v43/STAGE_05B2A_LOCAL_REDUNDANT_CHECKSUMS.sha256"
+  ],
+  "HISTORICAL_RECOVERY": [
+   "docs/thesis_revision_v43/STAGE_05B2A_HISTORICAL_RECOVERY_CHECKSUMS.sha256"
+  ],
+  "remote_asset_index": "docs/thesis_revision_v43/STAGE_05B2A_REMOTE_ASSET_INDEX.csv",
+  "note": "REMOTE_RELEASE_ASSET is empty: GitHub Release/asset upload is unavailable via the session tooling; bulk data is stored on the dedicated remote git branch instead."
+ },
+ "bundle_manifest_reconciled_5b2a": {
+  "entries": 1890,
+  "previous_entries": 1761,
+  "note": "bundle_manifest.json regenerated from all 1890 durable bundles; every SHA-256 cross-verified against results_manifest.json; the 1761 pre-existing entries unchanged."
+ },
+ "execution_ledger_counts": {
+  "data_rows": 2781,
+  "csv_lines_incl_header": 2782,
+  "COMPLETED_VALID_rows": 2335,
+  "INVALIDATED_rows": 445,
+  "INTERRUPTED_rows": 1,
+  "distinct_run_ids": 1890,
+  "final_status_all": "COMPLETED_VALID"
+ }
 }

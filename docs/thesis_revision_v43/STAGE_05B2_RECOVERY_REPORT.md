@@ -78,15 +78,24 @@ ledger row from its revalidated durable bundle.
 
 ## 5. Checksums, storage, results branch
 
-- Committed aggregated outputs: ≈ 775 MB, 578 files, largest 34.7 MB
-  (`STAGE_05B2_STORAGE_REPORT.md`).
-- `STAGE_05B2_CHECKSUM_MANIFEST.sha256`: SHA-256 of all 578 committed output files.
-- Locally retained (not committed): durable per-run bundles (763 MB, redundant with
-  aggregates, individually checksummed in `bundle_manifest.json`) and the corrupt
-  streaming debris (98 MB, preserved under `failed_attempts/recovery/attempt-1/`).
+- Committed to the results branch: **474 files, ≈ 47 MB** (462 result outputs + 12 stage
+  docs), largest committed table 34.7 MB (`STAGE_05B2_STORAGE_REPORT.md`). The earlier
+  "≈ 775 MB / 578 files" figure described a single full-aggregate push **attempt** the
+  remote rejected with HTTP 413; it never became branch history and is not a committed
+  set.
+- `STAGE_05B2_CHECKSUM_MANIFEST.sha256`: SHA-256 of **all 580 output files (committed +
+  bulk)** as of aggregation time (its `bundle_manifest.json` entry refreshed after the
+  5B2A reconciliation to 1890 entries). Stage 5B2A also splits the checksums by
+  availability class (`STAGE_05B2A_*_CHECKSUMS.sha256`).
+- Bulk data (durable per-run bundles 763 MB, and the corrupt streaming debris 98 MB
+  under `failed_attempts/recovery/attempt-1/`) is durably archived as 42 deterministic
+  chunks on the remote branch `thesis-v43-stage5b2-data-1` (roundtrip-verified from a
+  fresh clone) **and** retained on disk; each bundle is individually checksummed in
+  `bundle_manifest.json`.
 - Frozen inputs re-verified unchanged; scientific-tree diff vs freeze 6 = 0 tracked
   modifications.
-- Results branch: `thesis-v43-stage5b2-results-1` (full commit SHA recorded on push).
+- Results branches: `thesis-v43-stage5b2-results-1` and, for the 5B2A corrections,
+  `thesis-v43-stage5b2-results-2` (full commit SHAs recorded on push).
 
 ## Conclusion
 

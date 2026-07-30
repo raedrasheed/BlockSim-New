@@ -62,9 +62,11 @@ runs retained; no run removed.
 | Failed terminal | 0 |
 | Invalidated (current) | 0 |
 | Not started | 0 |
-| Total attempts (append-only ledger) | 2780 |
-| Retry/resume attempts (attempt > 1) | 445 |
-| Historical interrupted / invalidated | 1 / 445 |
+| Append-only ledger data rows (2780 per-run attempt rows + 1 recovery/`INTERRUPTED` marker) | 2781 |
+| Execution-ledger CSV lines (incl. header) | 2782 |
+| Ledger status breakdown | 2335 `COMPLETED_VALID` + 445 `INVALIDATED` + 1 `INTERRUPTED` |
+| Retry/resume attempt rows (attempt > 1) | 445 |
+| Historical interrupted / invalidated (preserved) | 1 / 445 |
 | Scenario runs (B0/B1/B2/B3;C1/C2) | 150 / 150 / 150 / 870 / 570 |
 | Zero-block runs | 142 |
 | Partial-final-generation runs | 1890 |
@@ -72,8 +74,9 @@ runs retained; no run removed.
 | stale-race records | 26 200 |
 | delivery-delay records | 7 722 695 |
 | Durable execution wall-clock | ≈ 582 s (final memory-safe pass) + recovery |
-| Committed output size / files | ≈ 775 MB / ≈ 578 |
-| Locally-retained (bundles + recovery) | 763 MB + 98 MB |
+| Committed to results branch (git) | ≈ 47 MB / 474 files (462 result outputs + 12 stage docs) |
+| Bulk data archived to remote bulk-data branch (42 chunks, roundtrip-verified) | ≈ 1.59 GB / 2196 original files |
+| Locally-retained on disk (also archived remotely) | bundles 763 MB + recovery 98 MB |
 
 ## 6. Post-execution gates
 
@@ -89,15 +92,23 @@ runs retained; no run removed.
 All 1890 runs are `COMPLETED_VALID`; every per-run QC check, group-level cross-check,
 data-integrity test, and pre-/post-execution frozen test gate passed; the scientific
 source and thesis files are unchanged; freeze branch 6 is untouched. The complete
-results manifest (all 1890 runs), per-run bundle manifest, append-only execution
-ledger, and a checksum manifest covering **every** output file were committed to the
-results-only branch `thesis-v43-stage5b2-results-1` (based on `45361674…`) and pushed.
+results manifest (all 1890 runs), per-run bundle manifest (reconciled to all 1890
+entries in Stage 5B2A), append-only execution ledger, and a checksum manifest covering
+**every** output file were committed to the results-only branch
+`thesis-v43-stage5b2-results-1` (based on `45361674…`) and pushed; the corrected reports
+and manifests are carried forward to `thesis-v43-stage5b2-results-2`.
 
-Per Section 10, the two bulk diagnostic aggregates (`per_miner_generation`,
-`delivery_delays`; ≈ 730 MB) exceeded the remote push limit (HTTP 413) and are
-**retained locally with complete checksums and an index**, not discarded; their full
-detail for the 61 retained-full-log runs IS committed under `full_logs/`, their totals
-reconcile in every committed `summary`, and they are deterministically regenerable from
-the frozen commit (`STAGE_05B2_STORAGE_REPORT.md`).
+> **Count correction (Stage 5B2A).** An earlier draft of this table cited
+> "≈ 775 MB / ≈ 578" committed files. That figure described a full-aggregate commit
+> **attempt** that the remote rejected with HTTP 413 and that **never became any
+> branch's history**; it must not be cited as committed. The authoritative committed
+> set is **474 files / ≈ 47 MB** (462 result outputs + 12 stage docs). The two bulk
+> diagnostic aggregates (`per_miner_generation`, `delivery_delays`) and the durable
+> per-run bundles and recovery debris are now stored as 42 deterministic archive chunks
+> on the dedicated remote branch `thesis-v43-stage5b2-data-1`, **roundtrip-verified**
+> from a fresh clone (all 2196 original files byte-identical); their full detail for the
+> 61 retained-full-log runs is also committed under `full_logs/`, their totals reconcile
+> in every committed `summary`, and they remain deterministically regenerable from the
+> frozen commit (`STAGE_05B2_STORAGE_REPORT.md`, `STAGE_05B2A_MANIFEST_RECONCILIATION.md`).
 
 **STAGE_5B2_EXECUTION_COMPLETE.** Stage 6 is not begun.

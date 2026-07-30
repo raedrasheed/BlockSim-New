@@ -1,0 +1,361 @@
+{
+ "collection_name": "stage5b2-bulk-data",
+ "source_results_commit": "d2ef6012afc8275c108ef56737a54a156abe5ceb",
+ "freeze6_commit": "45361674e6278971d430a79531f7aaac5cae3281",
+ "creation_utc": "2026-07-30T11:28:54Z",
+ "bulk_data_branch": "thesis-v43-stage5b2-data-1",
+ "original_file_checksums": "docs/thesis_revision_v43/STAGE_05B2A_ORIGINAL_BULK_FILE_CHECKSUMS.sha256",
+ "archives": [
+  {
+   "letter": "A",
+   "archive_name": "stage5b2-per-miner-generation",
+   "original_directory": "per_miner_generation",
+   "original_file_count": 63,
+   "original_total_bytes": 593152449,
+   "committed_path_prefix": "results/thesis_revision_v43/stage_05b2/bulk_archives/",
+   "chunk_count": 15,
+   "total_chunk_bytes": 593244160,
+   "chunks": [
+    {
+     "name": "stage5b2-per-miner-generation.tar.part-000",
+     "bytes": 41943040,
+     "sha256": "809b6454a98be5e25df562c6b451fc5fd65a35a8609a2056a99430c2d15d2551"
+    },
+    {
+     "name": "stage5b2-per-miner-generation.tar.part-001",
+     "bytes": 41943040,
+     "sha256": "91604e435b30fa50fb0164edad78e79be46c4b846812e31cbe958675721deed1"
+    },
+    {
+     "name": "stage5b2-per-miner-generation.tar.part-002",
+     "bytes": 41943040,
+     "sha256": "ac97e48e1a32f2265bd40a70f5ea3bfb888f42dc3015f2866f4cf037aec697b9"
+    },
+    {
+     "name": "stage5b2-per-miner-generation.tar.part-003",
+     "bytes": 41943040,
+     "sha256": "47e19f1aecf4797f667a299282af8da615125a9cf63625b94e76ce98a2fc2eda"
+    },
+    {
+     "name": "stage5b2-per-miner-generation.tar.part-004",
+     "bytes": 41943040,
+     "sha256": "edbea27f44f52de950749fcdd42d2191e6674c79572bd215d99f19e0493dd548"
+    },
+    {
+     "name": "stage5b2-per-miner-generation.tar.part-005",
+     "bytes": 41943040,
+     "sha256": "4d49efc707900b55aab4d30fbcea7c3beaef6347901b7223bbccb728ecd1b4be"
+    },
+    {
+     "name": "stage5b2-per-miner-generation.tar.part-006",
+     "bytes": 41943040,
+     "sha256": "6c48b92244a86c6c7a71b9ea50a48dab83f35dc2e842033738d5e543068e1cc5"
+    },
+    {
+     "name": "stage5b2-per-miner-generation.tar.part-007",
+     "bytes": 41943040,
+     "sha256": "4bbf6be7d91f0bb84e8e76586146782486418c509278b0f6697215c5c0f33b71"
+    },
+    {
+     "name": "stage5b2-per-miner-generation.tar.part-008",
+     "bytes": 41943040,
+     "sha256": "0f6fe287b378896a847374ed67b3739cf86a90731c5e476544f3a4a0d2e75d37"
+    },
+    {
+     "name": "stage5b2-per-miner-generation.tar.part-009",
+     "bytes": 41943040,
+     "sha256": "d6bef3d4668294c5be7c678c7e22603dcbad0e4d9ac5f59c4fba1128cd572fc2"
+    },
+    {
+     "name": "stage5b2-per-miner-generation.tar.part-010",
+     "bytes": 41943040,
+     "sha256": "ec317a85d307c456bd48b3dddf6eef3163fb7030a1e77071e2410c211111788d"
+    },
+    {
+     "name": "stage5b2-per-miner-generation.tar.part-011",
+     "bytes": 41943040,
+     "sha256": "c90b3d23aff4e43d195639a74e856c5a82c2081e53d5b25c1b850eeb7f153443"
+    },
+    {
+     "name": "stage5b2-per-miner-generation.tar.part-012",
+     "bytes": 41943040,
+     "sha256": "71a9f13b07b386163645944e1318359b1414d37fa4a4d9634f792adb84552b5a"
+    },
+    {
+     "name": "stage5b2-per-miner-generation.tar.part-013",
+     "bytes": 41943040,
+     "sha256": "082736acc7d23a5e3dcb2ed6b816a013aef01e85895c3f291d97a9f69fc39351"
+    },
+    {
+     "name": "stage5b2-per-miner-generation.tar.part-014",
+     "bytes": 6041600,
+     "sha256": "14904c09ff81a975764106f52aaee38087a3f3b821b938c67deb83850bf3c97d"
+    }
+   ],
+   "reconstruction_order": [
+    "stage5b2-per-miner-generation.tar.part-000",
+    "stage5b2-per-miner-generation.tar.part-001",
+    "stage5b2-per-miner-generation.tar.part-002",
+    "stage5b2-per-miner-generation.tar.part-003",
+    "stage5b2-per-miner-generation.tar.part-004",
+    "stage5b2-per-miner-generation.tar.part-005",
+    "stage5b2-per-miner-generation.tar.part-006",
+    "stage5b2-per-miner-generation.tar.part-007",
+    "stage5b2-per-miner-generation.tar.part-008",
+    "stage5b2-per-miner-generation.tar.part-009",
+    "stage5b2-per-miner-generation.tar.part-010",
+    "stage5b2-per-miner-generation.tar.part-011",
+    "stage5b2-per-miner-generation.tar.part-012",
+    "stage5b2-per-miner-generation.tar.part-013",
+    "stage5b2-per-miner-generation.tar.part-014"
+   ],
+   "extraction_command": "cat stage5b2-per-miner-generation.tar.part-* | tar -xf -",
+   "verification_command": "cat stage5b2-per-miner-generation.tar.part-* | tar -tf -  # then sha256 vs STAGE_05B2A_ORIGINAL_BULK_FILE_CHECKSUMS.sha256",
+   "remote_asset_location": "git branch thesis-v43-stage5b2-data-1 (path bulk_archives/)",
+   "availability_status": "AVAILABLE_REMOTE_GIT",
+   "remote_branch": "thesis-v43-stage5b2-data-1",
+   "remote_commit": "b44975dd0803e3912f6151398a5a93c34eb95082",
+   "roundtrip_verified": true
+  },
+  {
+   "letter": "B",
+   "archive_name": "stage5b2-delivery-delays",
+   "original_directory": "delivery_delays",
+   "original_file_count": 63,
+   "original_total_bytes": 171708436,
+   "committed_path_prefix": "results/thesis_revision_v43/stage_05b2/bulk_archives/",
+   "chunk_count": 5,
+   "total_chunk_bytes": 171796480,
+   "chunks": [
+    {
+     "name": "stage5b2-delivery-delays.tar.part-000",
+     "bytes": 41943040,
+     "sha256": "50f8716a0653f632fd1f2ceb6a233ed10b2cdee84c02e93ff7d8fa9d7d189635"
+    },
+    {
+     "name": "stage5b2-delivery-delays.tar.part-001",
+     "bytes": 41943040,
+     "sha256": "c1bcdbd5a2bc4da64bc5b33b38eeeb26ce0c6264c3e25805f04c62220fbbeaa5"
+    },
+    {
+     "name": "stage5b2-delivery-delays.tar.part-002",
+     "bytes": 41943040,
+     "sha256": "56a42c9dbcbf7ced3fec06785f9e466363bd02c13254fcf07d44e82c6f67d5a7"
+    },
+    {
+     "name": "stage5b2-delivery-delays.tar.part-003",
+     "bytes": 41943040,
+     "sha256": "45a2d5393dba4ee8dd375375c53cf322f7f86b7a34701350bbcd121260679e0a"
+    },
+    {
+     "name": "stage5b2-delivery-delays.tar.part-004",
+     "bytes": 4024320,
+     "sha256": "c756bc405b9676b82f7f7a58e1c3e814bf9ce1c07029900ac3c6790a19b95c82"
+    }
+   ],
+   "reconstruction_order": [
+    "stage5b2-delivery-delays.tar.part-000",
+    "stage5b2-delivery-delays.tar.part-001",
+    "stage5b2-delivery-delays.tar.part-002",
+    "stage5b2-delivery-delays.tar.part-003",
+    "stage5b2-delivery-delays.tar.part-004"
+   ],
+   "extraction_command": "cat stage5b2-delivery-delays.tar.part-* | tar -xf -",
+   "verification_command": "cat stage5b2-delivery-delays.tar.part-* | tar -tf -  # then sha256 vs STAGE_05B2A_ORIGINAL_BULK_FILE_CHECKSUMS.sha256",
+   "remote_asset_location": "git branch thesis-v43-stage5b2-data-1 (path bulk_archives/)",
+   "availability_status": "AVAILABLE_REMOTE_GIT",
+   "remote_branch": "thesis-v43-stage5b2-data-1",
+   "remote_commit": "b44975dd0803e3912f6151398a5a93c34eb95082",
+   "roundtrip_verified": true
+  },
+  {
+   "letter": "C",
+   "archive_name": "stage5b2-run-bundles",
+   "original_directory": "runs",
+   "original_file_count": 1890,
+   "original_total_bytes": 795235155,
+   "committed_path_prefix": "results/thesis_revision_v43/stage_05b2/bulk_archives/",
+   "chunk_count": 19,
+   "total_chunk_bytes": 796712960,
+   "chunks": [
+    {
+     "name": "stage5b2-run-bundles.tar.part-000",
+     "bytes": 41943040,
+     "sha256": "6fb2bc7837c5b5e492fc55dd403631b0c38b58626a388f089562f1786177a4fd"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-001",
+     "bytes": 41943040,
+     "sha256": "e9dc86f515ce382343a89c160b5b2f9be59a52c25fce26e55b80379661c823fd"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-002",
+     "bytes": 41943040,
+     "sha256": "f0f780ad1068e1fd56acd3aa4a163d9fc8e561da9d3dd2b1aa577d5812f2c964"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-003",
+     "bytes": 41943040,
+     "sha256": "d5fd8c0d5d7f406277dbbafe43fe41a54c3ef08c1b04fc5a08dd7d7a71036b3c"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-004",
+     "bytes": 41943040,
+     "sha256": "a0d724b3d3de82f0ac4ed396acbae031f32bf3b1edada3247740dd6bc6d5e8df"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-005",
+     "bytes": 41943040,
+     "sha256": "e69f41a6b0f606d8c85c4d099525b026138ac1d1e6fedf9440b57f3ec24daf24"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-006",
+     "bytes": 41943040,
+     "sha256": "af3ecf33e2ba24484f4abb1d63f7db525730ed9339452af9ca51bcfd7da2044d"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-007",
+     "bytes": 41943040,
+     "sha256": "1b774c474bcaf8180d4baad64d128ad6d6d29ecd874668363b3ea0e22da524d4"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-008",
+     "bytes": 41943040,
+     "sha256": "454db3c222df7067b8fac7f619c83182d9711ccc1d8b11a1579f1811f2f00c42"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-009",
+     "bytes": 41943040,
+     "sha256": "553ff594539085add3e9033e8adea2890b32baf218a1265a198eb9eb8f4c6455"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-010",
+     "bytes": 41943040,
+     "sha256": "f7070d6c89808b65ab8b6fc5110ece244a2d3565b775c0cc7f3d9614328f2af6"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-011",
+     "bytes": 41943040,
+     "sha256": "e46e5e7a3846698a80f14ed42311845a6163c1ff604fafe227ae7ba8e0d8e43d"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-012",
+     "bytes": 41943040,
+     "sha256": "e3c3c418c656847d8386cc2c73820a1f8dc676298f87caf797d40934f96ce7ba"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-013",
+     "bytes": 41943040,
+     "sha256": "fd65bdc4a2ad9893b46fe3486b7d44c565efccef371b8cb1a81ca4f682dc5caf"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-014",
+     "bytes": 41943040,
+     "sha256": "616ad25983ba05e7084bde5ed1927ba451fcae7e170b1591219214fef5e84b11"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-015",
+     "bytes": 41943040,
+     "sha256": "a3724679fba441733422000836a33f054f27a7d8ebffb0fb4e720a02fe7b864c"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-016",
+     "bytes": 41943040,
+     "sha256": "c9ea043bffec8dac5f0b29b17beec19fe0783205f43522acc31428366d7317a0"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-017",
+     "bytes": 41943040,
+     "sha256": "ee4a45c244a85491ede7c0d513c1bfae5f9f106de26c1e5d2737ed6d4898119d"
+    },
+    {
+     "name": "stage5b2-run-bundles.tar.part-018",
+     "bytes": 41738240,
+     "sha256": "4a69524c2d8920c137ddee01a758b549d2a7efa18a69234f41febf989d57d8cb"
+    }
+   ],
+   "reconstruction_order": [
+    "stage5b2-run-bundles.tar.part-000",
+    "stage5b2-run-bundles.tar.part-001",
+    "stage5b2-run-bundles.tar.part-002",
+    "stage5b2-run-bundles.tar.part-003",
+    "stage5b2-run-bundles.tar.part-004",
+    "stage5b2-run-bundles.tar.part-005",
+    "stage5b2-run-bundles.tar.part-006",
+    "stage5b2-run-bundles.tar.part-007",
+    "stage5b2-run-bundles.tar.part-008",
+    "stage5b2-run-bundles.tar.part-009",
+    "stage5b2-run-bundles.tar.part-010",
+    "stage5b2-run-bundles.tar.part-011",
+    "stage5b2-run-bundles.tar.part-012",
+    "stage5b2-run-bundles.tar.part-013",
+    "stage5b2-run-bundles.tar.part-014",
+    "stage5b2-run-bundles.tar.part-015",
+    "stage5b2-run-bundles.tar.part-016",
+    "stage5b2-run-bundles.tar.part-017",
+    "stage5b2-run-bundles.tar.part-018"
+   ],
+   "extraction_command": "cat stage5b2-run-bundles.tar.part-* | tar -xf -",
+   "verification_command": "cat stage5b2-run-bundles.tar.part-* | tar -tf -  # then sha256 vs STAGE_05B2A_ORIGINAL_BULK_FILE_CHECKSUMS.sha256",
+   "remote_asset_location": "git branch thesis-v43-stage5b2-data-1 (path bulk_archives/)",
+   "availability_status": "AVAILABLE_REMOTE_GIT",
+   "remote_branch": "thesis-v43-stage5b2-data-1",
+   "remote_commit": "b44975dd0803e3912f6151398a5a93c34eb95082",
+   "roundtrip_verified": true
+  },
+  {
+   "letter": "D",
+   "archive_name": "stage5b2-recovery-records",
+   "original_directory": "failed_attempts/recovery/attempt-1",
+   "original_file_count": 180,
+   "original_total_bytes": 102099517,
+   "committed_path_prefix": "results/thesis_revision_v43/stage_05b2/bulk_archives/",
+   "chunk_count": 3,
+   "total_chunk_bytes": 102277120,
+   "chunks": [
+    {
+     "name": "stage5b2-recovery-records.tar.part-000",
+     "bytes": 41943040,
+     "sha256": "1d4345b6dcf972fc86fd2bb4412b4823a1e7c50bb18ab1ccd23f0569ced55e6e"
+    },
+    {
+     "name": "stage5b2-recovery-records.tar.part-001",
+     "bytes": 41943040,
+     "sha256": "cd47eb067b6df3c10fd1967550096d0e2c5c47ee8d2854e8b2725ad5ccf053e8"
+    },
+    {
+     "name": "stage5b2-recovery-records.tar.part-002",
+     "bytes": 18391040,
+     "sha256": "d99d4643a7b4196bcff920c7812625d0824d757e56cb06179c33572818306eac"
+    }
+   ],
+   "reconstruction_order": [
+    "stage5b2-recovery-records.tar.part-000",
+    "stage5b2-recovery-records.tar.part-001",
+    "stage5b2-recovery-records.tar.part-002"
+   ],
+   "extraction_command": "cat stage5b2-recovery-records.tar.part-* | tar -xf -",
+   "verification_command": "cat stage5b2-recovery-records.tar.part-* | tar -tf -  # then sha256 vs STAGE_05B2A_ORIGINAL_BULK_FILE_CHECKSUMS.sha256",
+   "remote_asset_location": "git branch thesis-v43-stage5b2-data-1 (path bulk_archives/)",
+   "availability_status": "AVAILABLE_REMOTE_GIT",
+   "remote_branch": "thesis-v43-stage5b2-data-1",
+   "remote_commit": "b44975dd0803e3912f6151398a5a93c34eb95082",
+   "roundtrip_verified": true
+  }
+ ],
+ "remote_verification": {
+  "verified_utc": "2026-07-30T11:48:18Z",
+  "method": "fresh single-branch git clone of the bulk-data branch into a clean directory, recompute every chunk SHA-256, reconstruct each archive (cat parts | tar -xf -), verify every extracted file SHA-256 vs STAGE_05B2A_ORIGINAL_BULK_FILE_CHECKSUMS.sha256",
+  "remote_branch": "thesis-v43-stage5b2-data-1",
+  "remote_commit": "b44975dd0803e3912f6151398a5a93c34eb95082",
+  "remote_url_path": "git/raedrasheed/BlockSim-New (branch thesis-v43-stage5b2-data-1, path results/thesis_revision_v43/stage_05b2/bulk_archives/)",
+  "chunks_verified": 42,
+  "chunk_size_sha_status": "42/42 name+bytes+sha256 match STAGE_05B2A_ARCHIVE_ASSET_CHECKSUMS.sha256",
+  "archives_reconstructed": 4,
+  "files_verified": 2196,
+  "files_missing": 0,
+  "files_sha_bad": 0,
+  "files_extra": 0,
+  "result": "ROUNDTRIP_OK"
+ }
+}
