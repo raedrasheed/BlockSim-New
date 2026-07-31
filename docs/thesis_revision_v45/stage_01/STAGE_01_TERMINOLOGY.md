@@ -424,3 +424,32 @@ Catalogue" denotes the separate document defining I1..I19.
   (`FULL_BLOCK_ARRIVAL`, `CERTIFICATE_ARRIVAL`, `HASH_WORK`, `LEASE_EXPIRY`, `WAKE_COMPLETE`, `RESUME`,
   `PARTICIPATION_CHANGE`, `MONITORING`). No enqueue omits a microphase; every event-producing loop is stably
   sorted (`MinerID`, then `CandidateID`/`AssignmentID`) before the seq is assigned.
+
+## Stage-1N terminology addendum (run-lifecycle & recovery closure)
+
+- **Round abort vs. simulation end (N1).** `RoundAbort` terminates exactly ONE round: disposition
+  candidates, close assignments, record `round_terminal_time` at the abort `event_time`, transition to
+  `ROUND_ABORTED`, and return control so `RoundInitialise` may start another round when simulated time
+  remains. It performs NO `FINAL_RUN_END` settle and NO horizon-`T` reconciliation.
+- **`FinalizeSimulationRun` (N1).** The SINGLE run-level terminal action, run EXACTLY ONCE at the fixed
+  horizon `T` (or an explicit run-end condition), regardless of whether the last round is `ROUND_ACCEPTED`,
+  `ROUND_ABORTED`, or nonterminal. It drains events up to `T`, closes a nonterminal round through the
+  declared horizon-end disposition, performs the ONE `SettleResidencyBoundary(mode = FINAL_RUN_END,
+  boundary_id = (RunID, RUN_END))` (no reopen), and only THEN runs the I5/I6/I7 reconciliation. Guarded by
+  the per-run `run_finalised` flag. An early `RoundAbort` at `t < T` never closes residency at `T`.
+- **`CompleteSecurityRecovery` (N2/R13/R14).** The EXECUTABLE recovery-exit owner. Seated on the queue by
+  the epilogue's floor-restored decision (§9, at a strictly-later `event_time`, I-02), it branches: (A) live
+  propagation contexts remain → `SECURITY_RECOVERY → SOLUTION_PROPAGATION` (contexts + events preserved,
+  G8); (B) no context, no assignment change → `SECURITY_RECOVERY → HASHING`; (C) redistribution needed →
+  `SECURITY_RECOVERY → ASSIGNMENT → CompleteAssignmentPhase → HASHING` (no new template); (D) floor
+  unrecoverable → `RoundAbort(reason = floor_unrecoverable)`. Branches A/B/C reach a floor-applicable state
+  through `TransitionRoundState`/`CompleteAssignmentPhase`, so the applicability-entry census is captured
+  (M2). R13/R14 are no longer "described but non-executable".
+- **Driver-entry-point seating rules (N3).** Every sim-driver entry point seated on the queue
+  (`RoundInitialise`, `TemplateCommit`, `PrepareParticipantsForNewRound`, `MinerRegister`, `ReserveActivate`,
+  `FullRangeExhaustNoSolution`, `CompleteSecurityRecovery`, `RoundAbort`, `FinalizeSimulationRun`) has a
+  declared event type, target microphase, stable tie key, required envelope fields, and a declared right to
+  create same-time delta-cycle events (§0.7g-driver). No driver entry point receives a `dispatch_envelope`
+  without a normative `ScheduleEvent` seating rule. `RoundAbort` keeps `TERMINAL_ABORT` priority (§21 item
+  1); `FinalizeSimulationRun` is `RUN_FINALISE`, a run-level terminal processed after every ordinary round
+  event, not an ordinary round event.

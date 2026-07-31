@@ -277,6 +277,14 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
   failed).
 - **Exit condition(s).** To `ROUND_INITIALISING` to restart the round (carrying forward the
   preserved cross-round information of Section 4).
+- **Round-scope only (N1).** `RoundAbort` (pseudocode §20) terminates exactly ONE round: it
+  dispositions candidates, closes assignments, records `round_terminal_time` at the abort
+  `event_time`, and transitions to `ROUND_ABORTED`. It performs **no** run-end residency settle and
+  **no** reconciliation to the fixed horizon `T`; an early abort at `t < T` is followed by
+  `RoundInitialise` (R21) when simulated time remains. The single run-level finaliser
+  `FinalizeSimulationRun` (pseudocode §20a) — NOT `RoundAbort` — owns the one `FINAL_RUN_END`
+  residency settle and the I5/I6/I7 horizon reconciliation, running exactly once at `T` for a run
+  whose last round is `ROUND_ACCEPTED`, `ROUND_ABORTED`, or nonterminal alike (§3.13).
 
 ---
 
@@ -366,10 +374,18 @@ round remains in `HASHING`. Only accepted range-exhaustion accounting counts tow
 ### 3.10 What happens after a security-floor violation
 
 A security-floor violation (modeled `H_honest(t)` below the floor) moves `HASHING →
-SECURITY_RECOVERY`, which activates reserves and re-establishes coverage (Section 3.6). If
-recovery succeeds the round returns to `HASHING`; if the floor cannot be restored the round
-moves `SECURITY_RECOVERY → ROUND_ABORTED`. Monitoring is specified only; no claim is made
-that the floor is actually preserved (scope §C).
+SECURITY_RECOVERY`, which activates reserves and re-establishes coverage (Section 3.6). The
+recovery **exit** (R13/R14) is EXECUTABLE via the named procedure `CompleteSecurityRecovery`
+(pseudocode §10a/N2): once the epilogue's floor-restored decision is settled, a dispatched
+`CompleteSecurityRecovery` event resumes the round to `SOLUTION_PROPAGATION` (live candidates
+preserved, branch A), directly to `HASHING` (no context/no redistribution, branch B), or through
+`ASSIGNMENT → CompleteAssignmentPhase → HASHING` when ranges must be redistributed (branch C, no new
+template); if the floor cannot be restored it calls `RoundAbort(reason = floor_unrecoverable)`
+(branch D/R14), which closes ONLY this round (N1). Every recovery-success branch reaches a
+floor-applicable state through `TransitionRoundState`/`CompleteAssignmentPhase`, so the
+applicability-entry census is captured (M2). This contract is NO LONGER "described but
+non-executable". Monitoring is specified only; no claim is made that the floor is actually
+preserved (scope §C).
 
 ### 3.11 What causes a template refresh
 
@@ -418,6 +434,19 @@ are resolved by **network-arrival semantics** (CR6), consistent with
 No global-oracle "smallest `(TemplateID, nonce, MinerID)`" primary rule is used, no global set
 of future solutions is consulted, and **no chain-wide fork-choice proof** is claimed.
 
+### 3.14 What happens at the end of the simulation run (N1)
+
+Round abort and simulation end are DISTINCT. `RoundAbort` (§2.10) terminates one round and never
+reconciles to the fixed horizon `T`; when simulated time remains, an aborted round is followed by
+`RoundInitialise` (R21). The **run** ends exactly once, at the fixed horizon `T` (or an explicit
+run-end condition), through the single run-level finaliser `FinalizeSimulationRun` (pseudocode §20a).
+Regardless of whether the last round ended `ROUND_ACCEPTED`, `ROUND_ABORTED`, or remained nonterminal
+at `T`, `FinalizeSimulationRun` runs once: it drains all events permitted up to the final `event_time`;
+if a nonterminal round must be closed at the horizon it closes it through the declared horizon-end round
+disposition; it then performs the SINGLE `SettleResidencyBoundary(mode = FINAL_RUN_END, boundary_id =
+(RunID, RUN_END))` (no reopen); and only AFTER that final settle does it run the I5/I6/I7 reconciliation
+to `T`. An early `RoundAbort` at `t < T` therefore NEVER closes residency at the horizon.
+
 ---
 
 ## 4. Round-transition table
@@ -441,8 +470,8 @@ the notes and specified in `STAGE_01_MINER_STATE_MACHINE.md`.
 | R10 | `HASHING` | SecurityFloorViolation | Modeled `H_honest(t)` below the security floor, or invariant-risk detected | Trigger reserve activation | `SECURITY_RECOVERY` | Emits miner activation → `RESERVE → WAKING` (T4), `LOW_POWER_LISTEN → WAKING` (T10) |
 | R11 | `HASHING` | RefreshTrigger | A superseding immutable template is available | Prepare template replacement | `TEMPLATE_REFRESH` | Refresh is the only way mined content changes (§3.11) |
 | R12 | `HASHING` | FatalFault / RoundTimeout | Unrecoverable fault or round-level timeout | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.4) |
-| R13 | `SECURITY_RECOVERY` | FloorRestored | Activated reserves raise `H_honest(t)` to/above the floor | Re-partition/redistribute disjoint ranges (I1); if live candidates remain, resume propagation instead | `ASSIGNMENT` (→ `HASHING` at R4) **or `SOLUTION_PROPAGATION`** if `active_propagation_set` is non-empty (G8) | Re-`ASSIGNMENT` returns to `HASHING` at R4 when `propagation_quiescent`; when live candidates were preserved during recovery (G8), the round returns to `SOLUTION_PROPAGATION` and those candidates' acceptance events continue (§3.6) |
-| R14 | `SECURITY_RECOVERY` | FloorUnrecoverable | Floor cannot be restored (insufficient reserves) | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.10) |
+| R13 | `SECURITY_RECOVERY` | FloorRestored | Activated reserves raise `H_honest(t)` to/above the floor | Re-partition/redistribute disjoint ranges (I1); if live candidates remain, resume propagation instead | `ASSIGNMENT` (→ `HASHING` at R4) **or `SOLUTION_PROPAGATION`** if `active_propagation_set` is non-empty (G8) **or directly `HASHING`** when no context and no redistribution | **EXECUTABLE via `CompleteSecurityRecovery` (pseudocode §10a/N2):** seated by the epilogue's floor-restored decision (I-02); branch A (live contexts) → `SOLUTION_PROPAGATION` preserving those candidates' events; branch B (no context, no assignment change) → `HASHING`; branch C (redistribution) → `ASSIGNMENT` → `CompleteAssignmentPhase` → `HASHING`. Every recovery-success branch reaches a floor-applicable state through `TransitionRoundState`/`CompleteAssignmentPhase`, so the applicability-entry census is captured (M2). No new template is fabricated (§3.6) |
+| R14 | `SECURITY_RECOVERY` | FloorUnrecoverable | Floor cannot be restored (insufficient reserves) | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.10); **EXECUTABLE via `CompleteSecurityRecovery` branch D (§10a/N2) → `RoundAbort(reason = floor_unrecoverable)`**, which closes ONLY this round (N1) |
 | R15 | `ROUND_EXHAUSTED` | RefreshAvailable | A new immutable template can be committed; difficulty fixed (I12) | Prepare new `TemplateID` | `TEMPLATE_REFRESH` | Retains `RoundID`; new template only (§3.5) |
 | R16 | `ROUND_EXHAUSTED` | NoRefreshPossible | No new template can be produced | Abort round | `ROUND_ABORTED` | Terminal-abort |
 | R17 | `TEMPLATE_REFRESH` | NewTemplateReady | New immutable template prepared | Commit new template | `TEMPLATE_COMMITMENT` | Then R3 → `ASSIGNMENT` re-partitions the new domain |
