@@ -125,10 +125,11 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
 - **Exit condition(s).** Back to `HASHING` (via re-`ASSIGNMENT` of activated reserves) when the floor
   is restored **and `propagation_quiescent` holds**; back to `SOLUTION_PROPAGATION` when the floor is
   restored while live candidates remain (G8); to `ROUND_ACCEPTED` if a valid candidate is accepted
-  during recovery (G8); to `ROUND_ABORTED` if the floor cannot be restored by the recovery deadline
-  (via the seated `RecoveryDeadlineEvent` → `RecoveryOutcome = UNRECOVERABLE` source, O3). Every exit is
-  driven by the executable `CompleteSecurityRecovery` (§10a), guarded to one completion per
-  `RecoveryEpisodeID` (O4).
+  during recovery (G8); to `ROUND_ABORTED` if the FINAL census still breaches the floor when the recovery
+  deadline has elapsed — the deadline records only a FACT (`RecoveryDeadlineEvent`, P3) and the event-time
+  epilogue selects `RecoveryOutcome = UNRECOVERABLE` from the final census. Every exit is driven by the
+  executable `CompleteSecurityRecovery` (§10a), seated by the epilogue's `SeatRecoveryCompletion` and guarded to
+  one applied completion per `RecoveryEpisodeID` (O4) and to the latest `RecoveryDecisionID` (P5).
 
 ### 2.6 `SOLUTION_PROPAGATION`
 
@@ -383,19 +384,24 @@ round remains in `HASHING`. Only accepted range-exhaustion accounting counts tow
 A security-floor violation (modeled `H_honest(t)` below the floor) moves `HASHING →
 SECURITY_RECOVERY`, which activates reserves and re-establishes coverage (Section 3.6). Entering
 `SECURITY_RECOVERY` MINTS a deterministic `RecoveryEpisodeID` and seats the named
-`RecoveryDeadlineEvent` (pseudocode §9a) — the concrete UNRECOVERABLE source (O3). The recovery **exit**
-(R13/R14) is EXECUTABLE via the named procedure `CompleteSecurityRecovery` (pseudocode §10a/N2), which is
-seated with a settled `RecoveryOutcome ∈ {RESTORED, UNRECOVERABLE}` (O3) by ONE of two sources: **(i)** the
-epilogue's floor-restored decision seats it with `RESTORED`; **(ii)** `RecoveryDeadlineEvent` seats it with
-`UNRECOVERABLE` when the floor is still breached at the deadline. On `RESTORED`, the dispatched
-`CompleteSecurityRecovery` resumes the round to `SOLUTION_PROPAGATION` (live candidates preserved, branch A),
-directly to `HASHING` (no context/no redistribution, branch B), or through `ASSIGNMENT → CompleteAssignmentPhase
-→ HASHING` when ranges must be redistributed (branch C, no new template). On `UNRECOVERABLE` it calls
-`RoundAbort(reason = floor_unrecoverable)` (branch D/R14), which closes ONLY this round (N1). At most ONE
-completion is applied per episode (`RecoveryEpisodeID`, O4). Every recovery-success branch reaches a
-floor-applicable state through `TransitionRoundState`/`CompleteAssignmentPhase`, so the applicability-entry
-census is captured (M2). This contract is NO LONGER "described but non-executable" — a concrete seated source
-and call path exists for both R13 and R14. Monitoring is specified only; no claim is made that the floor is
+`RecoveryDeadlineEvent` (pseudocode §9a). **P3:** `RecoveryDeadlineEvent` records ONLY the FACT that the
+deadline elapsed (`recovery_deadline_reached[episode]`) and creates a coherent census for its timestamp; it
+selects NO outcome and seats NO completion. The **event-time epilogue** (`SecurityFloorEvaluate`) SELECTS the
+recovery outcome from the FINAL timestamp census — a persistent breach WITH the deadline reached →
+`RecoveryOutcome = UNRECOVERABLE`; a restored floor → `RESTORED` — so a same-timestamp `WakeCompleteEvent`
+that restores the floor is visible BEFORE the deadline outcome is chosen. The recovery **exit** (R13/R14) is
+EXECUTABLE via the named procedure `CompleteSecurityRecovery` (pseudocode §10a/N2), seated by the epilogue's
+SOLE seater `SeatRecoveryCompletion` (pseudocode §9) carrying the settled `RecoveryOutcome` and a versioned
+`RecoveryDecisionID` (P5). On `RESTORED`, the dispatched `CompleteSecurityRecovery` resumes the round to
+`SOLUTION_PROPAGATION` (live candidates preserved, branch A), directly to `HASHING` (no context/no
+redistribution, branch B), or through `ASSIGNMENT → CompleteAssignmentPhase → HASHING` when ranges must be
+redistributed (branch C, no new template). On `UNRECOVERABLE` it calls `RoundAbort(reason = floor_unrecoverable)`
+(branch D/R14), which closes ONLY this round (N1). At most ONE completion is applied per episode
+(`RecoveryEpisodeID`, O4), and a completion whose `RecoveryDecisionID` is not the latest is superseded
+(`recovery_decision_stale_noop`, P5). Every recovery-success branch reaches a floor-applicable state through
+`TransitionRoundState`/`CompleteAssignmentPhase`, so the applicability-entry census is captured (M2). This
+contract is NO LONGER "described but non-executable" — a concrete seated source and call path exists for both
+R13 and R14. Monitoring is specified only; no claim is made that the floor is
 actually preserved (scope §C).
 
 ### 3.11 What causes a template refresh
@@ -450,13 +456,16 @@ of future solutions is consulted, and **no chain-wide fork-choice proof** is cla
 Round abort and simulation end are DISTINCT. `RoundAbort` (§2.10) terminates one round and never
 reconciles to the fixed horizon `T`; when simulated time remains, an aborted round is followed by
 `RoundInitialise` (R21). The **run** ends exactly once, at the fixed horizon `T` (or an explicit
-run-end condition). **O5 canonical horizon sequence** (pseudocode §0.7d-run): (1) the run driver
-`RunEventLoopToHorizon` processes every `event_time <= T` through `ProcessEventTime` (the SOLE event-loop
-driver), draining all ordinary events and delta-cycles; (2) if the run's current round is still nonterminal
-at `T`, `ProcessEventTime(T)` interposes the named `CloseRoundAtHorizon` hook (pseudocode §20b), which
-closes the round through the declared horizon-end disposition (`→ ROUND_ABORTED`, one deterministic horizon
-envelope); (3) the `T` epilogue `FinalizeEventTimeSecurityCensus(T)` then runs as a `terminal_stale_noop`;
-(4) ONLY THEN, as a post-`ProcessEventTime(T)` RUN-LEVEL hook (NOT a queued event), the single run-level
+run-end condition). **Canonical horizon sequence** (pseudocode §0.7d-run; O1 with the P1 horizon sentinel):
+(1) the run driver `RunEventLoopToHorizon` processes every `event_time` **strictly less than** `T` through
+`ProcessEventTime` (the SOLE event-loop driver); (2) it then makes ONE **horizon-sentinel** invocation
+`ProcessEventTime(T, is_horizon = true, allow_empty_horizon = true)` that ALWAYS runs — **even when the queue
+holds no event at `T`** (P1) — so the horizon sequence occurs exactly once; if the round is still nonterminal,
+`ProcessEventTime(T)` interposes the named `CloseRoundAtHorizon` hook (pseudocode §20b), which closes the round
+through the declared horizon-end disposition (`→ ROUND_ABORTED`) using ONE deterministic run-hook envelope
+(P2); (3) the `T` epilogue `FinalizeEventTimeSecurityCensus(T)` then runs as a `terminal_stale_noop` that
+finalises the `T` census and adds `T` to `finalised_event_times`; (4) ONLY THEN, as a
+post-`ProcessEventTime(T)` RUN-LEVEL hook (NOT a queued event), the single run-level
 finaliser `FinalizeSimulationRun` (pseudocode §20a) performs the SINGLE `SettleResidencyBoundary(mode =
 FINAL_RUN_END, boundary_id = (RunID, RUN_END))` (no reopen) and, only after that final settle, the I5/I6/I7
 reconciliation to `T`. **O1:** `FinalizeSimulationRun` no longer drains the queue or closes a round itself —
@@ -487,7 +496,7 @@ the notes and specified in `STAGE_01_MINER_STATE_MACHINE.md`.
 | R11 | `HASHING` | RefreshTrigger | A superseding immutable template is available | Prepare template replacement | `TEMPLATE_REFRESH` | Refresh is the only way mined content changes (§3.11) |
 | R12 | `HASHING` | FatalFault / RoundTimeout | Unrecoverable fault or round-level timeout | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.4) |
 | R13 | `SECURITY_RECOVERY` | FloorRestored | Activated reserves raise `H_honest(t)` to/above the floor | Re-partition/redistribute disjoint ranges (I1); if live candidates remain, resume propagation instead | `ASSIGNMENT` (→ `HASHING` at R4) **or `SOLUTION_PROPAGATION`** if `active_propagation_set` is non-empty (G8) **or directly `HASHING`** when no context and no redistribution | **EXECUTABLE via `CompleteSecurityRecovery` (pseudocode §10a/N2):** seated by the epilogue's floor-restored decision (I-02); branch A (live contexts) → `SOLUTION_PROPAGATION` preserving those candidates' events; branch B (no context, no assignment change) → `HASHING`; branch C (redistribution) → `ASSIGNMENT` → `CompleteAssignmentPhase` → `HASHING`. Every recovery-success branch reaches a floor-applicable state through `TransitionRoundState`/`CompleteAssignmentPhase`, so the applicability-entry census is captured (M2). No new template is fabricated (§3.6) |
-| R14 | `SECURITY_RECOVERY` | FloorUnrecoverable | Floor cannot be restored (insufficient reserves) by the recovery deadline | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.10); **REACHABLE and EXECUTABLE (O3):** the named seated source `RecoveryDeadlineEvent` (§9a) seats `CompleteSecurityRecovery` with `RecoveryOutcome = UNRECOVERABLE`, whose **branch D (§10a/N2) → `RoundAbort(reason = floor_unrecoverable)`** closes ONLY this round (N1). At most one completion per `RecoveryEpisodeID` (O4) |
+| R14 | `SECURITY_RECOVERY` | FloorUnrecoverable | The FINAL timestamp census still breaches the floor when the recovery deadline has elapsed | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.10); **REACHABLE and EXECUTABLE (O3/P3):** `RecoveryDeadlineEvent` (§9a) records the deadline FACT only; the event-time epilogue selects `RecoveryOutcome = UNRECOVERABLE` from the final census and seats `CompleteSecurityRecovery` via `SeatRecoveryCompletion`, whose **branch D (§10a/N2) → `RoundAbort(reason = floor_unrecoverable)`** closes ONLY this round (N1). At most one applied completion per `RecoveryEpisodeID` (O4); latest `RecoveryDecisionID` wins (P5) |
 | R15 | `ROUND_EXHAUSTED` | RefreshAvailable | A new immutable template can be committed; difficulty fixed (I12) | Prepare new `TemplateID` | `TEMPLATE_REFRESH` | Retains `RoundID`; new template only (§3.5) |
 | R16 | `ROUND_EXHAUSTED` | NoRefreshPossible | No new template can be produced | Abort round | `ROUND_ABORTED` | Terminal-abort |
 | R17 | `TEMPLATE_REFRESH` | NewTemplateReady | New immutable template prepared | Commit new template | `TEMPLATE_COMMITMENT` | Then R3 → `ASSIGNMENT` re-partitions the new domain |

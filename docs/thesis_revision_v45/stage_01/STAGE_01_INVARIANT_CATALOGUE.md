@@ -406,9 +406,12 @@ replaced by two consistent invariants** (the old form was impossible while a lin
   horizon `T` and the subsequent I5/I6/I7 reconciliation; O1 narrowed it so it no longer drains the queue or
   closes a round — the drain is the run driver's and the horizon-close is `CloseRoundAtHorizon`'s;
   `RoundAbort` does NOT settle at the horizon);
-  `CloseRoundAtHorizon` (O1 — the run-level hook that closes a still-nonterminal round at `T` via
+  `CloseRoundAtHorizon` (O1/P2 — the run-level hook that closes a still-nonterminal round at `T` via
   `CloseRoundAssignments` with a distinct horizon-end disposition, BEFORE the `FINAL_RUN_END` settle; performs
-  NO residency finalisation itself);
+  NO residency finalisation itself. P2: it uses ONE deterministic run-hook envelope (`HorizonHookID`, reserved
+  `RUN_HOOK_CYCLE`) and is idempotent via `applied_run_hook_ids`, so a replayed horizon close produces
+  `horizon_close_duplicate_noop` — NO second transition energy and NO second residency boundary; it always runs
+  exactly once per run via the P1 horizon sentinel);
   `CloseRoundAssignments` (records `round_terminal_time` ONLY, performs NO residency finalisation — M4);
   `residency_ledger` (single writer). I5/I6 reconcile the
   resulting durations and energies.

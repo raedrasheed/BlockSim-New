@@ -501,3 +501,43 @@ Catalogue" denotes the separate document defining I1..I19.
   `FinalizeEventTimeSecurityCensus` (I-01/I-02). The superseded name `FinalizeTimestampSecurityCensus` is
   replaced everywhere by `FinalizeEventTimeSecurityCensus`. Historical Stage-1A–1N lettered artifacts are
   unchanged; supersessions are recorded in `STAGE_01O_SUPERSESSION_REGISTER.md`.
+
+## Stage-1P terminology addendum (horizon sentinel & recovery-decision lock)
+
+- **Horizon sentinel (P1).** `RunEventLoopToHorizon` processes every `event_time` **strictly less than** `T`,
+  then makes ONE synthetic horizon invocation `ProcessEventTime(T, is_horizon = true, allow_empty_horizon =
+  true)` (guarded by `T not in finalised_event_times`). It runs EVEN WHEN the queue holds no event at `T`, so
+  the horizon sequence occurs EXACTLY once: a nonterminal round is always horizon-closed (`CloseRoundAtHorizon`),
+  the `T` census created by that closure is finalised, `T` is always added to `finalised_event_times`, and
+  `FinalizeSimulationRun` runs only afterward (and ASSERTS the round is terminal, so a nonterminal round can
+  never reach it without horizon closure). An ordinary event at `T` is NOT required.
+- **`RunHookContext` & the deterministic run-hook envelope (P2).** Run-level hooks that mutate miner state
+  obtain their envelope identity from the SOLE owner `RunHookContext` (`run_hook_seq`, `applied_run_hook_ids`),
+  never from an ambient/undefined seq and never from the ordinary `event_creation_seq`. The horizon close uses
+  `HorizonHookID = (RunID, T, HORIZON_CLOSE)`; its envelope is `{event_time = T, delta_cycle = RUN_HOOK_CYCLE
+  (reserved), event_seq = run_hook_seq, hook_id = HorizonHookID}`. `RUN_HOOK_CYCLE` is never produced by
+  `ScheduleEvent`, so a run-hook envelope cannot collide with an ordinary event envelope; `applied_run_hook_ids`
+  makes the hook idempotent (exactly one horizon close per run; a replay returns `horizon_close_duplicate_noop`
+  with no second transition energy or residency boundary). The undefined `horizon_close_delta_cycle` /
+  `horizon_close_event_seq` are removed.
+- **Recovery deadline is a FACT, not a pre-epilogue outcome (P3).** `RecoveryDeadlineEvent` records ONLY
+  `recovery_deadline_reached[episode]` and creates a coherent census for its timestamp via
+  `CaptureSecurityCensusOnRecoveryDeadline` (the third coherent writer of `security_census_dirty` /
+  `latest_security_census`). It selects NO outcome and seats NO completion. The event-time epilogue
+  (`SecurityFloorEvaluate`) SELECTS the outcome from the FINAL timestamp census — a persistent breach WITH the
+  deadline reached → `UNRECOVERABLE`; a restored floor → `RESTORED` — so a same-timestamp `WakeCompleteEvent`
+  that restores the floor is visible before the deadline outcome is chosen. Remaining in `SECURITY_RECOVERY`
+  never implies the floor is still breached.
+- **Atomic completion seating (P4).** The SOLE seater `SeatRecoveryCompletion` sets
+  `recovery_completion_pending[episode]` ONLY AFTER `ScheduleEvent` returns `scheduled`; a rejected schedule
+  leaves it false and records the exact disposition, and never reports a completion as seated. A decision AT
+  `T` records `run_ending_no_recovery_action`, seats nothing, and leaves no false pending flag; the horizon
+  close governs run end.
+- **Recovery decision versioning (P5).** `RecoveryDecisionID = (RecoveryEpisodeID, recovery_decision_seq)`;
+  `latest_recovery_decision[episode]` holds the latest `{decision_id, outcome}`. A `CompleteSecurityRecovery`
+  carries its `RecoveryDecisionID` and applies its outcome ONLY if the episode is current AND its decision is
+  the LATEST for the episode; a superseded decision returns `recovery_decision_stale_noop`. This prevents an
+  old `RESTORED`/`UNRECOVERABLE` outcome from being applied after a newer final-census decision exists. A
+  different outcome supersedes a pending one; the same standing outcome is not re-seated.
+- **Historical freeze.** Stage-1A–1O lettered artifacts are unchanged; Stage-1P supersessions are recorded in
+  `STAGE_01P_SUPERSESSION_REGISTER.md`.
