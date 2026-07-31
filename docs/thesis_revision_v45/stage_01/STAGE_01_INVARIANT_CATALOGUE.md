@@ -314,14 +314,21 @@ point, planned test stage, and consequence of violation.
   re-checks this identity at **every** `ACTIVE_HASHING` entry and exit boundary. Every
   adversarial-participation change is carried by a scheduled `AdversarialParticipationChangeEvent`
   (G3/H6) that mutates the census ONLY through this hook; `ActiveHashRateUpdate` is **compute-only**
-  (no sampling, no census mutation — G3). **Q4:** the census maps `latest_security_census[event_time]` and
-  `security_census_dirty[event_time]` have ONE canonical atomic writer, `CommitSecurityCensus`, with three
-  named `census_source` values (MINER_STATE_TRANSITION, APPLICABILITY_ENTRY, RECOVERY_DEADLINE); this hook
-  calls it rather than writing the maps directly, and `dirty[t] = true ⇒ latest[t] exists` is structural. The
-  single settled-census event-time epilogue `FinalizeEventTimeSecurityCensus` (H3, keyed by `event_time` alone
-  per I-01/I-02; O5) reads the FINAL census once per settled `event_time` — AFTER the whole `event_time` is
-  quiescent, never before certificate/discovery events — and invokes `SecurityFloorEvaluate` exactly once; no
-  per-transition floor decision is scheduled.
+  (no sampling, no census mutation — G3). **Q4/R5:** the census maps `latest_security_census[event_time]` and
+  `security_census_dirty[event_time]` have ONE canonical atomic writer, `CommitSecurityCensus`, with **five**
+  named `census_source` values (R5): MINER_STATE_TRANSITION, APPLICABILITY_ENTRY, RECOVERY_DEADLINE,
+  RECOVERY_COMPLETION_DUE (the completion-due checkpoint, §10a), and POST_RECOVERY_APPLICATION (the single
+  post-application settlement `FinalizePostRecoveryApplicationState`, §10a/R2). Every producer (this hook and the
+  capture procedures) CALLS `CommitSecurityCensus` rather than writing the maps directly — NO producer is itself a
+  direct writer (R5) — and `dirty[t] = true ⇒ latest[t] exists` is structural. **R5:** the census-write order is
+  the EXPLICIT per-run counter `security_census_write_seq_by_event_time` (a `RunContext` field owned SOLELY by
+  `CommitSecurityCensus`, initialised in `RunInitialise` and preserved across rounds), replacing the implicit
+  "next per-event_time ordinal". The single settled-census event-time epilogue `FinalizeEventTimeSecurityCensus`
+  (H3, keyed by `event_time` alone per I-01/I-02; O5) reads the FINAL census EXACTLY ONCE per settled `event_time`
+  — AFTER the whole `event_time` is quiescent, never before certificate/discovery events — and invokes
+  `SecurityFloorEvaluate` exactly once; no per-transition floor decision is scheduled. **R2:** any post-application
+  re-dirty at `t` is settled by `FinalizePostRecoveryApplicationState` (a settlement, NOT a second floor decision),
+  so the epilogue still runs exactly once per `event_time`.
 - **Planned test stage.** Stage 3 (time-varying hash rate, security floor, reserve activation).
 - **Consequence of violation.** Inconsistent hash-rate decomposition; `q_adv(t)` derived from an
   independently sampled adversarial term; a zero-active-rate regime silently reported as safe
@@ -414,7 +421,11 @@ replaced by two consistent invariants** (the old form was impossible while a lin
   NO residency finalisation itself. P2: it uses ONE deterministic run-hook envelope (`HorizonHookID`, reserved
   `RUN_HOOK_CYCLE`) and is idempotent via `applied_run_hook_ids`, so a replayed horizon close produces
   `horizon_close_duplicate_noop` — NO second transition energy and NO second residency boundary; it always runs
-  exactly once per run via the P1 horizon sentinel);
+  exactly once per run via the P1 horizon sentinel. **R3:** the horizon envelope's `envelope_namespace = RUN_HOOK`
+  and `hook_id = HorizonHookID` are threaded through `CloseRoundAssignments → EnterLowPowerListen →
+  ApplyMinerStateTransition`, so every nested horizon-close miner transition carries them in its
+  `TransitionEventID` and is distinct from — and replay-suppressed independently of — any ordinary transition that
+  shares its numeric `(event_time, delta_cycle, event_seq)`);
   `CloseRoundAssignments` (records `round_terminal_time` ONLY, performs NO residency finalisation — M4);
   `residency_ledger` (single writer). I5/I6 reconcile the
   resulting durations and energies.

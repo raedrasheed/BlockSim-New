@@ -406,13 +406,40 @@ preserved, branch A), directly to `HASHING` (branch B), or through `ASSIGNMENT �
 HASHING` (branch C, no new template); on `UNRECOVERABLE`, `RoundAbort(reason = floor_unrecoverable)` (branch
 D/R14), closing ONLY this round (N1). At most ONE outcome is applied per episode (`RecoveryEpisodeID`, O4).
 **Q3:** pending decisions are explicit identities with a `RECOVERY_DECISION_STATUS`
-({CREATED, SCHEDULED, SUPERSEDED, APPLIED, SCHEDULE_FAILED, CANCELLED}); a superseded decision can NEVER become
-valid again, and a failed superseding schedule cannot revive an earlier decision. Every recovery-success branch
-reaches a floor-applicable state through `TransitionRoundState`/`CompleteAssignmentPhase`, so the
-applicability-entry census is captured (M2). This
+({CREATED, SCHEDULED, SUPERSEDED, APPLYING, APPLIED, SCHEDULE_FAILED, APPLY_FAILED, CANCELLED}); a superseded
+decision can NEVER become valid again, and a failed superseding schedule cannot revive an earlier decision. Every
+recovery-success branch reaches a floor-applicable state through `TransitionRoundState`/`CompleteAssignmentPhase`,
+so the applicability-entry census is captured (M2). This
 contract is NO LONGER "described but non-executable" — a concrete seated source and call path exists for both
 R13 and R14. Monitoring is specified only; no claim is made that the floor is
 actually preserved (scope §C).
+
+**R1 (no same-timestamp event after the ordinary drain).** The post-epilogue recovery application enqueues
+NOTHING at the already-drained application `event_time` `t`. In particular branch C (`SECURITY_RECOVERY →
+ASSIGNMENT`, reserve activation / reassignment, `CompleteAssignmentPhase → HASHING`) does NOT `StartWake`/seat a
+`WakeCompleteEvent` at `t`: it transitions to `ASSIGNMENT` and seats ONE `RecoveryAssignmentContinuationEvent` at
+`next_representable_simulation_time(t)` (a STRICTLY LATER `event_time`), whose ordinary handler performs the
+`ReserveActivate`/`RangeReassign`/`StartWake`. A zero modeled wake latency after the application is represented at
+`next_representable_simulation_time(t)`, never at `t`. `ProcessEventTime` ASSERTS that no ordinary event remains
+at `t` before finalising it.
+
+**R2 (one epilogue, one post-application settlement).** `FinalizeEventTimeSecurityCensus(t)` runs EXACTLY ONCE
+per `event_time` and is the SOLE security-floor decision for `t`. When the recovery application re-dirties `t`
+(the RESTORED exit's applicability-entry restatement, or the UNRECOVERABLE abort's off-`ACTIVE_HASHING` census),
+`FinalizePostRecoveryApplicationState(t)` — NOT a second floor decision — archives that terminal/post-application
+census and clears `security_census_dirty[t]` WITHOUT invoking `SecurityFloorEvaluate` again. For UNRECOVERABLE it
+records a TERMINAL census observation; for RESTORED any NEW applicability census from later miner activation is
+generated at the strictly later continuation `event_time`.
+
+**R4 (atomic recovery application).** A decision is NOT marked `APPLIED` (and `current_recovery_episode` is NOT
+cleared) before its R13/R14 branch succeeds. The application VERIFIES (round in `SECURITY_RECOVERY`, episode
+current, decision `SCHEDULED` and due, bound census version latest, outcome matches the final census, round
+nonterminal), atomically sets `APPLYING`, executes `CompleteSecurityRecovery` (which returns an EXPLICIT
+success/failure disposition per branch), and ONLY on a successful round transition / successful `RoundAbort` marks
+`APPLIED` + finalises the episode. On a branch failure the decision becomes `APPLY_FAILED` and the episode is
+PRESERVED. At the horizon, after `CloseRoundAtHorizon` makes the round terminal, every pending decision is
+cancelled and `ApplyRecoveryCompletionAfterEpilogue` returns `terminal_recovery_noop` — NO decision is marked
+`APPLIED` after horizon closure.
 
 ### 3.11 What causes a template refresh
 
@@ -505,8 +532,8 @@ the notes and specified in `STAGE_01_MINER_STATE_MACHINE.md`.
 | R10 | `HASHING` | SecurityFloorViolation | Modeled `H_honest(t)` below the security floor, or invariant-risk detected | Trigger reserve activation | `SECURITY_RECOVERY` | Emits miner activation → `RESERVE → WAKING` (T4), `LOW_POWER_LISTEN → WAKING` (T10) |
 | R11 | `HASHING` | RefreshTrigger | A superseding immutable template is available | Prepare template replacement | `TEMPLATE_REFRESH` | Refresh is the only way mined content changes (§3.11) |
 | R12 | `HASHING` | FatalFault / RoundTimeout | Unrecoverable fault or round-level timeout | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.4) |
-| R13 | `SECURITY_RECOVERY` | FloorRestored | Activated reserves raise `H_honest(t)` to/above the floor | Re-partition/redistribute disjoint ranges (I1); if live candidates remain, resume propagation instead | `ASSIGNMENT` (→ `HASHING` at R4) **or `SOLUTION_PROPAGATION`** if `active_propagation_set` is non-empty (G8) **or directly `HASHING`** when no context and no redistribution | **EXECUTABLE via `CompleteSecurityRecovery` (pseudocode §10a/N2):** seated by the epilogue's floor-restored decision (I-02); branch A (live contexts) → `SOLUTION_PROPAGATION` preserving those candidates' events; branch B (no context, no assignment change) → `HASHING`; branch C (redistribution) → `ASSIGNMENT` → `CompleteAssignmentPhase` → `HASHING`. Every recovery-success branch reaches a floor-applicable state through `TransitionRoundState`/`CompleteAssignmentPhase`, so the applicability-entry census is captured (M2). No new template is fabricated (§3.6) |
-| R14 | `SECURITY_RECOVERY` | FloorUnrecoverable | The FINAL census of the completion `event_time` still breaches the floor after the deadline | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.10); **REACHABLE and EXECUTABLE (O3/P3/Q2):** the epilogue selects `UNRECOVERABLE` from the FINAL census (versioned, Q1) and seats a `RecoveryCompletionDueEvent`; `ApplyRecoveryCompletionAfterEpilogue` applies it — ONLY if still the latest census version and the final census still breaches — via `CompleteSecurityRecovery` **branch D (§10a) → `RoundAbort(reason = floor_unrecoverable)`**, closing ONLY this round (N1). At most one applied outcome per `RecoveryEpisodeID` (O4); a superseded decision never applies (Q1/Q3) |
+| R13 | `SECURITY_RECOVERY` | FloorRestored | Activated reserves raise `H_honest(t)` to/above the floor | Re-partition/redistribute disjoint ranges (I1); if live candidates remain, resume propagation instead | `ASSIGNMENT` (→ `HASHING` at R4) **or `SOLUTION_PROPAGATION`** if `active_propagation_set` is non-empty (G8) **or directly `HASHING`** when no context and no redistribution | **EXECUTABLE via `CompleteSecurityRecovery` (pseudocode §10a/N2):** seated by the epilogue's floor-restored decision (I-02); branch A (live contexts) → `SOLUTION_PROPAGATION` preserving those candidates' events; branch B (no context, no assignment change) → `HASHING`; branch C (redistribution) → `ASSIGNMENT`, then a SINGLE `RecoveryAssignmentContinuationEvent` seated at `next_representable_simulation_time(t)` (R1) whose handler does `ReserveActivate`/`RangeReassign` → `CompleteAssignmentPhase` → `HASHING`. Every recovery-success branch reaches a floor-applicable state through `TransitionRoundState`/`CompleteAssignmentPhase`, so the applicability-entry census is captured (M2). **R1:** the application enqueues NOTHING at the drained application `event_time` — branch C's wakes fire at a strictly-later time. **R4:** the decision is marked `APPLIED` and the episode cleared ONLY after `CompleteSecurityRecovery` reports success (`APPLYING → APPLIED`); a branch failure yields `APPLY_FAILED` and preserves the episode. No new template is fabricated (§3.6) |
+| R14 | `SECURITY_RECOVERY` | FloorUnrecoverable | The FINAL census of the completion `event_time` still breaches the floor after the deadline | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.10); **REACHABLE and EXECUTABLE (O3/P3/Q2):** the epilogue selects `UNRECOVERABLE` from the FINAL census (versioned, Q1) and seats a `RecoveryCompletionDueEvent`; `ApplyRecoveryCompletionAfterEpilogue` applies it — ONLY if still the latest census version and the final census still breaches — via `CompleteSecurityRecovery` **branch D (§10a) → `RoundAbort(reason = floor_unrecoverable)`**, closing ONLY this round (N1). At most one applied outcome per `RecoveryEpisodeID` (O4); a superseded decision never applies (Q1/Q3). **R4:** the decision passes `SCHEDULED → APPLYING → APPLIED` and is marked `APPLIED` ONLY after `RoundAbort` succeeds (`round_state = ROUND_ABORTED`); at the horizon the round is already terminal, so pending decisions are CANCELLED and `ApplyRecoveryCompletionAfterEpilogue` returns `terminal_recovery_noop` (no `APPLIED` after horizon closure) |
 | R15 | `ROUND_EXHAUSTED` | RefreshAvailable | A new immutable template can be committed; difficulty fixed (I12) | Prepare new `TemplateID` | `TEMPLATE_REFRESH` | Retains `RoundID`; new template only (§3.5) |
 | R16 | `ROUND_EXHAUSTED` | NoRefreshPossible | No new template can be produced | Abort round | `ROUND_ABORTED` | Terminal-abort |
 | R17 | `TEMPLATE_REFRESH` | NewTemplateReady | New immutable template prepared | Commit new template | `TEMPLATE_COMMITMENT` | Then R3 → `ASSIGNMENT` re-partitions the new domain |

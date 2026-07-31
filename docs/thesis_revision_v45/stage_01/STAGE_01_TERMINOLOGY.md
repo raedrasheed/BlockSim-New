@@ -588,3 +588,59 @@ Catalogue" denotes the separate document defining I1..I19.
   (status CANCELLED), a superseded decision stays invalid, and `CloseRoundAtHorizon` governs run end.
 - **Historical freeze.** Stage-1A–1P lettered artifacts are unchanged; Stage-1Q supersessions are recorded in
   `STAGE_01Q_SUPERSESSION_REGISTER.md`.
+
+## Stage-1R terminology addendum (post-epilogue & transition-identity lock)
+
+- **No same-timestamp event after the ordinary drain (R1).** The post-epilogue recovery application
+  (`ApplyRecoveryCompletionAfterEpilogue`) and its branch dispatch `CompleteSecurityRecovery` may NOT directly or
+  indirectly enqueue an ordinary event whose `target_event_time` equals the already-drained application
+  `event_time` `t`. Branch C (`SECURITY_RECOVERY → ASSIGNMENT`, reserve activation / reassignment,
+  `CompleteAssignmentPhase → HASHING`) transitions to `ASSIGNMENT` and seats ONE
+  `RecoveryAssignmentContinuationEvent` at `next_representable_simulation_time(t)` — a STRICTLY LATER `event_time`
+  — whose ordinary handler performs `ReserveActivate`/`RangeReassign`/`StartWake`. A zero modeled wake latency after
+  application is represented at `next_representable_simulation_time(t)`, never at `t`. Before adding `t` to
+  `finalised_event_times`, `ProcessEventTime` ASSERTS no ordinary event remains at `t`.
+- **`RecoveryAssignmentContinuationEvent` (R1).** The ordinary queued event
+  (`RECOVERY_ASSIGNMENT_CONTINUATION`) that carries out branch-C assignment work at a strictly-later `event_time`,
+  so the post-epilogue application enqueues nothing at the drained `event_time`.
+- **One security epilogue, one post-application settlement (R2).** `FinalizeEventTimeSecurityCensus(t)` runs
+  EXACTLY ONCE per `event_time` and is the SOLE security-floor decision for `t`. The prior "epilogue #1 / epilogue
+  #2" framing is removed. `FinalizePostRecoveryApplicationState(t)` is a post-application SETTLEMENT — run once when
+  the application re-dirtied `t` — that archives the terminal/post-application census and clears
+  `security_census_dirty[t]` WITHOUT invoking `SecurityFloorEvaluate` again, seats no recovery decision, and
+  enqueues no event at `t`.
+- **`FinalizePostRecoveryApplicationState` (R2).** The single post-application settlement hook. For an
+  UNRECOVERABLE application that closes the round it records a terminal census observation; for a RESTORED exit it
+  records a post-application observation of the already-non-breached census; any NEW applicability census from later
+  miner activation is generated at the strictly later continuation `event_time`.
+- **Full transition envelope (R3).** `ApplyMinerStateTransition` receives ONE explicit transition envelope —
+  `envelope_namespace`, `event_time`, `delta_cycle`, `event_seq`, `hook_id` — sourced from the caller's
+  `dispatch_envelope`; the namespace fields are NEVER decomposed away. `TransitionEventID` includes
+  `envelope_namespace` and `hook_id`, so a `RUN_HOOK` transition and an `ORDINARY_EVENT` transition with identical
+  numeric `(event_time, delta_cycle, event_seq)` are DISTINCT ids. `ProcessEventTime` materialises an
+  `ORDINARY_EVENT` dispatch envelope with `hook_id = null`; `CloseRoundAtHorizon` preserves `RUN_HOOK` +
+  `HorizonHookID` through `CloseRoundAssignments → EnterLowPowerListen → ApplyMinerStateTransition`.
+- **Atomic recovery application (R4).** `RECOVERY_DECISION_STATUS` adds `APPLYING` and `APPLY_FAILED`. A decision is
+  verified, atomically set `APPLYING`, and marked `APPLIED` (with the episode finalised + cleared) ONLY after
+  `CompleteSecurityRecovery` reports a successful round transition or `RoundAbort`; a branch failure yields
+  `APPLY_FAILED` and PRESERVES the active episode. `CompleteSecurityRecovery` returns an explicit success/failure
+  disposition per branch. At the horizon (after `CloseRoundAtHorizon` makes the round terminal) pending decisions
+  are cancelled and the application returns `terminal_recovery_noop` — no decision is marked `APPLIED` after horizon
+  closure.
+- **Explicit census-write sequence and five sources (R5).** `security_census_write_seq_by_event_time` is a
+  `RunContext` field — an EXPLICIT deterministic per-`event_time` census-write ordinal owned SOLELY by
+  `CommitSecurityCensus`, initialised in `RunInitialise` and preserved across rounds — replacing the implicit "next
+  ordinal". `CENSUS_SOURCE` = {MINER_STATE_TRANSITION, APPLICABILITY_ENTRY, RECOVERY_DEADLINE,
+  RECOVERY_COMPLETION_DUE, POST_RECOVERY_APPLICATION}. `RecoveryCompletionDueEvent` uses `RECOVERY_COMPLETION_DUE`
+  (not `RECOVERY_DEADLINE`); `FinalizePostRecoveryApplicationState` uses `POST_RECOVERY_APPLICATION`. Every producer
+  (the miner hook and the capture procedures) CALLS `CommitSecurityCensus`; none is a direct writer of the maps.
+- **Consistent latest-decision mirror (R6).** `latest_recovery_decision` is kept ATOMICALLY consistent with
+  `recovery_decisions` by the sole status mutator `SetRecoveryDecisionStatus` on every transition to SCHEDULED /
+  SUPERSEDED / APPLYING / APPLIED / SCHEDULE_FAILED / APPLY_FAILED / CANCELLED — it can never remain CREATED after
+  the underlying decision became CANCELLED or SCHEDULE_FAILED.
+- **`SetRecoveryDecisionStatus` (R6).** The SOLE mutator of a decision's status after its initial CREATED; it also
+  refreshes `latest_recovery_decision` when that mirror points at the decision, making mirror consistency structural.
+- **`next_representable_simulation_time(t)` (R1).** The next representable simulation instant strictly greater than
+  `t`; the deterministic target for a zero-modeled-latency continuation after post-epilogue recovery application.
+- **Historical freeze.** Stage-1A–1Q lettered artifacts are unchanged; Stage-1R supersessions are recorded in
+  `STAGE_01R_SUPERSESSION_REGISTER.md`.
