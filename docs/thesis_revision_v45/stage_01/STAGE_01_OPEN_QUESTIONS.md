@@ -20,7 +20,7 @@ Every blocking question below is given a **minimal default decision** that fixes
 just enough for Stage 2 to proceed. Adopting the default is itself the resolution-for-Stage-2;
 deeper study is deferred to the noted later stage. Defaults are chosen to be the most
 conservative / least-claiming option consistent with the canonical preamble, `A1`, and
-`I1..I17`.
+`I1..I19`.
 
 Field order per entry: **question | why it matters | candidate options | scientific risk |
 implementation dependency | stage where it must be resolved | Stage-2-blocking?** followed by
@@ -300,7 +300,7 @@ the seven blocking semantics (state transitions, energy accounting, range validi
 termination, security-floor triggering, reserve activation, template identity) — Q1–Q12 — has
 an adopted **minimal default decision** above that fixes its semantics for Stage 2 while
 remaining the most conservative, least-claiming option consistent with the canonical preamble,
-the `A1` accounting invariant, and `I1..I17`. The remaining open items (Q13, Q14 `UNRESOLVED`;
+the `A1` accounting invariant, and `I1..I19`. The remaining open items (Q13, Q14 `UNRESOLVED`;
 Q15, Q16 non-blocking) affect later-stage soundness, incentives, reporting, or numeric tuning
 only, and do not block Stage 2. No default above asserts that any security, fairness,
 incentive, or energy-reduction property is achieved; each merely fixes semantics so Stage 2 can

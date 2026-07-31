@@ -8,7 +8,7 @@ Stage 1 — it classifies **no** property as experimentally supported. The idle 
 operating policy inside PoCol, not a variant or fork.
 
 Canonical references: 8 miner states and 10 round states as listed in
-`STAGE_01_PROTOCOL_SCOPE.md`; invariants `I1..I17` in `STAGE_01_INVARIANT_CATALOGUE.md`;
+`STAGE_01_PROTOCOL_SCOPE.md`; invariants `I1..I19` in `STAGE_01_INVARIANT_CATALOGUE.md`;
 adversarial share `q_adv(t) = H_adversarial(t) / (H_honest(t) + H_adversarial(t))`; progress
 evidence is a **modeled progress-verification abstraction**, never a cryptographic proof;
 difficulty is FIXED (`I12`).

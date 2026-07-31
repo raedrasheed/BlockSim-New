@@ -167,14 +167,17 @@ point, planned test stage, and consequence of violation.
 
 ### I8b — Custody / provenance model (orthogonal to coverage).
 
-- **Formal statement.** Each assignment carries a custody / lineage status in
-  `{original, renewed, reassigned, revoked, expired, abandoned, completed}`. These are custody /
-  provenance properties and **MUST NOT** appear as additive terms in the coverage-state equation of
-  I8a. A `reassigned` position still has an **independent coverage state**
-  (`searched` / `active_unsearched` / `inactive_unsearched`); custody and coverage are two
-  orthogonal models of the same position. A fully exhausted range has `coverage_state = searched`
-  together with `custody_status = completed`, and is **NOT** reassignable under the same
-  `TemplateID`.
+- **Formal statement.** Each assignment carries a custody / lineage status from the CANONICAL,
+  CLOSED enum `{original, renewed, reassigned, revoked, expired, abandoned, completed,
+  superseded_by_template_refresh}` (I-07). No procedure may set `custody_status` to a value outside
+  this enum — in particular an adversarial withdrawal sets `custody_status = revoked` and records the
+  cause in the SEPARATE `revocation_reason` field (e.g. `adversarial_withdrawal`), never an invented
+  value such as `revoked_adversarial_exit`. These are custody / provenance properties and **MUST NOT**
+  appear as additive terms in the coverage-state equation of I8a. A `reassigned` position still has an
+  **independent coverage state** (`searched` / `active_unsearched` / `inactive_unsearched`); custody
+  and coverage are two orthogonal models of the same position. A fully exhausted range has
+  `coverage_state = searched` together with `custody_status = completed`, and is **NOT** reassignable
+  under the same `TemplateID`.
 - **Scope.** Custody / lineage of assignments across renewal and reassignment.
 - **Required inputs.** Assignment / lease records; reassignment provenance; lineage links
   (`previous_assignment_reference`, `assignment_version`).

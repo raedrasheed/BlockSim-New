@@ -11,7 +11,7 @@ and "Enhanced PoCol" are prohibited.
 
 **Reference cross-links.** "Scope §X" denotes the corresponding section of
 `STAGE_01_PROTOCOL_SCOPE.md`. "Preamble" denotes the canonical Stage-1 preamble. "Invariant
-Catalogue" denotes the separate document defining I1..I17.
+Catalogue" denotes the separate document defining I1..I19.
 
 ---
 
@@ -235,3 +235,48 @@ Catalogue" denotes the separate document defining I1..I17.
   version being paused/exhausted/revoked/closed as `assignment_ref` (a live head in
   `{CURRENT, PAUSED}`); there is no undeclared free `assignment`. Every caller passes the precise
   version, so a `SUPERSEDED`/`CLOSED` historical version can never be paused or closed by accident.
+
+## Stage-1I terminology addendum (execution-contract lock)
+
+- **Event-time security epilogue (I-01/I-02).** The single security-floor decision is keyed by
+  `event_time` ALONE, not by `(event_time, delta_cycle)`. `ApplyMinerStateTransition` sets
+  `security_census_dirty[event_time]` and OVERWRITES `latest_security_census[event_time]` with the
+  newest post-transition census. After the whole `event_time` is quiescent, `ProcessEventTime` runs the
+  EPILOGUE `FinalizeEventTimeSecurityCensus(event_time)` exactly once, deciding from
+  `latest_security_census[event_time]`. Because it is an epilogue (not a queued microphase event) it
+  cannot be missed when no later event exists, and no intermediate delta-cycle census can strand a
+  pending decision or independently trigger recovery.
+- **`ProcessEventTime` / quiescence (I-02).** The event-loop driver that DRAINS every ordinary and
+  delta-cycle event at one `event_time` (in `(delta_cycle, microphase, stable_tie_key, seq)` order,
+  including handler-generated same-time events) BEFORE running the security epilogue and marking the
+  `event_time` finalised. No ordinary event may be scheduled into a finalised `event_time`; any
+  participation-changing action from the security decision is scheduled at a STRICTLY LATER
+  `event_time`, so it cannot alter `H_active` after the final decision at this timestamp.
+- **`TransitionEventID` (I-03).** The immutable identity of ONE applied transition:
+  `(event_time, delta_cycle, seq, MinerID, old_state, new_state, reason, AssignmentID,
+  assignment_version, CandidateID?, PropagationID?)`. `ApplyMinerStateTransition` suppresses ONLY an
+  exact-same-`TransitionEventID` replay; a legitimate repeat of the SAME state edge for the SAME miner
+  at the SAME `event_time` in a DIFFERENT `delta_cycle` has a DISTINCT id and is applied (not
+  suppressed). Recorded in `transition_audit`.
+- **Runtime registries (I-04).** `RoundInitialise` explicitly initialises and returns every normative
+  registry; none is an implicit global. Per-ROUND registries (`active_propagation_set`,
+  `acceptance_batch_registry`, `candidate_discovery_seq`, `block_accepted`, `state_version`,
+  `residency_ledger`) reset each round; per-RUN event-loop bookkeeping (`security_census_dirty`,
+  `latest_security_census`, `transition_event_registry`, `finalised_event_times`,
+  `current_delta_cycle`) is initialised once at run start and preserved across rounds.
+- **Terminal-first / persistent-recovery security (I-05).** `SecurityFloorEvaluate` returns
+  `terminal_stale_noop` for `ROUND_ACCEPTED`/`ROUND_ABORTED` BEFORE any breach recording. Recovery is
+  entered ONLY via `HASHING → SECURITY_RECOVERY` or `SOLUTION_PROPAGATION → SECURITY_RECOVERY`. A
+  breach that persists while already in `SECURITY_RECOVERY` records `breach_persists` with NO
+  `SECURITY_RECOVERY → SECURITY_RECOVERY` self-transition and NO `state_version` bump.
+- **State-specific low-power re-entry (I-06).** Adversarial re-entry of a `LOW_POWER_LISTEN` miner is
+  split by `entry_stop_reason`: `VALID_SOLUTION_VERIFIED` resumes the own PAUSED head via
+  `ResumeFromPause`; `RANGE_EXHAUSTED`/`ASSIGNMENT_REVOKED` create a fresh T10 assignment ONLY in a
+  nonterminal, non-refreshing, committed-eligible-template round whose policy permits a range;
+  `ROUND_ACCEPTED`/`ROUND_ABORTED` create NO assignment or wake in the closed round (deferred to the
+  next round); a `TEMPLATE_REFRESH` round defers to the new-template assignment procedure.
+- **Canonical custody enum + `revocation_reason` (I-07).** `custody_status` takes ONLY a value from the
+  canonical enum `{original, renewed, reassigned, revoked, expired, abandoned, completed,
+  superseded_by_template_refresh}`. An adversarial withdrawal sets `custody_status = revoked` and
+  `revocation_reason = adversarial_withdrawal`; it NEVER invents a custody value such as
+  `revoked_adversarial_exit`. The cause lives in the separate `revocation_reason` field.

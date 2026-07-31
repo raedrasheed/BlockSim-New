@@ -21,7 +21,7 @@
   - Round states: `ROUND_INITIALISING`, `TEMPLATE_COMMITMENT`, `ASSIGNMENT`, `HASHING`,
     `SECURITY_RECOVERY`, `SOLUTION_PROPAGATION`, `ROUND_ACCEPTED`, `ROUND_EXHAUSTED`,
     `TEMPLATE_REFRESH`, `ROUND_ABORTED`.
-  - Invariants `I1..I17` are defined in `STAGE_01_INVARIANT_CATALOGUE.md`.
+  - Invariants `I1..I19` are defined in `STAGE_01_INVARIANT_CATALOGUE.md`.
   - Progress evidence is a **modeled progress-verification abstraction**, never a
     cryptographic proof. **Target verification** (checking that one candidate solution's hash
     satisfies the fixed target) is DISTINCT from **progress verification** (modeling a miner's
@@ -104,17 +104,21 @@ the propagation set are NOT identified**: `SECURITY_RECOVERY` may coexist with a
 `active_propagation_set` (G8), and there is no "iff" forbidding that coexistence.
 
 **(0.7) Timestamp microphase contract (authoritative: `STAGE_01G_EVENT_MICROPHASE_SPEC.md`; extended
-in H2).** At each `event_time` the loop processes events in explicit **microphases**: PHASE 1 terminal
-abort / previously-committed closure; PHASE 2 template invalidation/refresh; PHASE 3 collect ALL
-full-block arrivals into `acceptance_batch_registry` (each `BlockAcceptancePoint` only REGISTERS and
-returns); PHASE 4 run `AcceptanceBatchFinalize` exactly once per (timestamp, acceptance point) —
-validate all collected candidates, select a winner, commit acceptance and close the round ATOMICALLY;
-PHASE 5 the SINGLE settled-census security evaluation (`FinalizeTimestampSecurityCensus` →
-`SecurityFloorEvaluate`, H3, terminal/source-guarded, G10/H4); PHASE 6+ certificate arrivals,
-solution-discovery, range completion, reported exhaustion, lease expiry, wake completion, resume,
-periodic monitoring. Round-acceptance closure is the atomic result of `AcceptanceBatchFinalize`, not
-an independent preceding event. **The authoritative same-timestamp contract is
-`STAGE_01G_EVENT_MICROPHASE_SPEC.md`, extended by the H2 delta-cycle rule below; the frozen Stage-1F
+in H2; security decision relocated to an event-time epilogue in I-01/I-02).** At each `event_time` the
+loop processes events in explicit **microphases**: PHASE 1 terminal abort / previously-committed
+closure; PHASE 2 template invalidation/refresh; PHASE 3 collect ALL full-block arrivals into
+`acceptance_batch_registry` (each `BlockAcceptancePoint` only REGISTERS and returns); PHASE 4 run
+`AcceptanceBatchFinalize` exactly once per (timestamp, acceptance point) — validate all collected
+candidates, select a winner, commit acceptance and close the round ATOMICALLY; PHASE 5+ certificate
+arrivals, solution-discovery, range completion, reported exhaustion, lease expiry, wake completion,
+resume, periodic monitoring. Round-acceptance closure is the atomic result of `AcceptanceBatchFinalize`,
+not an independent preceding event. **The single security-floor decision is NO LONGER a microphase**
+(it could be missed when no later event exists): it is the **event-time EPILOGUE**
+`FinalizeEventTimeSecurityCensus(event_time) → SecurityFloorEvaluate`, run EXACTLY ONCE by
+`ProcessEventTime` AFTER the whole `event_time` is quiescent (all ordinary and delta-cycle events
+drained), keyed by `event_time` alone (I-01/I-02, terminal-first + legal-source guarded, I-05/G10).
+**The authoritative same-timestamp contract is `STAGE_01G_EVENT_MICROPHASE_SPEC.md`, extended by the H2
+delta-cycle rule below and the I-01/I-02 epilogue; the frozen Stage-1F
 `STAGE_01F_EVENT_PRIORITY_TABLE.md` is NOT authoritative.**
 
 **(0.7-H2) Delta-cycle scheduling (no backward travel within a timestamp).** A handler running in
@@ -126,11 +130,13 @@ scheduling CAUSALLY FORWARD it obeys:
   3. the loop completes ALL microphases of `delta_cycle k` before processing any event of
      `delta_cycle k + 1` at the same `event_time`;
   4. no event may travel backward into a completed `delta_cycle`.
-This rule governs, in particular: `FinalizeTimestampSecurityCensus`/`SecurityFloorEvaluate` scheduled
-from miner transitions (H3); a zero-latency `WakeCompleteEvent` (H5); `ResumeFromPause`; candidate-
-failure cleanup (`HandlePropagationFailure` and its scheduled resumes); and ANY same-`event_time`
-event created inside another handler. The full contract, worked examples, and the required-race table
-are in `STAGE_01H_DELTA_CYCLE_CONTRACT.md`. Within a microphase, ties break by
+This rule governs, in particular: a zero-latency `WakeCompleteEvent` (H5); `ResumeFromPause`;
+candidate-failure cleanup (`HandlePropagationFailure` and its scheduled resumes); and ANY
+same-`event_time` event created inside another handler. The security-floor decision is NOT scheduled
+as such an event; it is the event-time epilogue (I-01/I-02) that `ProcessEventTime` runs once after
+ALL delta-cycles at `event_time` are drained, so no `delta_cycle` can strand a pending decision. The
+full contract, worked examples, and the required-race table are in `STAGE_01H_DELTA_CYCLE_CONTRACT.md`
+(extended by `STAGE_01I_EVENT_TIME_EPILOGUE_SPEC.md`). Within a microphase, ties break by
 `(CandidateID, MinerID, AssignmentID, seq)`, NEVER by data-structure iteration order.
 
 **(0.7a) Deterministic identifiers and iteration (G7).** `CandidateID` and `PropagationID` are
@@ -152,10 +158,52 @@ the `ACTIVE_HASHING` interval is closed at its boundary (H7/I19), never accumula
 pending `HashWorkEvent` becomes a no-op (or is cancelled) once its miner is no longer `ACTIVE_HASHING`
 or its exact assignment version is no longer `CURRENT`.
 
-**(0.7c) Terminal-round security guard (G10).** `SecurityFloorEvaluate` is always SCHEDULED (never
-called inline) and carries `(RoundID, TemplateID, state_version)`. It returns `stale_noop` — never
-transitioning to `SECURITY_RECOVERY` — when the round is already `ROUND_ACCEPTED`/`ROUND_ABORTED` or
-the evaluation belongs to a stale `RoundID`/`TemplateID`/`state_version`.
+**(0.7c) Terminal-round security guard (G10/I-05).** `SecurityFloorEvaluate` is invoked ONLY by the
+event-time epilogue and carries `(RoundID, TemplateID, state_version)`. It returns `terminal_stale_noop`
+— never transitioning to `SECURITY_RECOVERY` — when the round is already `ROUND_ACCEPTED`/`ROUND_ABORTED`
+(checked FIRST, before any breach recording, I-05) or the evaluation belongs to a stale
+`RoundID`/`TemplateID`/`state_version`.
+
+**(0.7d) Explicit event-time driver and security epilogue (I-02).** The event loop advances simulated
+wall-clock time ONE `event_time` at a time via `ProcessEventTime(event_time)` (below). For a given
+`event_time = t` it DRAINS every ordinary and delta-cycle event at `t` — including same-`event_time`
+events generated inside handlers — in deterministic `(delta_cycle, microphase, stable_tie_key, seq)`
+order, until the queue holds no further ordinary event at `t`. ONLY THEN does it run the security
+EPILOGUE `FinalizeEventTimeSecurityCensus(t)` exactly once (if `security_census_dirty[t]`), mark `t`
+finalised, and advance to the next `event_time`. Two guarantees follow: (a) the epilogue runs even when
+no later event exists (it is not itself a queued event that could be absent); (b) no ordinary event may
+be scheduled into an already-finalised `event_time`, and any participation-changing action produced by
+the security decision is scheduled at a **strictly later** `event_time`, so a recovery action can never
+change `H_active` after the final decision at `t`.
+
+```
+PROCEDURE ProcessEventTime
+  INPUTS: RoundContext, event_time t
+  PRECONDITIONS: t is the earliest unprocessed event_time on the queue; t not in finalised_event_times
+  EFFECTS:
+    # I-02: DRAIN t to quiescence in deterministic order, INCLUDING handler-generated same-t events.
+    LOOP:
+      IF no ordinary event remains at event_time = t: BREAK       # quiescent (all delta-cycles drained)
+      SET current_delta_cycle <- smallest delta_cycle with a pending event at t
+      FOR EACH event e at (t, current_delta_cycle) IN ASCENDING (microphase, stable_tie_key, seq):
+        ASSERT t not in finalised_event_times                     # never dispatch into a finalised time
+        DISPATCH e                                                # its handler may schedule further events
+                                                                  #   at t per the delta-cycle rule (§0.7-H2)
+                                                                  #   or at a strictly later event_time
+      # loop re-evaluates: a handler may have added a (t, current_delta_cycle+1) event (forward only)
+    # ---- EVENT-TIME SECURITY EPILOGUE (runs once, even if no later event exists) ----
+    IF security_census_dirty[t]:
+      CALL FinalizeEventTimeSecurityCensus(RoundContext, t)       # decides from latest_security_census[t]
+    ADD t to finalised_event_times                               # t is now closed to ordinary events
+    # any participation action the decision created was scheduled at a STRICTLY LATER event_time (I-02),
+    # so it cannot alter the census that this epilogue already finalised at t.
+    ADVANCE simulated wall-clock time to the next event_time on the queue
+  RETURNS: event_time_finalised(t)
+  NOTE: I-02: FinalizeEventTimeSecurityCensus is an EPILOGUE, not a normal microphase event; it cannot be
+        "missed" because it is invoked structurally by this driver after quiescence, not dispatched from
+        the queue. Draining to quiescence first guarantees the single decision uses the FINAL
+        event-time census (I-01) and that no stranded delta-cycle census can trigger recovery.
+```
 
 ### 0.8 Core data model (Stage 1F)
 
@@ -186,17 +234,33 @@ CANDIDATE_STATUS in {DISCOVERED, SELF_VALIDATED, PROPAGATING, PENDING_ACCEPTANCE
 # active_propagation_set membership (G6) = { cpc : status(cpc) in {PROPAGATING, PENDING_ACCEPTANCE} }
 
 STRUCTURE RoundContext registries (initialised by RoundInitialise, cleared on closure; G8)
+  # --- per-ROUND registries (reset by RoundInitialise at each round; I4) ---
   active_propagation_set      : set of propagation-active CPCs (status PROPAGATING/PENDING_ACCEPTANCE)
   acceptance_batch_registry   : map (acceptance_timestamp, acceptance_point) -> list of registered block arrivals
   candidate_discovery_seq     : monotonic per-round counter for CandidateID (G7)
   block_accepted              : boolean flag, false until a block is accepted this round
   state_version               : monotonic round-state epoch, bumped on every round-state transition (G10)
-  security_evaluation_required : per (event_time, delta_cycle) boolean flag set by ApplyMinerStateTransition
-                                 when a miner-state boundary changed the ACTIVE_HASHING census (H3); cleared
-                                 by FinalizeTimestampSecurityCensus. NO per-transition floor decision is scheduled.
   residency_ledger            : the SOLE owner of every per-miner state-residency duration t_<state>,
                                  including t_ACTIVE_HASHING = t_hash (H7). Only ApplyMinerStateTransition
                                  opens/closes residency intervals; no other procedure increments a t_<state>.
+  # --- event-loop bookkeeping (PER-RUN: initialised once at run start, PRESERVED across rounds; I-04) ---
+  # These are keyed by event_time / TransitionEventID (both embed the monotonic run-level seq/event_time),
+  # so they MUST persist across round boundaries; a per-round reset would un-finalise past timestamps or
+  # drop replay-suppression state. RoundInitialise initialises them ONLY at run start and preserves them after.
+  security_census_dirty       : map event_time -> boolean. Set true by ApplyMinerStateTransition whenever
+                                 a miner-state boundary at that event_time changed the ACTIVE_HASHING census
+                                 (I-01, superseding the per-(event_time,delta_cycle) H3 flag). Cleared ONLY by
+                                 the event-time epilogue FinalizeEventTimeSecurityCensus(event_time).
+  latest_security_census      : map event_time -> census. OVERWRITTEN by ApplyMinerStateTransition on every
+                                 census-changing boundary at that event_time with the NEWEST post-transition
+                                 (H_active, H_honest, H_adversarial, q_adv). The epilogue decides from THIS
+                                 value after timestamp quiescence, never from any intermediate delta-cycle census.
+  transition_event_registry   : set of TransitionEventIDs already applied (I-03). ApplyMinerStateTransition
+                                 suppresses ONLY the exact-same TransitionEventID replay; a legitimate repeat of
+                                 the same state edge at the same event_time in a DIFFERENT delta_cycle is NOT suppressed.
+  current_delta_cycle         : the delta_cycle of the event currently being dispatched at this event_time (H2)
+  finalised_event_times       : set of event_times whose ProcessEventTime epilogue has run (I-02); no ordinary
+                                 event may be scheduled into a finalised event_time
 
 STRUCTURE Assignment (immutable version object)   # F7: renewal makes a NEW version; never mutate in place
   AssignmentID                : identity of THIS version (immutable once created)
@@ -206,7 +270,11 @@ STRUCTURE Assignment (immutable version object)   # F7: renewal makes a NEW vers
   status                      : one of {PENDING, CURRENT, PAUSED, SUPERSEDED, CLOSED}
   previous_assignment_reference : prior version's AssignmentID (null for an ORIGINAL first version)
   assignment_origin           : one of {ORIGINAL, RENEWED, REASSIGNED}
-  custody_status              : {original, renewed, reassigned, revoked, expired, abandoned, completed, superseded_by_template_refresh}
+  custody_status              : one of the CANONICAL enum ONLY (I-07): {original, renewed, reassigned,
+                                revoked, expired, abandoned, completed, superseded_by_template_refresh}
+  revocation_reason           : set ONLY when custody_status = revoked (else null); one of
+                                {adversarial_withdrawal, assignment_revoked, lease_conflict, departure} (I-07).
+                                A revocation NEVER invents a new custody_status value; the cause lives HERE.
   actual_frontier, reported_frontier, accepted_frontier
   provenance                  : I9 reassignment/lineage records
   lease_start, lease_expiry
@@ -234,10 +302,17 @@ PROCEDURE ApplyMinerStateTransition
                  old_state = the sentinel NONE and step (1) is a no-op;                  # F6
                  (old_state -> new_state) is a legal miner transition (STAGE_01_MINER_STATE_MACHINE.md §3)
   EFFECTS:
-    # F6: the SOLE owner of every miner-state change. It is idempotent per (MinerID, event_time,
-    #     new_state): a duplicate call for the same transition at the same event is a NO-OP.
-    IF already_applied(MinerID, event_time, old_state -> new_state):
-      RETURN duplicate_suppressed                                        # prevent duplicate transitions at the same event
+    # F6: the SOLE owner of every miner-state change.
+    # (0) I-03 EVENT-IDENTITY IDEMPOTENCE. Build the immutable TransitionEventID from the FULL envelope,
+    #     including delta_cycle and the creation seq, so two LEGITIMATE occurrences of the SAME state edge
+    #     for the SAME miner at the SAME event_time but in DIFFERENT delta-cycles are DISTINCT ids and
+    #     BOTH apply. Suppress ONLY an exact-same-id replay (never a same-(state,timestamp) recurrence).
+    SET TransitionEventID <- (event_time, current_delta_cycle, seq, MinerID, old_state, new_state, reason,
+                              AssignmentID(assignment_ref), assignment_version(assignment_ref),
+                              CandidateID(candidate_ref)?, PropagationID(candidate_ref)?)   # immutable
+    IF TransitionEventID in transition_event_registry:
+      RETURN duplicate_suppressed        # exact replay only; charges NO second residency boundary or energy
+    ADD TransitionEventID to transition_event_registry
     # (1) close the OLD residency interval at event_time; (2) open the NEW one at event_time.
     IF old_state != NONE: CLOSE residency(MinerID, old_state) at event_time   # accrues P_old * (event_time - last_boundary)
     OPEN  residency(MinerID, new_state) at event_time                    # begins P_new accrual (I5/I6)
@@ -253,22 +328,26 @@ PROCEDURE ApplyMinerStateTransition
     SET H_active(event_time)      <- H_honest(event_time) + H_adversarial(event_time)   # I17 EXACT at this boundary
     IF H_active(event_time) = 0: SET q_adv(event_time) <- NA             # I17: undefined at zero
     ELSE:                        SET q_adv(event_time) <- H_adversarial(event_time) / H_active(event_time)
-    RECORD transition_audit(MinerID, old_state, new_state, event_time, reason, assignment_ref, candidate_ref)
-    # current_delta_cycle is the delta-cycle of the event being dispatched (§0.2/§0.7-H2); every caller
-    # passes event_time = now, so (event_time, current_delta_cycle) is exactly the settling timestamp.
-    RECORD intermediate_census_for_audit(event_time, current_delta_cycle, (H_active, H_honest, H_adversarial, q_adv))  # H3: audit only
-    # (7) H3: do NOT schedule an independent floor decision for THIS transition. Instead flag that a
-    #     single settled-census evaluation is required for this (event_time, current_delta_cycle); ONE
-    #     FinalizeTimestampSecurityCensus runs after all same-time state changes settle. The
-    #     intermediate census above is recorded for audit but NEVER triggers a round-state transition.
+    RECORD transition_audit(TransitionEventID, MinerID, old_state, new_state, event_time,
+                            current_delta_cycle, reason, assignment_ref, candidate_ref)   # I-03: id recorded
+    RECORD intermediate_census_for_audit(event_time, current_delta_cycle, (H_active, H_honest, H_adversarial, q_adv))  # audit only
+    # (7) I-01 EVENT-TIME SECURITY BOOKKEEPING. Do NOT schedule any floor decision, and do NOT key the
+    #     pending decision by delta_cycle. Flag the WHOLE event_time dirty and OVERWRITE the newest census
+    #     for that event_time; the single event-time epilogue FinalizeEventTimeSecurityCensus(event_time)
+    #     (driven by ProcessEventTime after timestamp quiescence, I-02) reads latest_security_census[event_time]
+    #     and decides exactly once. No intermediate delta-cycle census can independently trigger recovery.
     IF this transition changed the ACTIVE_HASHING census:
-      SET security_evaluation_required[(event_time, current_delta_cycle)] <- true
+      SET security_census_dirty[event_time]  <- true
+      SET latest_security_census[event_time] <- (H_active(event_time), H_honest(event_time),
+                                                 H_adversarial(event_time), q_adv(event_time))   # newest wins
   RETURNS: transition_record
   NOTE: This is the ONLY writer of miner_state (0.3) and the SOLE owner of state-residency time
         t_<state> including t_ACTIVE_HASHING = t_hash (H7). It recomputes H_active/H_honest/H_adversarial
         and re-checks I17 at EVERY ACTIVE_HASHING boundary. It never SAMPLES a hash rate and never
-        schedules a per-transition floor decision (H3): it only sets security_evaluation_required for
-        the settled-census evaluation. Duplicate suppression makes concurrent handlers safe.
+        schedules a floor decision: it only flags security_census_dirty[event_time] and overwrites
+        latest_security_census[event_time] for the SINGLE event-time epilogue (I-01). Idempotence is by
+        TransitionEventID (I-03), so a legitimate repeat of the same edge in a later delta_cycle is
+        applied (not suppressed), while an exact replay is a no-op that charges no second boundary.
 ```
 
 ### 0.10 Event-scheduled wake (F5)
@@ -420,17 +499,38 @@ PROCEDURE RoundInitialise
     INITIALISE reassignment_log  <- empty           # supports I9
     INITIALISE energy_ledger     <- empty           # supports I5, I6, I7
     INITIALISE floor_state       <- config.floor parameters
-    # G8: initialise the propagation/acceptance registries and counters used across the round.
+    # I-04: PER-ROUND registries -- reset FRESH every round (G8). No field below is an implicit global.
     INITIALISE active_propagation_set    <- empty
     INITIALISE acceptance_batch_registry <- empty
     SET        candidate_discovery_seq   <- 0        # G7: deterministic CandidateID counter
     SET        block_accepted            <- false
     SET        state_version             <- 0        # G10: round-state epoch
+    INITIALISE residency_ledger          <- empty    # H7/I19: sole owner of per-miner t_<state> this round
+    # I-04: PER-RUN event-loop bookkeeping -- initialise ONCE at run start, PRESERVE across rounds. These
+    #       are keyed by event_time / TransitionEventID (run-monotonic), so resetting them per round would
+    #       un-finalise past event_times or drop replay-suppression state.
+    IF prior_state = null:                           # run start (genesis round)
+      INITIALISE security_census_dirty     <- empty map     # I-01
+      INITIALISE latest_security_census    <- empty map     # I-01
+      INITIALISE transition_event_registry <- empty set     # I-03
+      INITIALISE finalised_event_times     <- empty set     # I-02
+      SET        current_delta_cycle       <- 0             # H2 dispatch cursor
+    ELSE:                                            # subsequent round: CARRY the run-level bookkeeping forward
+      PRESERVE security_census_dirty, latest_security_census, transition_event_registry,
+               finalised_event_times, current_delta_cycle  from prior_state (§3.12)
     TRANSITION round_state -> ROUND_INITIALISING     # each round-state change bumps state_version (G10)
     TRANSITION round_state -> TEMPLATE_COMMITMENT
   RETURNS: RoundContext(RoundID, D, nonce_domain, ledgers,
+                        # per-round registries:
                         active_propagation_set, acceptance_batch_registry,
-                        candidate_discovery_seq, block_accepted, state_version)
+                        candidate_discovery_seq, block_accepted, state_version, residency_ledger,
+                        # per-run event-loop bookkeeping (carried forward across rounds, I-04):
+                        security_census_dirty, latest_security_census, transition_event_registry,
+                        finalised_event_times, current_delta_cycle)
+  NOTE: I-04: every normative runtime registry is EXPLICITLY initialised and returned here; none exists as
+        an implicit global. Per-round registries reset each round; per-run event-loop bookkeeping
+        (security_census_dirty, latest_security_census, transition_event_registry, finalised_event_times,
+        current_delta_cycle) is created once at run start and preserved thereafter (§3.12).
   NOTE: G10: every `TRANSITION round_state -> S` in this document also bumps `state_version` (a round
         epoch); `SecurityFloorEvaluate` carries the epoch to reject stale evaluations.
 ```
@@ -759,8 +859,8 @@ PROCEDURE AdversarialParticipationChangeEvent
     #     ONLY through the hook, so residency (single owner, H7), transition energy, the
     #     H_active/H_honest/H_adversarial recompute, and I17 all happen exactly once (F6). It NEVER
     #     adds/removes a miner from H_active directly. Because the census-changing boundary is a hook
-    #     transition, the hook sets security_evaluation_required[(now, current_delta_cycle)] and the
-    #     SINGLE FinalizeTimestampSecurityCensus for this settled timestamp evaluates the floor once (H3).
+    #     transition, the hook flags security_census_dirty[now] and overwrites latest_security_census[now],
+    #     and the SINGLE event-time epilogue FinalizeEventTimeSecurityCensus evaluates the floor once (I-01).
     # H6: entry and exit take STATE-SPECIFIC legal paths; there is NO generic re-entry that fabricates a
     #     second live head, and NO generic exit that leaves a live CURRENT head behind.
 
@@ -776,7 +876,11 @@ PROCEDURE AdversarialParticipationChangeEvent
       # H6/I9: record the withdrawal reason and provenance on the closed version, then CLOSE/REVOKE the
       #        CURRENT head EXPLICITLY so NO live CURRENT head remains for MinerID (I18a/I18b).
       RECORD withdrawal_reason(X) <- adversarial_withdrawal      # I9 reason
-      RECORD provenance(X): previous_assignment_reference, custody_status(range(X)) <- revoked_adversarial_exit
+      # I-07: use the CANONICAL custody enum ONLY. The withdrawal cause lives in revocation_reason,
+      #       never in an invented custody_status value (no `revoked_adversarial_exit`).
+      SET custody_status(range(X)) <- revoked                    # canonical enum value
+      SET revocation_reason(X)     <- adversarial_withdrawal     # I-07 two-field representation
+      RECORD provenance(X): previous_assignment_reference, custody_status = revoked, revocation_reason = adversarial_withdrawal
       # H7/G9: cancel this version's pending hash-work units explicitly (they would self-cancel by the
       #        stale guard, but the exit CANCELS them so no unit is charged after the census leaves H_active).
       CANCEL pending HashWorkEvent units for (MinerID, AssignmentID(X), assignment_version(X))
@@ -804,80 +908,112 @@ PROCEDURE AdversarialParticipationChangeEvent
                                   lease_duration = default_lease_duration)
 
         CASE LOW_POWER_LISTEN:
-          # H6: the re-entry path DEPENDS on why the miner is idle (entry_stop_reason, I4).
-          IF entry_stop_reason(MinerID) = VALID_SOLUTION_VERIFIED:
-            # PATH-B pause: the miner's OWN assignment is still PAUSED (a live head, I18b). Resuming it
-            # MUST reuse that head via ResumeFromPause carrying ITS recorded pause-cause ids -- it MUST
-            # NOT call RangeAssign (that would mint a SECOND live head and break I18b).
-            SET paused <- paused_assignment(MinerID)
-            RETURN CALL ResumeFromPause(RoundContext, MinerID, trigger = adversarial_reactivation,
-                     pause_cause_candidate_id   = pause_cause_candidate_id(paused),      # G11: matched ids
-                     pause_cause_propagation_id = pause_cause_propagation_id(paused))     # T30
-          ELSE:
-            # entry_stop_reason in {RANGE_EXHAUSTED, ASSIGNMENT_REVOKED, ROUND_ACCEPTED, ROUND_ABORTED}:
-            # the prior assignment is CLOSED (NO live head, I18b), so a fresh eligible assignment is
-            # legal. The LEGAL re-entry edge from LOW_POWER_LISTEN is T10 (new-assignment wake ->
-            # WAKING), NOT RangeAssign (whose precondition is REGISTERED/RESERVE, T3/T4). Bind a fresh
-            # PENDING (a NEW ORIGINAL lineage, I18b) via the shared constructor and StartWake from
-            # LOW_POWER_LISTEN -- mirroring RangeAssign's body but with the correct legal source edge.
-            SELECT candidate_range from unassigned portion of nonce_domain    # fresh, never-assigned (I1)
-            fresh <- CALL CreatePendingAssignment(RoundContext, MinerID, candidate_range,
-                       assignment_origin = ORIGINAL, source_assignment = null, reason = null)   # F4
-            SET lease_start(fresh)  <- now
-            SET lease_expiry(fresh) <- now + default_lease_duration
-            RETURN CALL StartWake(RoundContext, MinerID, target_assignment = fresh,
-                                  from_state = LOW_POWER_LISTEN)                          # T10 (F5/F6)
+          # I-06: STATE-SPECIFIC re-entry split by entry_stop_reason (I4) AND the CURRENT round's liveness.
+          #       A closed/refreshing round NEVER receives a fresh assignment or a wake here.
+          SWITCH entry_stop_reason(MinerID):
+
+            CASE VALID_SOLUTION_VERIFIED:
+              # PATH-B pause: resume the miner's OWN still-PAUSED head via ResumeFromPause carrying ITS
+              # recorded pause-cause ids (matched two-id, G11); NEVER RangeAssign (no second live head,
+              # I18b). A terminal round would already have CLOSED this head (CloseRoundAssignments), so
+              # reaching here implies the round is still live and the head is genuinely PAUSED.
+              SET paused <- paused_assignment(MinerID)
+              RETURN CALL ResumeFromPause(RoundContext, MinerID, trigger = adversarial_reactivation,
+                       pause_cause_candidate_id   = pause_cause_candidate_id(paused),      # G11: matched ids
+                       pause_cause_propagation_id = pause_cause_propagation_id(paused))     # T30
+
+            CASE RANGE_EXHAUSTED OR ASSIGNMENT_REVOKED:
+              # I-06: a fresh assignment is legal ONLY when the CURRENT round is NONTERMINAL, is NOT
+              #       mid-template-refresh, has a committed ELIGIBLE TemplateID, and its assignment
+              #       policy permits a fresh range. Otherwise the re-entry is DEFERRED, not forced.
+              IF round_state in {ROUND_ACCEPTED, ROUND_ABORTED}:
+                RETURN deferred_round_terminal        # closed round: no assignment/wake (see terminal case)
+              IF round_state = TEMPLATE_REFRESH:
+                RETURN deferred_to_new_template        # governed by the new-template assignment procedure
+              IF NOT (a committed eligible TemplateID exists for RoundContext
+                      AND assignment_policy_permits_fresh_range(RoundContext)):
+                RETURN no_eligible_range_now           # policy offers no fresh range at this instant
+              # legal fresh re-entry via T10 (LOW_POWER_LISTEN -> WAKING new assignment), NOT RangeAssign
+              # (whose precondition is REGISTERED/RESERVE, T3/T4). Bind a NEW ORIGINAL lineage (I18b).
+              SELECT candidate_range from unassigned portion of nonce_domain    # fresh, never-assigned (I1)
+              fresh <- CALL CreatePendingAssignment(RoundContext, MinerID, candidate_range,
+                         assignment_origin = ORIGINAL, source_assignment = null, reason = null)   # F4
+              SET lease_start(fresh)  <- now
+              SET lease_expiry(fresh) <- now + default_lease_duration
+              RETURN CALL StartWake(RoundContext, MinerID, target_assignment = fresh,
+                                    from_state = LOW_POWER_LISTEN)                          # T10 (F5/F6)
+
+            CASE ROUND_ACCEPTED OR ROUND_ABORTED:
+              # I-06: the miner idled because the ROUND ENDED. Do NOT create an assignment in the closed
+              #       RoundContext and do NOT StartWake for the closed round. Participation is DEFERRED
+              #       to the next RoundInitialise / TemplateCommit / ASSIGNMENT phase, which re-offers
+              #       ranges legally under a fresh RoundID/TemplateID.
+              RETURN deferred_round_terminal
+          # I-06 (TEMPLATE_REFRESH round-state): when the round is refreshing its template, a
+          # RANGE_EXHAUSTED/ASSIGNMENT_REVOKED re-entry is deferred (above) to the new-template
+          # assignment procedure -- TemplateRefresh commits the new TemplateID and then re-offers ranges
+          # (T10 under the new template). No activation is performed against a discarded template.
 
         DEFAULT:
           # WAKING / ACTIVE_HASHING / EXHAUSTED_PENDING / DISQUALIFIED: already participating or in a
           # transient/terminal state; no participation change is applied.
           RETURN no_change
   RETURNS: participation_change_record
-  NOTE: H6: entry is state-specific -- REGISTERED/RESERVE and (post-closure) LOW_POWER_LISTEN create a
-        fresh PENDING and wake; OFFLINE rejoins via the hook first; a still-PAUSED LOW_POWER_LISTEN
-        resumes its OWN head via ResumeFromPause (never RangeAssign). Exit acts ONLY on ACTIVE_HASHING:
-        it preserves accepted coverage, exposes only the accepted unsearched suffix, records the I9
-        reason/provenance, cancels the version's pending hash units, closes the CURRENT head explicitly
-        (no live head remains), and departs via T11 -- all through the hook.
+  NOTE: I-06: LOW_POWER_LISTEN re-entry is split by entry_stop_reason: VALID_SOLUTION_VERIFIED resumes
+        the own PAUSED head (ResumeFromPause, never RangeAssign); RANGE_EXHAUSTED/ASSIGNMENT_REVOKED
+        create a fresh T10 assignment ONLY in a nonterminal, non-refreshing, committed-eligible-template
+        round whose policy permits a range; ROUND_ACCEPTED/ROUND_ABORTED defer to the next round; a
+        TEMPLATE_REFRESH round defers to the new-template assignment procedure. No assignment or wake is
+        ever created against a closed or discarded-template RoundContext.
+  NOTE: H6 exit acts ONLY on ACTIVE_HASHING: preserve accepted coverage, expose only the accepted
+        unsearched suffix, record the I9 reason/provenance, set custody_status = revoked with
+        revocation_reason = adversarial_withdrawal (canonical enum, I-07), cancel the version's pending
+        hash units, close the CURRENT head explicitly (no live head remains), depart via T11.
   NOTE: G3: the adversarial-participation SAMPLING is entirely in the SCHEDULING of these events (the
         model draws each miner's enter/exit times); the STATE CHANGE is deterministic and routes
         through the hook. ActiveHashRateUpdate never mutates the census (C7 preserved: floor breaches
-        are still recorded only by SecurityFloorEvaluate, invoked once per settled timestamp by
-        FinalizeTimestampSecurityCensus, H3).
+        are recorded only by SecurityFloorEvaluate, invoked once per event_time by the event-time
+        epilogue FinalizeEventTimeSecurityCensus, I-01).
 ```
 
 ## 9. Security-floor evaluation
 
 ```
-PROCEDURE FinalizeTimestampSecurityCensus
-  INPUTS: RoundContext, event_time, delta_cycle
-  PRECONDITIONS: microphase 5 (§0.7); runs EXACTLY ONCE per (event_time, delta_cycle), AFTER every
-                 state-changing event of that (event_time, delta_cycle) has settled (H3)
+PROCEDURE FinalizeEventTimeSecurityCensus
+  INPUTS: RoundContext, event_time
+  PRECONDITIONS: an EVENT-TIME EPILOGUE (I-01/I-02), NOT a normal microphase event that could be missed
+                 when no later event exists. It is driven by ProcessEventTime(event_time) AFTER the
+                 event_time is QUIESCENT -- every ordinary and delta-cycle event at event_time has been
+                 drained -- and runs EXACTLY ONCE per event_time.
   EFFECTS:
-    # H3: the SINGLE per-timestamp security evaluation. If no ACTIVE_HASHING boundary occurred this
-    #     (event_time, delta_cycle), there is nothing to evaluate.
-    IF NOT security_evaluation_required[(event_time, delta_cycle)]:
+    # I-01: keyed by event_time ALONE (never by delta_cycle). If no ACTIVE_HASHING boundary occurred at
+    #       this event_time, there is nothing to evaluate.
+    IF NOT security_census_dirty[event_time]:
       RETURN no_census_change
-    # read the FINAL settled census (the last recomputation by ApplyMinerStateTransition at this
-    # (event_time, delta_cycle)); intermediate same-time census values were recorded for AUDIT ONLY.
-    SET (H_active, H_honest, q_adv) <- final settled census at (event_time, delta_cycle)
-    CLEAR security_evaluation_required[(event_time, delta_cycle)]
-    # exactly ONE floor decision for the settled census, carrying the current round epoch (G10/H4).
+    # decide from the LATEST (newest) post-transition census overwritten by ApplyMinerStateTransition at
+    # this event_time -- never from any intermediate delta-cycle census.
+    SET (H_active, H_honest, H_adversarial, q_adv) <- latest_security_census[event_time]
+    CLEAR security_census_dirty[event_time]
+    # exactly ONE floor decision for the quiescent event-time census, carrying the current round epoch.
     RETURN CALL SecurityFloorEvaluate(RoundContext, event_RoundID = RoundID, event_TemplateID = TemplateID,
                  event_state_version = state_version, (H_active, H_honest, q_adv), floor_state)
   RETURNS: floor_result
-  NOTE: H3: the ONLY caller of SecurityFloorEvaluate. It runs ONCE per settled (event_time, delta_cycle),
-        so the FIRST of several same-time miner transitions never independently triggers recovery from an
-        intermediate census. Intermediate census values are retained for audit but never drive a
-        round-state transition.
+  NOTE: I-01/I-02: the SOLE caller of SecurityFloorEvaluate, run once per QUIESCENT event_time as an
+        epilogue. Because the dirty flag is keyed by event_time (not delta_cycle) it can NEVER be
+        stranded between delta-cycles, and no intermediate delta-cycle census can independently trigger
+        recovery. Any recovery action that changes participation is scheduled at a STRICTLY LATER
+        event_time (I-02), so it cannot alter H_active after this final decision at this timestamp.
 
 PROCEDURE SecurityFloorEvaluate
   INPUTS: RoundContext, event_RoundID, event_TemplateID, event_state_version,
           (H_active(t), H_honest(t), q_adv(t)), floor_state
-  PRECONDITIONS: invoked ONLY by FinalizeTimestampSecurityCensus on a settled census (H3); never
-                 inline (G10); carries the (RoundID, TemplateID, state_version) of that evaluation
+  PRECONDITIONS: invoked ONLY by FinalizeEventTimeSecurityCensus on a QUIESCENT event-time census
+                 (I-01); never inline (G10); carries the (RoundID, TemplateID, state_version) of the round
   EFFECTS:
-    # G10: TERMINAL/STALE GUARD. Never act on a stale round/template/epoch.
+    # I-05: TERMINAL-FIRST. Return BEFORE any breach recording or recovery logic for a terminal round.
+    IF round_state in {ROUND_ACCEPTED, ROUND_ABORTED}:
+      RETURN terminal_stale_noop                               # no breach recorded, no transition
+    # G10: STALE GUARD on the carried epoch (a superseded RoundID/TemplateID/state_version).
     IF event_RoundID != RoundID_current
        OR event_TemplateID != TemplateID_committed
        OR event_state_version != state_version_current:
@@ -901,28 +1037,33 @@ PROCEDURE SecurityFloorEvaluate
       IF q_adv(t) != NA AND q_adv(t) > floor_state.q_adv_threshold:
         RECORD_ONCE breach_event(adversarial_share, t)        # I16
         breach <- TRUE
-    # H4: SECURITY_RECOVERY may be entered ONLY from a legal source state; from any other state the
-    #     final census is recorded as OBSERVATION-ONLY and NO round transition occurs.
-    IF breach AND round_state in {HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY}:
-      # G8: SR may be entered from HASHING or SOLUTION_PROPAGATION and PRESERVES any live propagation
-      #     contexts; block arrivals/arbitration remain processable during recovery.
+    # I-05: the ONLY permitted recovery transitions are HASHING -> SECURITY_RECOVERY and
+    #       SOLUTION_PROPAGATION -> SECURITY_RECOVERY. All other states are observation-only or no-op.
+    IF breach AND round_state in {HASHING, SOLUTION_PROPAGATION}:
+      # G8: SR PRESERVES any live propagation contexts; block arrivals/arbitration remain processable.
       TRANSITION round_state -> SECURITY_RECOVERY              # bumps state_version (G10)
       RETURN breach
+    ELSE IF breach AND round_state = SECURITY_RECOVERY:
+      # I-05: a CONTINUING breach while ALREADY in recovery. Record persistence ONLY; perform NO
+      #       SECURITY_RECOVERY -> SECURITY_RECOVERY self-transition and do NOT bump state_version merely
+      #       to represent persistence (that would spuriously stale every carried epoch).
+      RECORD_ONCE breach_persists(t)                          # I16 persistence record; NO transition
+      RETURN breach_persists
     ELSE IF breach:
-      # illegal source: record the census/breach for audit but perform NO transition (H4).
+      # illegal source: record the census/breach for audit but perform NO transition (I-05).
       RETURN (round_state = TEMPLATE_REFRESH        ? refresh_observation_only  :
               round_state = ROUND_EXHAUSTED         ? exhausted_observation_only :
-              round_state in {ROUND_ACCEPTED, ROUND_ABORTED} ? terminal_stale_noop :
               setup_observation_only)               # ROUND_INITIALISING / TEMPLATE_COMMITMENT / ASSIGNMENT
     RETURN no_breach
-  RETURNS: breach | no_breach | refresh_observation_only | exhausted_observation_only |
-           setup_observation_only | terminal_stale_noop
-  NOTE: H3/H4: SecurityFloorEvaluate runs ONCE per settled timestamp (via FinalizeTimestampSecurityCensus)
-        and transitions to SECURITY_RECOVERY ONLY from {HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY};
-        from setup (ROUND_INITIALISING/TEMPLATE_COMMITMENT/ASSIGNMENT), TEMPLATE_REFRESH, ROUND_EXHAUSTED,
-        or a terminal round it records observation-only and performs NO illegal transition. I17 holds at
-        every boundary; `q_adv = NA` is never numerically compared; recovery logs never overwrite breach
-        records (I16). Entering SECURITY_RECOVERY does NOT cancel live candidates (G8).
+  RETURNS: breach | breach_persists | no_breach | refresh_observation_only |
+           exhausted_observation_only | setup_observation_only | terminal_stale_noop
+  NOTE: I-05: terminal rounds return terminal_stale_noop BEFORE any breach recording; recovery is entered
+        ONLY from HASHING or SOLUTION_PROPAGATION; a persistent breach already in SECURITY_RECOVERY records
+        breach_persists with NO self-transition and NO state_version bump; from setup
+        (ROUND_INITIALISING/TEMPLATE_COMMITMENT/ASSIGNMENT), TEMPLATE_REFRESH, or ROUND_EXHAUSTED it is
+        observation-only. I17 holds at every boundary; `q_adv = NA` is never numerically compared;
+        recovery logs never overwrite breach records (I16); entering SECURITY_RECOVERY does NOT cancel
+        live candidates (G8).
 ```
 
 ## 10. Reserve activation
@@ -1407,11 +1548,12 @@ PROCEDURE HandlePropagationFailure
       SCHEDULE event ResumeFromPause(RoundContext, M, trigger = failure_reason,
                                      pause_cause_candidate_id = CandidateID,
                                      pause_cause_propagation_id = PropagationID)   # G11: both ids on the resume event
-    # (3) H3: do NOT schedule an independent floor decision here. The candidate-scoped resumes above
-    #     re-activate miners in a later delta-cycle; each re-activation boundary sets
-    #     security_evaluation_required, and the SINGLE FinalizeTimestampSecurityCensus for that settled
-    #     timestamp performs the one floor decision (microphase 5, delta-cycle rule §0.7-H2).
-    SET security_evaluation_required[(now, current_delta_cycle)] <- true   # settled-census eval, not per-transition
+    # (3) I-01: do NOT schedule an independent floor decision here. The candidate-scoped resumes above
+    #     re-activate miners in a later delta-cycle; each re-activation boundary (via the hook) flags
+    #     security_census_dirty[now] and overwrites latest_security_census[now], and the SINGLE event-time
+    #     epilogue FinalizeEventTimeSecurityCensus(now) performs the one floor decision after quiescence.
+    #     (This handler alters no census directly; the flag is set defensively for the event_time.)
+    SET security_census_dirty[now] <- true   # event-time epilogue eval, not per-failure or per-delta-cycle
     # (4) round-state rule (F3/G8): return to HASHING ONLY when propagation is FULLY quiescent AND the
     #     round is still in SOLUTION_PROPAGATION. During SECURITY_RECOVERY the round stays in recovery
     #     (live candidates are preserved, G8); a later floor-restored step returns it (round SM R13).
@@ -1423,8 +1565,8 @@ PROCEDURE HandlePropagationFailure
   NOTE: Candidate-scoped (F2/F3/G11 on BOTH ids). One candidate's failure NEVER cancels or resumes
         another candidate's events or paused miners. The round remains SOLUTION_PROPAGATION while any
         live candidate exists (F3), and SECURITY_RECOVERY may coexist with live candidates (G8).
-        The floor evaluation is NOT scheduled per failure (H3); it is the single settled-census
-        evaluation via FinalizeTimestampSecurityCensus. No block is accepted and no round is closed
+        The floor evaluation is NOT scheduled per failure (I-01); it is the single event-time epilogue
+        evaluation via FinalizeEventTimeSecurityCensus. No block is accepted and no round is closed
         here. `propagation_quiescent` is defined in §0.6.
 ```
 
@@ -1818,7 +1960,7 @@ acceptance; `(CandidateID, MinerID, AssignmentID, seq)` within an event type) co
 draw and are independent of data-structure iteration order.
 
 Every other step is deterministic protocol logic. This separation is deliberate: it keeps the
-protocol's decision logic reproducible and audit-checkable against `I1..I17`, while confining
+protocol's decision logic reproducible and audit-checkable against `I1..I19`, while confining
 all randomness to clearly labelled model draws that exist solely because Stage-1 evaluation is
 a simulation and not a real deployment. None of the above is executable source.
 
@@ -1828,34 +1970,40 @@ a simulation and not a real deployment. None of the above is executable source.
 
 When two or more scheduled events carry the **exact same** `event_time`, they are processed in a
 **deterministic** order. **Stage 1G replaces the flat F8 priority sequence with the explicit
-microphase contract of §0.7** (full spec in `STAGE_01G_EVENT_MICROPHASE_SPEC.md`): terminal
-closure → template refresh → collect all block arrivals → `AcceptanceBatchFinalize` (one atomic
-arbitration+closure) → security-floor evaluation (terminal-guarded) → certificate/discovery/…
-events. Where this section's ordering differs from §0.7, **§0.7 (microphases) is authoritative**.
-The historical F8 table (`STAGE_01F_EVENT_PRIORITY_TABLE.md`) remains a frozen Stage-1F artifact and
-is not modified. The two-level structure below is retained for the intra-type tie-break, which the
-microphases reuse verbatim.
+microphase contract of §0.7** (full spec in `STAGE_01G_EVENT_MICROPHASE_SPEC.md`, extended by the H2
+delta-cycle rule and the I-01/I-02 epilogue): terminal closure → template refresh → collect all block
+arrivals → `AcceptanceBatchFinalize` (one atomic arbitration+closure) → certificate/discovery/…
+events, and — AFTER the whole `event_time` is quiescent — the single security-floor decision as the
+event-time EPILOGUE (`FinalizeEventTimeSecurityCensus`, I-01/I-02, terminal-first + legal-source
+guarded, I-05). Where this section's ordering differs from §0.7, **§0.7 (microphases + epilogue) is
+authoritative**. The historical F8 table (`STAGE_01F_EVENT_PRIORITY_TABLE.md`) remains a frozen
+Stage-1F artifact and is not modified. The two-level structure below is retained for the intra-type
+tie-break, which the microphases reuse verbatim.
 
 The contract has two levels:
 
 1. **Inter-type priority.** Same-timestamp events of different types fire in this fixed order
    (highest first), so that no event ever acts on a round/miner/assignment that a
-   higher-priority same-timestamp event has already invalidated:
+   higher-priority same-timestamp event has already invalidated. **The security-floor decision is NOT
+   in this queue** (I-01/I-02): it is the event-time epilogue that `ProcessEventTime` runs ONCE after
+   every event below — across all delta-cycles — has been drained at this `event_time`:
 
        1  RoundAbort closure            (ROUND_ABORTED)
        2  Round-acceptance closure      (ValidBlockAccept -> ROUND_ACCEPTED)
-       3-4  Collect all block arrivals (BlockAcceptancePoint register) then AcceptanceBatchFinalize (G5)
+       3  Collect all block arrivals    (BlockAcceptancePoint register) then AcceptanceBatchFinalize (G5)
        4  Template invalidation / refresh (TemplateRefresh / CloseTemplateAssignments)
-       5  Security-floor evaluation / breach (SecurityFloorEvaluate)
-       6  Full-block arrival            (BlockAcceptancePoint)
-       7  Certificate arrival           (CertificateArrival)
-       8  Solution discovery            (HashWorkEvent hit -> ScheduleSolutionPropagation)
-       9  Range completion              (ActualRangeCompletion / ExhaustionAdjudicate)
-      10  Reported exhaustion           (ReportedExhaustionClaim)
-      11  Lease expiry                  (LeaseExpiry)
-      12  Wake completion               (WakeCompleteEvent)
-      13  Resume-from-pause             (ResumeFromPause)
-      14  Periodic monitoring           (ActiveHashRateUpdate / heartbeat)
+       5  Full-block arrival            (BlockAcceptancePoint)
+       6  Certificate arrival           (CertificateArrival)
+       7  Solution discovery            (HashWorkEvent hit -> ScheduleSolutionPropagation)
+       8  Range completion              (ActualRangeCompletion / ExhaustionAdjudicate)
+       9  Reported exhaustion           (ReportedExhaustionClaim)
+      10  Lease expiry                  (LeaseExpiry)
+      11  Wake completion               (WakeCompleteEvent)
+      12  Resume-from-pause             (ResumeFromPause)
+      13  Periodic monitoring           (ActiveHashRateUpdate / heartbeat)
+      —  Security-floor decision        (FinalizeEventTimeSecurityCensus -> SecurityFloorEvaluate):
+                                         event-time EPILOGUE, run once AFTER quiescence (I-01/I-02), never
+                                         as a same-timestamp queued event
 
 2. **Intra-type tie-break.** Events of the SAME type at the SAME timestamp are ordered by
    `(CandidateID, MinerID, AssignmentID, seq)` lexicographically, where `seq` is the monotonic

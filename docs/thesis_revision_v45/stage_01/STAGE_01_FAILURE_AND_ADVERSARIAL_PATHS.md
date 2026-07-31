@@ -20,7 +20,7 @@ Every path below is described against the canonical identifiers:
 - **Round states (10):** `ROUND_INITIALISING`, `TEMPLATE_COMMITMENT`, `ASSIGNMENT`,
   `HASHING`, `SECURITY_RECOVERY`, `SOLUTION_PROPAGATION`, `ROUND_ACCEPTED`,
   `ROUND_EXHAUSTED`, `TEMPLATE_REFRESH`, `ROUND_ABORTED`.
-- **Invariants** `I1..I17` are defined in `STAGE_01_INVARIANT_CATALOGUE.md`.
+- **Invariants** `I1..I19` are defined in `STAGE_01_INVARIANT_CATALOGUE.md`.
 - **Adversarial share:** `q_adv(t) = H_adversarial(t) / (H_honest(t) + H_adversarial(t))`.
 - **Progress evidence** is only a **modeled progress-verification abstraction**; it is NOT a
   cryptographic proof of range exhaustion.

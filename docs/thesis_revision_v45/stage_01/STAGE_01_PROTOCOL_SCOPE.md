@@ -223,7 +223,7 @@ actually preserved is out of scope here (Section C).
 - **Round states (10):** `ROUND_INITIALISING`, `TEMPLATE_COMMITMENT`, `ASSIGNMENT`,
   `HASHING`, `SECURITY_RECOVERY`, `SOLUTION_PROPAGATION`, `ROUND_ACCEPTED`,
   `ROUND_EXHAUSTED`, `TEMPLATE_REFRESH`, `ROUND_ABORTED`.
-- **Invariants:** referenced by ID as I1..I17, defined in the separate Invariant Catalogue;
+- **Invariants:** referenced by ID as I1..I19, defined in the separate Invariant Catalogue;
   the accounting invariant A1 is stated in Section 0.2.
 
 Terminology for every symbol and term above is defined in
