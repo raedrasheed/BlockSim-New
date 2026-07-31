@@ -22,3 +22,6 @@ R20,Threat model classification,actors and capabilities,all,coalition; network p
 R21,Zero-block retention and NA policy,zero-block outcome; NA metric,I14;I15,none-direct,Stage 6/7,Stage 8,Ch6 methods,SPECIFIED
 R22,No double-counting of shared physical executions,physical run / master seed,I13,none-direct,Stage 6/7,Stage 8,Ch6 methods,SPECIFIED
 R23,Event-ordered solution propagation and modeled acceptance point,ScheduleSolutionPropagation; CertificateArrival; BlockAcceptancePoint,I2;I3;I11,delayed/false certificate; competing solutions,Stage 4,Stage 5,Ch5 protocol design,SPECIFIED
+R24,Activation always through WAKING (RangeAssign/ReserveActivate/RangeReassign/TemplateRefresh/resume),REGISTERED/RESERVE->WAKING->ACTIVE_HASHING,I5;I6,delayed wake,Stage 2,Stage 2/3,Ch5/Ch6,SPECIFIED
+R25,Centralised round closure (CloseRoundAssignments) for ROUND_ACCEPTED/ROUND_ABORTED,CloseRoundAssignments; EnterLowPowerListen,I5;I6;I7,coordinator failure; partition,Stage 2,Stage 5,Ch5 protocol design,SPECIFIED
+R26,Exhaustion split (actual/reported/accepted adjudication); same-timestamp acceptance batch,ActualRangeCompletion;ReportedExhaustionClaim;ExhaustionAdjudicate;AcceptanceTimestampBatch,I8a;I4,false exhaustion; competing solutions,Stage 4,Stage 4/5,Ch5/Ch6,SPECIFIED

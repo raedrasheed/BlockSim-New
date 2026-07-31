@@ -1,5 +1,13 @@
 # Stage 1C — Semantic Test Vectors (paper execution)
 
+> **Superseded for executable-procedure naming by `STAGE_01D_SEMANTIC_TEST_VECTORS.md`.**
+> Stage 1D split `ActualRangeCompletion`→`ReportedExhaustionClaim`→`ExhaustionAdjudicate` into `ActualRangeCompletion` / `ReportedExhaustionClaim` /
+> `ExhaustionAdjudicate`, routed all activation through `WAKING`, and added
+> `AcceptanceTimestampBatch` / `ValidateCandidate` / `CloseRoundAssignments` /
+> `SelfValidateFoundSolution`. The corrected, authoritative 17-vector set is the Stage-1D file;
+> the vectors below are retained and their procedure references updated to the split procedures.
+
+
 Documentation-level test vectors traced through the corrected pseudocode
 (`STAGE_01_PROTOCOL_PSEUDOCODE.md`) and miner state machine. Each shows: initial states →
 events → state transitions → coverage changes → custody changes → energy terms → hash-rate
@@ -11,8 +19,8 @@ Legend: coverage layers `actual` / `reported` / `accepted`; `af` = accepted_fron
 
 ## TV1 — Honest full range exhaustion
 - **Initial:** miner M `ACTIVE_HASHING`, assignment `[s,e]`, honest mode.
-- **Events:** cursor reaches `e`, no hit; `RangeExhaust`.
-- **Transitions:** adjudication ACCEPTED (honest ground-truth) → `ACTIVE_HASHING → EXHAUSTED_PENDING` (T7, `RANGE_EXHAUSTED`) → `EnterLowPowerListen(RANGE_EXHAUSTED)` → `EXHAUSTED_PENDING → LOW_POWER_LISTEN` (T8).
+- **Events:** cursor reaches `e`, no hit; `ActualRangeCompletion`→`ReportedExhaustionClaim`→`ExhaustionAdjudicate`.
+- **Transitions:** `ExhaustionAdjudicate` ACCEPTED (honest ground-truth) → `ACTIVE_HASHING → EXHAUSTED_PENDING` (T7, `RANGE_EXHAUSTED`) → `EnterLowPowerListen(RANGE_EXHAUSTED)` → `EXHAUSTED_PENDING → LOW_POWER_LISTEN` (T8).
 - **Coverage:** `accepted_searched = [s,e]`; `active_unsearched = ∅`.
 - **Custody:** `completed`.
 - **Energy:** `t_hash` for the full sweep; short `P_hash` `EXHAUSTED_PENDING` transient; then `P_listen`; one-shot `E_transition`/`E_coordination`.
@@ -22,7 +30,7 @@ Legend: coverage layers `actual` / `reported` / `accepted`; `af` = accepted_fron
 
 ## TV2 — False exhaustion, audited and rejected
 - **Initial:** adversarial M `ACTIVE_HASHING`; `actual_frontier < e` but reports `reported_exhaustion=true`.
-- **Events:** `RangeExhaust`; `[SIMULATION SAMPLING] audit_selected = true`; `audit_result = inconsistent`.
+- **Events:** `ActualRangeCompletion`→`ReportedExhaustionClaim`→`ExhaustionAdjudicate`; `[SIMULATION SAMPLING] audit_selected = true`; `audit_result = inconsistent`.
 - **Transitions:** `claim_accepted_or_rejected = REJECTED` → **no** transition; M stays `ACTIVE_HASHING`.
 - **Coverage:** unchanged — `accepted_searched` NOT advanced; range NOT `searched`.
 - **Custody:** unchanged (NOT `completed`).
@@ -33,7 +41,7 @@ Legend: coverage layers `actual` / `reported` / `accepted`; `af` = accepted_fron
 
 ## TV3 — False exhaustion, unaudited under the explicitly modeled policy
 - **Initial:** adversarial M; `reported_exhaustion=true`; audit not selected.
-- **Events:** `RangeExhaust`; `audit_selected=false`; `claim_accepted_or_rejected = modeled_unaudited_acceptance_policy(...)`.
+- **Events:** `ActualRangeCompletion`→`ReportedExhaustionClaim`→`ExhaustionAdjudicate`; `audit_selected=false`; `claim_accepted_or_rejected = modeled_unaudited_acceptance_policy(...)`.
 - **Transitions:** if policy = ACCEPTED → T7/T8 as TV1 but flagged **modeled acceptance** (not actual proof); if policy = REJECTED → as TV2.
 - **Coverage/custody:** on modeled acceptance, `accepted_searched=[s,e]`, `completed` — recorded as *modeled acceptance*.
 - **Round:** contributes to `ROUND_EXHAUSTED` only via **accepted** coverage; recorded as modeled, not proven.

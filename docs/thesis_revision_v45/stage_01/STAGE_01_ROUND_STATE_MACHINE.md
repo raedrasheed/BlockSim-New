@@ -380,7 +380,7 @@ the notes and specified in `STAGE_01_MINER_STATE_MACHINE.md`.
 | R15 | `ROUND_EXHAUSTED` | RefreshAvailable | A new immutable template can be committed; difficulty fixed (I12) | Prepare new `TemplateID` | `TEMPLATE_REFRESH` | Retains `RoundID`; new template only (§3.5) |
 | R16 | `ROUND_EXHAUSTED` | NoRefreshPossible | No new template can be produced | Abort round | `ROUND_ABORTED` | Terminal-abort |
 | R17 | `TEMPLATE_REFRESH` | NewTemplateReady | New immutable template prepared | Commit new template | `TEMPLATE_COMMITMENT` | Then R3 → `ASSIGNMENT` re-partitions the new domain |
-| R18 | `TEMPLATE_REFRESH` | ReassignOnly | New template already committed; only re-partition needed | Re-partition nonce domain (I1) | `ASSIGNMENT` | Shortcut when commitment is unnecessary |
+| R18 | `TEMPLATE_COMMITMENT` | TemplateCommitted (refresh) | New immutable template committed via TemplateCommit (D8) | Enter partitioning of the NEW candidate-identity domain | `ASSIGNMENT` | Refresh ALWAYS mints a fresh TemplateID via TEMPLATE_COMMITMENT (R17); no commitment-bypass. New ORIGINAL assignments only (C5) |
 | R19 | `TEMPLATE_REFRESH` | RefreshFailed | New template invalid/uncommittable | Abort round | `ROUND_ABORTED` | Terminal-abort |
 | R20 | `ROUND_ACCEPTED` | NextRound | Accepted block recorded and round closed | Advance `RoundID`; carry forward preserved info (§3.12) | `ROUND_INITIALISING` | Terminal-accept → next round |
 | R21 | `ROUND_ABORTED` | RestartRound | Round closed without acceptance | Carry forward preserved info (§3.12) | `ROUND_INITIALISING` | Terminal-abort → restart |

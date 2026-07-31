@@ -85,11 +85,15 @@ transition; monitoring is specified, enforcement soundness is out of scope (scop
 ### 1.5 Progress-verification convention
 
 A miner's assertion that it has searched (part of) its assigned range is treated ONLY as a
-**modeled progress-verification abstraction** (progress commitments / early-stop
-certificates of scope §B). It is never a cryptographic proof of range exhaustion. Invariant
-**I11** forbids any false or unverified early-stop message from ending hashing: a transition
-out of active hashing on grounds of exhaustion requires target verification over the
-assigned range and MUST NOT be effected by an unverified early-stop assertion.
+**modeled progress-verification abstraction** (progress commitments; scope §B). Progress
+verification and the early-stop certificate (which carries a found solution) are **separate
+mechanisms**, not one evidence type. Range exhaustion is governed by **I4, I8a, and the
+actual/reported/accepted adjudication model** (ExhaustionAdjudicate); a false exhaustion claim
+is a progress/audit violation, **not** an I11 violation. Invariant **I11** applies ONLY to
+validating a solution-bearing early-stop certificate — it forbids any false or unverified
+early-stop certificate from ending hashing. I11 does **not** gate the range-exhaustion
+transition T7 and does **not** prove or confirm exhaustion; target verification checks one
+candidate solution, whereas progress verification models claimed range progress.
 
 **Verification-time state rule (CR2).** A miner receiving an unverified early-stop
 certificate **remains in `ACTIVE_HASHING`**; it continues hashing while verifying; it
@@ -295,7 +299,7 @@ solver identity for a valid solution.
   confirmation the miner is reassigned (T9) if a range is offered, otherwise it routes to
   `OFFLINE` (T13). It NEVER auto-drops to `LOW_POWER_LISTEN` on timeout — that would violate
   I4.
-- **Failure behaviour.** Fabricating exhaustion (unverified early-stop, I11) or otherwise
+- **Failure behaviour.** Fabricating exhaustion (a progress/audit violation detected by the modeled audit, not I11) or otherwise
   violating protocol → `DISQUALIFIED` (T19); crash/heartbeat loss → `OFFLINE` (T13).
 
 ### 2.5 `LOW_POWER_LISTEN`
@@ -513,10 +517,11 @@ enforcement explicit:
 - **Any direct `LOW_POWER_LISTEN → ACTIVE_HASHING` or `RESERVE → ACTIVE_HASHING`.**
   Resumption of hashing MUST pass through `WAKING` so that wake energy `P_wake,i * t_wake,i`
   and `E_transition,i` are charged; skipping the wake state would misstate the energy model.
-- **Any `ACTIVE_HASHING → EXHAUSTED_PENDING` on an unverified early-stop.** Ending active
-  hashing on exhaustion grounds without target verification over the whole assigned range is
-  prohibited by **I11**; such an attempt is itself a violation routing to `DISQUALIFIED`
-  (T18).
+- **Any `ACTIVE_HASHING → EXHAUSTED_PENDING` without ACCEPTED exhaustion adjudication.**
+  Entering `EXHAUSTED_PENDING` is a PATH-A range-exhaustion transition governed by **I4, I8a,
+  and ExhaustionAdjudicate** (accepted coverage), never by an early-stop certificate or I11. A
+  fabricated exhaustion claim is a progress/audit violation (detected by the modeled audit)
+  routing to `DISQUALIFIED` (T19); it is not an I11 matter.
 - **Any outgoing edge from `DISQUALIFIED`.** The state is absorbing.
 - **Concurrent occupancy of two states.** The eight states are mutually exclusive; no
   transition may leave a miner in more than one.
