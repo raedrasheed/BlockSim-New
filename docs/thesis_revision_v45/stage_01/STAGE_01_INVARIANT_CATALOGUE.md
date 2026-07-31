@@ -347,7 +347,12 @@ replaced by two consistent invariants** (the old form was impossible while a lin
   per-version `status`; the `renewal_time`.
 - **Enforcement point.** `RenewAssignment` (atomic supersede-and-publish, SOLE renewal path — G2);
   `CreatePendingAssignment` (opens ORIGINAL/REASSIGNED fresh lineages, never RENEWED); `ValidateCandidate`
-  resolves each snapshot's `(AssignmentID, assignment_version)` to its immutable version.
+  resolves each snapshot's `(AssignmentID, assignment_version)` to its immutable version. **J7 canonical
+  terminal status:** `SUPERSEDED` is used ONLY for atomic same-range renewal (a new `CURRENT` is published
+  in the same step); every non-renewal end-of-life (revocation, adversarial withdrawal, abandonment, wake
+  failure, cancellation, round closure, template closure) sets `status = CLOSED`. A CLOSED lineage has
+  ZERO live heads (I18b) — in particular an adversarial withdrawal closes with `status = CLOSED`,
+  `custody_status = revoked`, `revocation_reason = adversarial_withdrawal` (I-07), leaving no live head.
 - **Planned test stage.** Stage 4 (leases, reassignment, renewal).
 - **Consequence of violation.** Two CURRENT versions in one lineage (ambiguous acceptance target); a
   renewal that mutates identity in place (invalidating a discovery snapshot, violating E1/I2); or an

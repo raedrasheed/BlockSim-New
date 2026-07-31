@@ -280,3 +280,45 @@ Catalogue" denotes the separate document defining I1..I19.
   superseded_by_template_refresh}`. An adversarial withdrawal sets `custody_status = revoked` and
   `revocation_reason = adversarial_withdrawal`; it NEVER invents a custody value such as
   `revoked_adversarial_exit`. The cause lives in the separate `revocation_reason` field.
+
+## Stage-1J terminology addendum (implementation-handoff lock)
+
+- **Security-census coherence (J1).** `ApplyMinerStateTransition` is the SOLE writer of
+  `security_census_dirty[event_time]` and `latest_security_census[event_time]`, and writes them TOGETHER
+  atomically. INVARIANT: `security_census_dirty[t] = true ⇒ latest_security_census[t] exists`.
+  `FinalizeEventTimeSecurityCensus` asserts this before reading. Candidate failure
+  (`HandlePropagationFailure`) sets NO dirty flag — it changes no `ACTIVE_HASHING` census; only the later
+  re-activation boundaries do, through the hook.
+- **Replay-before-precondition (J2).** In `ApplyMinerStateTransition` the `TransitionEventID` replay guard
+  is evaluated FIRST; an exact replay returns `duplicate_suppressed` WITHOUT reading `old_state` and
+  WITHOUT charging energy. The `old_state = miner_state(MinerID)` precondition is checked only for a
+  non-replay (a replay necessarily arrives after the first event already changed `miner_state`).
+- **Complete transition envelope (J3).** `ApplyMinerStateTransition` receives/resolves the full envelope
+  including explicit `candidate_id` AND `propagation_id` (replacing the ambiguous `candidate_ref`); every
+  candidate-triggered caller passes BOTH. `TransitionEventID` therefore distinguishes two propagation
+  attempts of one `CandidateID` (different `PropagationID`).
+- **`event_creation_seq` (J4).** The ONE per-run monotonic event-creation counter, owned SOLELY by the
+  central scheduler `ScheduleEvent`, assigned atomically after deterministic ordering; it is the `seq`
+  in every event envelope and every `TransitionEventID`. Initialised once at run start, preserved across
+  rounds (I-04). No ambient undeclared seq exists.
+- **`PrepareParticipantsForNewRound` (J5).** The named `ASSIGNMENT`-phase procedure that gives every
+  eligible miner a legal new-round path (REGISTERED→T3, RESERVE→T4, `LOW_POWER_LISTEN` parked by
+  `ROUND_ACCEPTED`/`ROUND_ABORTED`→fresh `ORIGINAL` under the new `RoundID`/`TemplateID` via T10),
+  establishing the intended assignment set BEFORE `ASSIGNMENT → HASHING` (R4). It never reopens a CLOSED
+  old-round assignment.
+- **Floor applicability before breach (J6).** `SecurityFloorEvaluate` checks round-state applicability
+  BEFORE evaluating thresholds: setup/refresh/exhausted states record only a `security_census_observation`
+  (no I16 breach event); only `HASHING`/`SOLUTION_PROPAGATION`/`SECURITY_RECOVERY` record breaches.
+- **Canonical terminal status (J7).** `SUPERSEDED` is used ONLY for atomic same-range renewal; `CLOSED`
+  is the terminal status for every non-renewal end-of-life (revocation, adversarial withdrawal,
+  abandonment, wake failure, cancellation, round closure, template closure). There is no ambiguous
+  "CLOSE/SUPERSEDE"; a CLOSED lineage has zero live heads (I18b).
+- **Security-census provenance (J8).** `latest_security_census[event_time]` carries the epoch it was
+  PRODUCED under (`RoundID_at_census`, `TemplateID_at_census`, `state_version_at_census`, `census_seq`)
+  plus the census values. The epilogue passes the STORED provenance to `SecurityFloorEvaluate`; a
+  stale-context census records `stale_census_observation` and never triggers recovery in the new
+  round/template.
+- **Central scheduler `ScheduleEvent` (J9).** The sole event-enqueue interface: it rejects a finalised
+  `event_time`, assigns `event_creation_seq`, applies the delta-cycle forward rule, attaches
+  `RoundID`/`TemplateID` and the candidate envelope fields, and inserts by the deterministic total-order
+  key. Every `SCHEDULE` in the specification is shorthand for a `ScheduleEvent` call.
