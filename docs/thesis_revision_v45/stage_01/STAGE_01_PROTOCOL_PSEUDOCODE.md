@@ -180,8 +180,9 @@ change `H_active` after the final decision at `t`.
 
 ```
 PROCEDURE ProcessEventTime
-  INPUTS: RoundContext, event_time t
-  PRECONDITIONS: t is the earliest unprocessed event_time on the queue; t not in finalised_event_times
+  INPUTS: RoundContext, event_time t, is_horizon = (t == run_horizon_T)   # O1: is_horizon marks the fixed horizon T
+  PRECONDITIONS: t is the earliest unprocessed event_time on the queue; t not in finalised_event_times;
+                 t <= run_horizon_T (no ordinary event is ever scheduled beyond T — O2/§0.7e)
   EFFECTS:
     # I-02: DRAIN t to quiescence in deterministic order, INCLUDING handler-generated same-t events.
     LOOP:
@@ -199,9 +200,18 @@ PROCEDURE ProcessEventTime
                                                                   #   may schedule further events at t per the
                                                                   #   delta-cycle rule (§0.7-H2) or at a later time
       # loop re-evaluates: a handler may have added a (t, current_delta_cycle+1) event (forward only)
+    # ---- HORIZON CLOSURE (O1: run-level hook, ONLY at t = T, interposed BETWEEN drain and epilogue) ----
+    # After T is drained to quiescence, if the run's current round is still NONTERMINAL, close it at the
+    # horizon through the named CloseRoundAtHorizon hook (§20b) so the round is ALREADY terminal when the T
+    # epilogue runs. This is a direct CALL, NOT a queued event (no ordinary event exists at T after the drain).
+    IF is_horizon AND round_state NOT in {ROUND_ACCEPTED, ROUND_ABORTED}:
+      CALL CloseRoundAtHorizon(RoundContext)                      # O1/§20b: -> ROUND_ABORTED (horizon-end disposition)
     # ---- EVENT-TIME SECURITY EPILOGUE (runs once, even if no later event exists) ----
     IF security_census_dirty[t]:
       CALL FinalizeEventTimeSecurityCensus(RoundContext, t)       # decides from latest_security_census[t]
+                                                                  #   at the horizon the round is terminal after
+                                                                  #   CloseRoundAtHorizon, so this is a
+                                                                  #   terminal_stale_noop that only clears dirty[T] (O1)
     ADD t to finalised_event_times                               # t is now closed to ordinary events
     # any participation action the decision created was scheduled at a STRICTLY LATER event_time (I-02),
     # so it cannot alter the census that this epilogue already finalised at t.
@@ -210,8 +220,52 @@ PROCEDURE ProcessEventTime
   NOTE: I-02: FinalizeEventTimeSecurityCensus is an EPILOGUE, not a normal microphase event; it cannot be
         "missed" because it is invoked structurally by this driver after quiescence, not dispatched from
         the queue. Draining to quiescence first guarantees the single decision uses the FINAL
-        event-time census (I-01) and that no stranded delta-cycle census can trigger recovery.
+        event-time census (I-01) and that no stranded delta-cycle census can trigger recovery. O1: this is
+        the SOLE event-loop driver — no handler ever re-enters it. At the horizon T it interposes the
+        run-level CloseRoundAtHorizon hook (§20b) BETWEEN the drain and the epilogue, so the horizon epilogue
+        is a terminal_stale_noop; the run-level FinalizeSimulationRun (§20a) is then invoked by the RUN DRIVER
+        (§0.7d-run) AFTER ProcessEventTime(T) returns — it is NOT a queued event.
+
+PROCEDURE RunEventLoopToHorizon                                   # O1: the RUN-LEVEL driver (top-level loop)
+  INPUTS: RunContext, RoundContext
+  PRECONDITIONS: a run is in progress with a fixed horizon run_horizon_T = T; the queue holds only
+                 event_times <= T (O2: ScheduleEvent rejects any target_event_time > T)
+  EFFECTS:
+    # O1: ProcessEventTime is the SOLE event-loop driver; this run-level loop only SELECTS the next
+    #     event_time and never itself dispatches an event. It processes every event_time up to AND
+    #     INCLUDING the horizon T (so the T drain, the horizon closure, and the T epilogue all run).
+    WHILE the queue has an unprocessed event_time t with t <= T:
+      SET t <- the earliest unprocessed event_time on the queue
+      CALL ProcessEventTime(RoundContext, t, is_horizon = (t == T))
+    # O1: RUN-LEVEL FINALISER — a post-ProcessEventTime(T) run-driver HOOK, NOT a queued event. By now every
+    #     event_time <= T is finalised, any nonterminal round was horizon-closed inside ProcessEventTime(T)
+    #     (§20b), and the T epilogue has run (terminal_stale_noop). FinalizeSimulationRun performs ONLY the
+    #     single FINAL_RUN_END settle + I5/I6/I7 reconciliation.
+    CALL FinalizeSimulationRun(RunContext, RoundContext)          # O1/N1: run-level hook (not queued)
+  RETURNS: run_completed(T)
+  NOTE: O1: the canonical horizon sequence lives HERE — process every event_time <= T via ProcessEventTime
+        (which drains each t, and at t = T interposes CloseRoundAtHorizon between drain and epilogue), THEN
+        invoke the run-level FinalizeSimulationRun as a post-quiescence hook. Nothing below RUN_FINALISE is a
+        queued microphase; FinalizeSimulationRun and CloseRoundAtHorizon are run-level hooks, never enqueued.
 ```
+
+**(0.7d-run) Run-level driver and the canonical horizon sequence (O1).** `ProcessEventTime` is the SOLE
+event-loop driver; a handler NEVER re-enters it. The RUN-LEVEL driver `RunEventLoopToHorizon` (above) selects
+the next `event_time` and calls `ProcessEventTime` for every `event_time` up to AND INCLUDING the fixed
+horizon `T`, then invokes `FinalizeSimulationRun` (§20a) as a post-`ProcessEventTime(T)` run-level HOOK. The
+canonical horizon sequence is therefore: (1) process every `event_time < T`; (2) drain all ordinary and
+delta-cycle events AT `T` to quiescence; (3) if the run's current round is still nonterminal, run
+`CloseRoundAtHorizon` (§20b) — the named horizon-close hook that closes the round via `CloseRoundAssignments`
+and transitions it to `ROUND_ABORTED` with a DISTINCT horizon-end disposition, using ONE deterministic
+horizon envelope and scheduling NO ordinary event after the drain; (4) run the `T` epilogue
+`FinalizeEventTimeSecurityCensus(T)`, which — the round now being terminal — is a `terminal_stale_noop` that
+merely clears `security_census_dirty[T]`; (5) ONLY THEN invoke the run-level `FinalizeSimulationRun`, which
+performs ONLY the single `FINAL_RUN_END` `SettleResidencyBoundary` + the I5/I6/I7 reconciliation + sets
+`run_finalised`. `FinalizeSimulationRun` and `CloseRoundAtHorizon` are RUN-LEVEL hooks, NOT queued events;
+`RUN_FINALISE` is therefore NOT an ordinary microphase in the queue map (§0.7g/§21) but a post-quiescence
+run-level action. Because `ScheduleEvent` rejects any `target_event_time > T` (O2/§0.7e), no ordinary event
+ever remains with `event_time > T`, so `FinalizeSimulationRun`'s former internal DRAIN is unnecessary and is
+REMOVED (the run driver has already drained every `event_time <= T`).
 
 **(0.7e) Central scheduler contract (J9; complete dispatch context K8; sole delta-cycle authority L6).**
 Every event enters the queue through ONE interface, `ScheduleEvent` (below), which reads and updates a
@@ -246,6 +300,10 @@ STRUCTURE EventQueueContext (per-RUN; K8; the sole dispatch/scheduling state)
                           event binds from. It is an EXPLICIT dispatched-envelope field, NOT an ambient seq.
   event_creation_seq    : the ONE per-run monotonic event-creation counter (J4); owned SOLELY here
   finalised_event_times : set of event_times whose epilogue has run (I-02)
+  run_horizon_T         : O2 — the fixed simulation horizon T (= run-end event_time). BINDING SCHEDULING
+                          BOUND: ScheduleEvent REJECTS any target_event_time > run_horizon_T, so no ordinary
+                          event is ever enqueued beyond T (target_event_time = T is legal). Same value the
+                          run driver (§0.7d-run) and SettleResidencyBoundary (FINAL_RUN_END) use.
 
 PROCEDURE ScheduleEvent
   INPUTS: EventQueueContext EQ, RoundContext, event_type, target_event_time, target_microphase,
@@ -257,6 +315,13 @@ PROCEDURE ScheduleEvent
     # K8/J9 (1): reject scheduling into an already-finalised event_time (I-02).
     IF target_event_time in EQ.finalised_event_times:
       RETURN rejected_finalised_time        # a security-decision participation action MUST use a strictly later time
+    # O2 (1-bis): BINDING HORIZON RULE. Reject any event scheduled BEYOND the fixed horizon T. The result is
+    #     DETERMINISTIC and the event is NOT enqueued (never queued, never later dispatched), so no pending
+    #     ordinary event can remain with event_time > T. target_event_time = T is LEGAL (it is the horizon
+    #     itself); only target_event_time > T is rejected.
+    IF target_event_time > EQ.run_horizon_T:
+      RECORD post_horizon_event(event_type, target_event_time, target_microphase)   # audit-only log
+      RETURN post_horizon_event_rejected    # deterministic: the caller records the rejection; nothing is enqueued
     # K8 (2): DERIVE the target delta_cycle from the dispatch context; the caller never supplies it.
     IF target_event_time > EQ.current_event_time:
       SET dc <- 0                            # a FUTURE event_time starts its delta_cycle numbering at 0 (K8)
@@ -280,8 +345,11 @@ PROCEDURE ScheduleEvent
   RETURNS: scheduled(envelope)
   NOTE: K8/J9: the SOLE enqueue interface, over the explicit EventQueueContext. It DERIVES delta_cycle
         (caller supplies only event_time + microphase), owns event_creation_seq (J4), rejects finalised
-        (I-02) and backward event_times, and inserts by the deterministic total-order key (G7/H2). Every
-        `SCHEDULE` elsewhere is shorthand for a call here.
+        (I-02), post-horizon (O2: target_event_time > T), and backward event_times, and inserts by the
+        deterministic total-order key (G7/H2). Every `SCHEDULE` elsewhere is shorthand for a call here.
+        O2: because this is the ONLY enqueue path and it rejects target_event_time > T, the queue can never
+        hold an ordinary event beyond the horizon T — the run driver (§0.7d-run) drains every event_time <= T,
+        so nothing is stranded past T.
 ```
 
 **(0.7f) Driver event envelopes (K4; single sanctioned source L1).** A miner-state transition originated
@@ -316,6 +384,14 @@ a queued microphase — it is the epilogue (I-01/I-02), so it has no mapping ent
 | `ResumeFromPause` | `RESUME` | 12 |
 | `AdversarialParticipationChangeEvent` | `PARTICIPATION_CHANGE` | 13a |
 | `ActiveHashRateUpdate` / periodic monitoring | `MONITORING` | 13 |
+| `RecoveryDeadlineEvent` (O3: seated UNRECOVERABLE source, §9a) | `RECOVERY_DEADLINE` | 13b |
+| `CompleteSecurityRecovery` (R13/R14 exit, §10a) | `RECOVERY_COMPLETE` | 13c |
+
+`RecoveryDeadlineEvent` and `CompleteSecurityRecovery` are ordinary queued events (seated through
+`ScheduleEvent`, always at a STRICTLY LATER `event_time <= T`). `RUN_FINALISE` is **NOT** in this queue map
+(O1): `FinalizeSimulationRun` is a run-level hook invoked by `RunEventLoopToHorizon` after
+`ProcessEventTime(T)`, and `CloseRoundAtHorizon` is a run-level hook invoked inside `ProcessEventTime(T)` —
+neither is a queued microphase.
 
 `AcceptanceBatchFinalize` (microphase 4) is enqueued once per (timestamp, acceptance point) by
 `BlockAcceptancePoint` at microphase `ACCEPTANCE_ARBITRATION`; round-closure/refresh transitions are the
@@ -327,9 +403,12 @@ that CREATES or CANCELS events iterates in a STABLE order (by `MinerID`, then `C
 event queue has a DECLARED event type, target microphase, stable tie key, required envelope fields, and a
 declared right (or not) to create SAME-TIME delta-cycle events. No driver entry point receives a
 `dispatch_envelope` without such a normative `ScheduleEvent` seating rule (the envelope is always the
-dispatched event's own, per §0.7f). `RoundAbort` retains TERMINAL-ABORT priority (§21 item 1);
-`FinalizeSimulationRun` is a RUN-LEVEL terminal action (microphase `RUN_FINALISE`, processed after every
-ordinary round event of every event_time up to and including the horizon `T`), NOT an ordinary round event.
+dispatched event's own, per §0.7f). `RoundAbort` retains TERMINAL-ABORT priority (§21 item 1). **O1:**
+`FinalizeSimulationRun` and `CloseRoundAtHorizon` are RUN-LEVEL hooks (NOT queued events) and therefore do
+NOT appear in the seating table below — `FinalizeSimulationRun` is invoked by `RunEventLoopToHorizon` after
+`ProcessEventTime(T)` (§0.7d-run), and `CloseRoundAtHorizon` is invoked inside `ProcessEventTime(T)` between
+the `T` drain and the `T` epilogue (§20b). `RecoveryDeadlineEvent` (O3, §9a) is added as a seated queued
+source of the UNRECOVERABLE recovery outcome.
 
 | Driver entry point | Event type | Target microphase | Stable tie key | Required envelope fields | May create same-time delta-cycle events? |
 |--------------------|-----------|-------------------|----------------|--------------------------|:--:|
@@ -339,15 +418,20 @@ ordinary round event of every event_time up to and including the horizon `T`), N
 | `MinerRegister` | `MinerRegister` | `REGISTRATION` | `(MinerID)` | `event_time, delta_cycle, event_seq` | no |
 | `ReserveActivate` | `ReserveActivate` | `RECOVERY_ACTIVATE` | `(MinerID)` | `event_time, delta_cycle, event_seq` | yes — its `StartWake` may seat a same-time `WakeCompleteEvent` (H5) |
 | `FullRangeExhaustNoSolution` | `FullRangeExhaust` | `RANGE_EXHAUST_ADJUDICATE` | `(RoundID, TemplateID)` | `event_time, delta_cycle, event_seq` | no |
-| `CompleteSecurityRecovery` | `CompleteSecurityRecovery` | `RECOVERY_COMPLETE` | `(RoundID, state_version)` | `event_time, delta_cycle, event_seq` | yes — branch C's `CompleteAssignmentPhase`/`ReserveActivate` may seat same-time events |
+| `RecoveryDeadlineEvent` | `RecoveryDeadlineEvent` | `RECOVERY_DEADLINE` | `(RoundID, RecoveryEpisodeID)` | `event_time, delta_cycle, event_seq` | no (it only seats a strictly-later `CompleteSecurityRecovery`) |
+| `CompleteSecurityRecovery` | `CompleteSecurityRecovery` | `RECOVERY_COMPLETE` | `(RoundID, RecoveryEpisodeID)` | `event_time, delta_cycle, event_seq` | yes — branch C's `CompleteAssignmentPhase`/`ReserveActivate` may seat same-time events |
 | `RoundAbort` | `RoundAbort` | `TERMINAL_ABORT` (§21 item 1) | `(RoundID)` | `event_time, delta_cycle, event_seq` | no |
-| `FinalizeSimulationRun` | `FinalizeSimulationRun` | `RUN_FINALISE` (run-level terminal) | `(RunID)` | `event_time (= T), delta_cycle, event_seq` | no (run-level; nothing is scheduled past `T`) |
 
-Same-timestamp ordering among these driver microphases follows the §21 inter-type order, with
-`TERMINAL_ABORT` retaining top priority and `RUN_FINALISE` last (a run-level action that runs after every
-ordinary round microphase). `CompleteSecurityRecovery` (`RECOVERY_COMPLETE`) and the epilogue's floor
-decision are ordered per I-02 (the recovery-completion event is always seated at a STRICTLY LATER event_time
-than the decision that produced it). **Envelope-fields column (N3).** The "required envelope fields" are the
+Run-level hooks (NOT in the seating table, O1): `CloseRoundAtHorizon` (§20b, invoked inside
+`ProcessEventTime(T)` with ONE deterministic horizon envelope) and `FinalizeSimulationRun` (§20a, invoked by
+`RunEventLoopToHorizon` after `ProcessEventTime(T)`, carrying NO dispatch_envelope). Neither is enqueued;
+nothing is ever scheduled past `T` (O2).
+
+Same-timestamp ordering among the queued driver microphases follows the §21 inter-type order, with
+`TERMINAL_ABORT` retaining top priority. `RecoveryDeadlineEvent` (`RECOVERY_DEADLINE`) and
+`CompleteSecurityRecovery` (`RECOVERY_COMPLETE`) and the epilogue's floor decision are ordered per I-02 (both
+recovery events are always seated at a STRICTLY LATER event_time than the decision/entry that produced them).
+**Envelope-fields column (N3).** The "required envelope fields" are the
 fields the DISPATCHED event carries — every dispatched event has `(event_time, delta_cycle, event_seq)`.
 A driver entry point that performs a miner transition or a `StartWake` THREADS its own
 `dispatch_envelope` (a `dispatch_envelope` INPUT in its signature, M1); `RoundInitialise` and
@@ -391,6 +475,26 @@ STRUCTURE RoundContext registries (initialised by RoundInitialise, cleared on cl
   candidate_discovery_seq     : monotonic per-round counter for CandidateID (G7)
   block_accepted              : boolean flag, false until a block is accepted this round
   state_version               : monotonic round-state epoch, bumped on every round-state transition (G10)
+  # --- O4 security-recovery episode registries (reset by RoundInitialise; keyed by RecoveryEpisodeID) ---
+  recovery_episode_seq        : O4 — monotonic per-round counter advanced when the round ENTERS
+                                 SECURITY_RECOVERY. RecoveryEpisodeID = (RoundID, recovery_episode_seq) is the
+                                 DETERMINISTIC identity of one recovery episode (G7-style), immutable once minted.
+  current_recovery_episode    : O4 — the RecoveryEpisodeID of the round's ACTIVE recovery episode while
+                                 round_state = SECURITY_RECOVERY; null otherwise. Set on entry to
+                                 SECURITY_RECOVERY, cleared when the episode's completion is finalised.
+  recovery_completion_pending : O4 — map RecoveryEpisodeID -> boolean. Set true when the FIRST completion
+                                 source (the floor-restored epilogue OR RecoveryDeadlineEvent) seats ONE
+                                 CompleteSecurityRecovery for the episode. A second source that finds it true
+                                 seats NOTHING (deterministic duplicate no-op) — AT MOST ONE completion event
+                                 per episode. Not prose "ENSURE exactly one": the boolean IS the registry key.
+  recovery_outcome_finalised  : O4 — map RecoveryEpisodeID -> RecoveryOutcome. Set ONCE, when
+                                 CompleteSecurityRecovery APPLIES the episode's outcome. A later or replayed
+                                 CompleteSecurityRecovery for the SAME RecoveryEpisodeID finds it set and is a
+                                 deterministic stale/duplicate no-op — AT MOST ONE finalised outcome per episode.
+  # RecoveryOutcome enum (O3): the settled result carried by a recovery-completion event.
+  #   RESTORED     -> the floor was restored (branches A/B/C of CompleteSecurityRecovery)
+  #   UNRECOVERABLE-> the floor cannot be restored (branch D -> RoundAbort(floor_unrecoverable), round only)
+  # RECOVERY_OUTCOME in {RESTORED, UNRECOVERABLE}   # O3: replaces the contradictory `floor_result = restored`
   residency_ledger            : the SOLE owner of every per-miner state-residency duration t_<state>,
                                  including t_ACTIVE_HASHING = t_hash (H7). Only ApplyMinerStateTransition
                                  opens/closes residency intervals; no other procedure increments a t_<state>.
@@ -773,6 +877,10 @@ PROCEDURE RoundInitialise
     SET        candidate_discovery_seq   <- 0        # G7: deterministic CandidateID counter
     SET        block_accepted            <- false
     SET        state_version             <- 0        # G10: round-state epoch
+    SET        recovery_episode_seq      <- 0        # O4: deterministic RecoveryEpisodeID counter
+    SET        current_recovery_episode  <- null     # O4: no active recovery episode at round start
+    INITIALISE recovery_completion_pending <- empty map   # O4: per-episode "one completion seated" key
+    INITIALISE recovery_outcome_finalised  <- empty map   # O4: per-episode "one outcome applied" key
     INITIALISE residency_ledger          <- empty    # H7/I19: sole owner of per-miner t_<state> this round
     # I-04: PER-RUN event-loop bookkeeping -- initialise ONCE at run start, PRESERVE across rounds. These
     #       are keyed by event_time / TransitionEventID (run-monotonic), so resetting them per round would
@@ -784,13 +892,15 @@ PROCEDURE RoundInitialise
       INITIALISE transition_rejection_log    <- empty log      # K5
       INITIALISE EventQueueContext EQ WITH event_queue = empty, current_event_time = 0,
                  current_delta_cycle = 0, current_microphase = 0, current_event_seq = 0,
-                 event_creation_seq = 0, finalised_event_times = empty set   # K8/J4/L1/I-02 (sole dispatch state)
+                 event_creation_seq = 0, finalised_event_times = empty set,
+                 run_horizon_T = config.horizon_T   # K8/J4/L1/I-02/O2 (sole dispatch state; horizon bound for ScheduleEvent)
       INITIALISE rebased_boundaries          <- empty set     # L5 (idempotence key for the round-boundary rebase)
       INITIALISE run_finalised               <- false         # N1 (guards the single run-end finalisation)
     ELSE:                                            # subsequent round: CARRY the run-level bookkeeping forward
       PRESERVE security_census_dirty, latest_security_census, applied_transition_registry,
                transition_rejection_log, rebased_boundaries, run_finalised, EventQueueContext EQ (incl. event_queue,
-               event_creation_seq, current_event_seq, finalised_event_times, current_delta_cycle)  from prior_state (§3.12)
+               event_creation_seq, current_event_seq, finalised_event_times, current_delta_cycle,
+               run_horizon_T)  from prior_state (§3.12)   # O2: the horizon bound is per-run, preserved across rounds
       # K3/L5/M4 CROSS-ROUND RESIDENCY REBASE between the prior (terminal) round and this one, performed by the
       #    SINGLE idempotent owner SettleResidencyBoundary (§1a) with mode = REBASE_TO_NEXT_ROUND: it closes every
       #    open interval in the prior round (attributing energy to it) AND reopens the SAME state for this round
@@ -1666,6 +1776,24 @@ PROCEDURE SecurityFloorEvaluate
     IF breach AND round_state in {HASHING, SOLUTION_PROPAGATION}:
       # G8: SR PRESERVES any live propagation contexts; block arrivals/arbitration remain processable.
       TRANSITION round_state -> SECURITY_RECOVERY              # bumps state_version (G10)
+      # O4: MINT the recovery episode for this entry (deterministic id, immutable). This episode key drives
+      #     the at-most-one-completion idempotence for BOTH completion sources (epilogue + deadline).
+      SET recovery_episode_seq <- recovery_episode_seq + 1
+      SET episode <- (RoundID_current, recovery_episode_seq)
+      SET current_recovery_episode <- episode
+      SET recovery_completion_pending[episode] <- false        # no completion seated yet
+      # O3: SEAT the NAMED UNRECOVERABLE source. RecoveryDeadlineEvent (§9a) is the concrete, seated source that
+      #     makes R14 (FloorUnrecoverable) REACHABLE: if the floor is still breached when it fires, it seats a
+      #     CompleteSecurityRecovery carrying RecoveryOutcome = UNRECOVERABLE. It is enqueued through the SOLE
+      #     scheduler, carrying the episode + epoch (J8). If the deadline would fall beyond T, ScheduleEvent
+      #     rejects it (O2) and the round is instead terminated by CloseRoundAtHorizon at the horizon (§20b).
+      SET r <- CALL ScheduleEvent(EQ, RoundContext, RecoveryDeadlineEvent,
+                     target_event_time = min(t + recovery_deadline_window, run_horizon_T),
+                     target_microphase = RECOVERY_DEADLINE,
+                     {RecoveryEpisodeID = episode, RoundID_at_entry = RoundID_current,
+                      TemplateID_at_entry = TemplateID_committed, state_version_at_entry = state_version_current})
+      IF r = post_horizon_event_rejected:
+        RECORD recovery_deadline_past_horizon(episode)         # O2: none seated past T; horizon-close governs
       RETURN breach
     ELSE IF breach AND round_state = SECURITY_RECOVERY:
       # I-05: a CONTINUING breach while ALREADY in recovery. Record persistence ONLY; perform NO
@@ -1677,28 +1805,83 @@ PROCEDURE SecurityFloorEvaluate
       #   (it is the census decision, keyed by event_time alone). It SEATS the executable recovery-completion
       #   driver CompleteSecurityRecovery (§10a) on the queue at a STRICTLY LATER event_time (I-02: recovery
       #   participation actions never alter the census already finalised at t), so the R13 transition happens
-      #   in a dispatched handler with its own dispatch_envelope, carrying the settled floor result + the epoch
-      #   the decision was produced under (J8). Guarded to ONE per recovery episode.
-      ENSURE exactly one CompleteSecurityRecovery is scheduled for THIS recovery episode via
-             CALL ScheduleEvent(EQ, RoundContext, CompleteSecurityRecovery,
-                                target_event_time = t_next (strictly > t), target_microphase = RECOVERY_COMPLETE,
-                                {floor_result = restored, RoundID_at_decision = RoundID_current,
-                                 TemplateID_at_decision = TemplateID_committed,
-                                 state_version_at_decision = state_version_current})   # N2/N3/I-02
+      #   in a dispatched handler with its own dispatch_envelope, carrying the settled RecoveryOutcome + the epoch
+      #   the decision was produced under (J8).
+      SET episode <- current_recovery_episode
+      # O2 HORIZON GUARD: a floor decision AT the horizon T cannot seat a recovery-completion at t_next > T
+      #   (ScheduleEvent would reject it). Record run_ending_no_recovery_action and take NO participation action;
+      #   the round is closed by CloseRoundAtHorizon at T (§20b).
+      IF t = run_horizon_T:
+        RECORD run_ending_no_recovery_action(episode)          # O2: no CompleteSecurityRecovery scheduled past T
+        RETURN run_ending_no_recovery_action
+      # O4 IDEMPOTENCE: at most ONE completion event per episode. If a completion (from THIS epilogue on an
+      #   earlier event_time, or from RecoveryDeadlineEvent) is already seated, seat NOTHING.
+      IF recovery_completion_pending[episode] OR recovery_outcome_finalised[episode] is set:
+        RETURN floor_restored_completion_already_pending       # O4: deterministic duplicate no-op
+      SET recovery_completion_pending[episode] <- true         # O4: this epilogue seats the ONE completion
+      CALL ScheduleEvent(EQ, RoundContext, CompleteSecurityRecovery,
+                         target_event_time = t_next (strictly > t, <= run_horizon_T),
+                         target_microphase = RECOVERY_COMPLETE,
+                         {RecoveryEpisodeID = episode, RecoveryOutcome = RESTORED,
+                          RoundID_at_decision = RoundID_current,
+                          TemplateID_at_decision = TemplateID_committed,
+                          state_version_at_decision = state_version_current})   # N2/N3/I-02/O3/O4
       RETURN floor_restored_scheduled
     RETURN no_breach
-  RETURNS: breach | breach_persists | floor_restored_scheduled | no_breach | refresh_observation_only |
-           exhausted_observation_only | setup_observation_only | stale_census_observation | terminal_stale_noop
+  RETURNS: breach | breach_persists | floor_restored_scheduled | floor_restored_completion_already_pending |
+           run_ending_no_recovery_action | no_breach | refresh_observation_only | exhausted_observation_only |
+           setup_observation_only | stale_census_observation | terminal_stale_noop
   NOTE: J6/J8/I-05: round-state applicability is checked BEFORE any threshold evaluation, so setup/refresh/
         exhausted states record ONLY a security_census_observation (never a breach event); a stale-context
         census records stale_census_observation and never triggers recovery in the new round/template;
         terminal rounds return terminal_stale_noop first. Breach events (I16) and recovery transitions
         occur ONLY in HASHING/SOLUTION_PROPAGATION/SECURITY_RECOVERY; recovery is entered only from
         HASHING or SOLUTION_PROPAGATION; a persistent breach in SECURITY_RECOVERY records breach_persists
-        with no self-transition and no state_version bump. N2/R13: when the floor is RESTORED while in
-        SECURITY_RECOVERY, the epilogue seats CompleteSecurityRecovery (§10a) at a strictly-later event_time
-        (I-02) — it never performs the recovery-exit transition inline. I17 holds at every boundary; `q_adv =
-        NA` is never numerically compared; entering SECURITY_RECOVERY does NOT cancel live candidates (G8).
+        with no self-transition and no state_version bump. N2/R13/O3/O4: entering SECURITY_RECOVERY MINTS a
+        deterministic RecoveryEpisodeID and seats the NAMED UNRECOVERABLE source RecoveryDeadlineEvent (§9a),
+        so R14 is reachable. When the floor is RESTORED while in SECURITY_RECOVERY, the epilogue seats ONE
+        CompleteSecurityRecovery (§10a) carrying RecoveryOutcome = RESTORED at a strictly-later event_time
+        (I-02) — never inline — guarded to at most ONE completion per episode (recovery_completion_pending,
+        O4). O2: a floor decision AT the horizon T seats NO recovery-completion (it would be past T); it records
+        run_ending_no_recovery_action and the round is closed by CloseRoundAtHorizon. I17 holds at every
+        boundary; `q_adv = NA` is never numerically compared; entering SECURITY_RECOVERY does NOT cancel live
+        candidates (G8).
+
+PROCEDURE RecoveryDeadlineEvent                                  # O3/§9a: the NAMED, seated UNRECOVERABLE source
+  INPUTS: RoundContext, dispatch_envelope, RecoveryEpisodeID, RoundID_at_entry, TemplateID_at_entry,
+          state_version_at_entry   # carried by the event seated on entry to SECURITY_RECOVERY (§9 breach branch)
+  PRECONDITIONS: a dispatched queued handler (seated through ScheduleEvent at RECOVERY_DEADLINE); its
+                 dispatch_envelope is its own (§0.7f)
+  EFFECTS:
+    # O3/O4 STALE GUARD. The deadline is meaningful ONLY if the round is STILL in recovery, on the SAME
+    #   episode and epoch, and no completion has been finalised. Otherwise it is a deterministic no-op.
+    IF round_state != SECURITY_RECOVERY
+       OR RecoveryEpisodeID != current_recovery_episode
+       OR recovery_outcome_finalised[RecoveryEpisodeID] is set
+       OR RoundID_at_entry != RoundID_current OR TemplateID_at_entry != TemplateID_committed
+       OR state_version_at_entry != state_version_current:
+      RETURN recovery_deadline_stale_noop
+    # O4 IDEMPOTENCE: if the floor-restored epilogue already seated the ONE completion for this episode, the
+    #   deadline does NOT override it (RESTORED wins because it was seated first). Deterministic duplicate no-op.
+    IF recovery_completion_pending[RecoveryEpisodeID]:
+      RETURN recovery_deadline_superseded_noop
+    # The deadline elapsed with the floor STILL breached -> seat the ONE UNRECOVERABLE completion (R14 source).
+    #   Through the SOLE scheduler, at a strictly-later event_time (<= T), carrying the episode + epoch (J8).
+    SET recovery_completion_pending[RecoveryEpisodeID] <- true   # O4: this deadline seats the ONE completion
+    CALL ScheduleEvent(EQ, RoundContext, CompleteSecurityRecovery,
+                       target_event_time = t_next (strictly > dispatch_envelope.event_time, <= run_horizon_T),
+                       target_microphase = RECOVERY_COMPLETE,
+                       {RecoveryEpisodeID = RecoveryEpisodeID, RecoveryOutcome = UNRECOVERABLE,
+                        RoundID_at_decision = RoundID_current, TemplateID_at_decision = TemplateID_committed,
+                        state_version_at_decision = state_version_current})   # O3/O4/N3/I-02
+    RETURN unrecoverable_completion_seated(RecoveryEpisodeID)
+  RETURNS: unrecoverable_completion_seated | recovery_deadline_stale_noop | recovery_deadline_superseded_noop
+  NOTE: O3: the CONCRETE, seated source that makes R14 (FloorUnrecoverable) reachable — a call path now exists
+        from a recovery episode to RoundAbort(floor_unrecoverable) via CompleteSecurityRecovery branch D. O4:
+        the episode key (RecoveryEpisodeID) guarantees at most ONE completion event per episode across BOTH
+        sources (this deadline and the floor-restored epilogue); whichever seats first wins, the other is a
+        deterministic no-op. It NEVER transitions the round itself — the transition/abort happens in the
+        dispatched CompleteSecurityRecovery handler (§10a).
 ```
 
 ## 10. Reserve activation
@@ -1738,34 +1921,51 @@ PROCEDURE ReserveActivate
         from REASSIGNED (F4).
 ```
 
-## 10a. Executable security-recovery completion (R13/N2)
+## 10a. Executable security-recovery completion (R13/R14/N2; RecoveryOutcome O3; episode idempotence O4)
 
-The round-state-machine R13 contract (`SECURITY_RECOVERY → …` once the floor is restored) is EXECUTABLE
-through the single named procedure `CompleteSecurityRecovery`. It is a dispatched sim-driver entry point,
-seated on the queue by the epilogue's floor-restored decision (§9/N2) at `(t_next, RECOVERY_COMPLETE)`
-(§0.7g/N3), and it performs the recovery-exit round-state transition in a dispatched handler with its own
-`dispatch_envelope`. R13 is NO LONGER "described but non-executable".
+The round-state-machine R13 (FloorRestored) AND R14 (FloorUnrecoverable) contracts are EXECUTABLE through
+the single named procedure `CompleteSecurityRecovery`. It is a dispatched sim-driver entry point, seated on
+the queue at `(t_next, RECOVERY_COMPLETE)` (§0.7g/N3) by EITHER of two concrete sources, each carrying a
+settled `RecoveryOutcome` (O3): (1) the epilogue's floor-restored decision (§9/N2) seats it with
+`RecoveryOutcome = RESTORED`; (2) the seated `RecoveryDeadlineEvent` (§9a) seats it with `RecoveryOutcome =
+UNRECOVERABLE` when the floor is still breached at the deadline — this is the concrete source and call path
+that makes R14 REACHABLE. The procedure performs the recovery-exit round-state transition (RESTORED) or the
+round-only abort (UNRECOVERABLE) in a dispatched handler with its own `dispatch_envelope`. `RecoveryEpisodeID`
+makes completion idempotent per episode (O4). R13/R14 are NO LONGER "described but non-executable".
 
 ```
 PROCEDURE CompleteSecurityRecovery
-  INPUTS: RoundContext, dispatch_envelope, floor_result,
-          RoundID_at_decision, TemplateID_at_decision, state_version_at_decision   # N2: settled recovery decision + epoch (J8)
+  INPUTS: RoundContext, dispatch_envelope, RecoveryEpisodeID, RecoveryOutcome,
+          RoundID_at_decision, TemplateID_at_decision, state_version_at_decision   # O3/O4: settled outcome + episode + epoch (J8)
   PRECONDITIONS: round_state = SECURITY_RECOVERY;
-                 # N2/J8: the recovery decision must be for the CURRENT epoch, or it is a stale no-op.
-                 floor_result = restored
+                 # O3: the settled result is a RecoveryOutcome, NOT the contradictory `floor_result = restored`.
+                 #     BOTH outcomes are accepted here; RESTORED -> branches A/B/C, UNRECOVERABLE -> branch D.
+                 RecoveryOutcome in {RESTORED, UNRECOVERABLE}
+                 # N2/J8: the recovery decision must be for the CURRENT epoch and episode, or it is a stale no-op.
   EFFECTS:
-    # N2/J8 STALE-DECISION GUARD. If the round already left recovery, or the decision's epoch is superseded,
-    #   do nothing (a later decision, or the terminal round, governs).
+    # O4 EPISODE IDEMPOTENCE (checked FIRST). At most ONE completion is APPLIED per RecoveryEpisodeID. A
+    #   duplicate/replayed completion for an already-finalised episode is a deterministic no-op.
+    IF recovery_outcome_finalised[RecoveryEpisodeID] is set:
+      RETURN recovery_completion_duplicate_noop
+    # N2/J8/O4 STALE-DECISION GUARD. If the round already left recovery, this is not the round's active
+    #   episode, or the decision's epoch is superseded, do nothing (a later decision, or the terminal round, governs).
     IF round_state != SECURITY_RECOVERY
+       OR RecoveryEpisodeID != current_recovery_episode
        OR RoundID_at_decision != RoundID_current OR TemplateID_at_decision != TemplateID_committed
        OR state_version_at_decision != state_version_current:
       RETURN recovery_completion_stale_noop
-    # N2: FOUR R13/R14 branches. The procedure PRESERVES candidate contexts where branch A requires them and
-    #   NEVER fabricates a new template (a template change is TemplateRefresh, not a recovery exit).
-    IF NOT floor_result = restored:
-      # (D) R14: the floor cannot be restored -> abort THIS round (not the run, N1).
+    # O4: FINALISE the episode's outcome ONCE (the idempotence key). After this, the episode is complete and
+    #   current_recovery_episode is cleared; any further completion for this RecoveryEpisodeID is a duplicate no-op.
+    SET recovery_outcome_finalised[RecoveryEpisodeID] <- RecoveryOutcome
+    SET current_recovery_episode <- null
+    # O3: FOUR R13/R14 branches keyed by RecoveryOutcome. The procedure PRESERVES candidate contexts where branch
+    #   A requires them and NEVER fabricates a new template (a template change is TemplateRefresh, not a recovery exit).
+    IF RecoveryOutcome = UNRECOVERABLE:
+      # (D) R14: the floor cannot be restored -> abort THIS round (not the run, N1). Reachable via the seated
+      #     RecoveryDeadlineEvent source (§9a); the round-only abort closes assignments and returns control.
       RETURN CALL RoundAbort(RoundContext, reason = floor_unrecoverable, dispatch_envelope = dispatch_envelope)
 
+    # ---- RecoveryOutcome = RESTORED: branches A/B/C ----
     IF active_propagation_set is non-empty:
       # (A) R13/G8: LIVE propagation contexts remain -> resume propagation. PRESERVE every live candidate's
       #     context and its scheduled certificate/block events (do NOT cancel or fabricate). Use the round-state
@@ -1792,13 +1992,17 @@ PROCEDURE CompleteSecurityRecovery
         reassign accepted unsearched suffixes via the ordinary named procedures (I1 disjoint; no new template)
       CALL CompleteAssignmentPhase(RoundContext, dispatch_envelope)                      # ASSIGNMENT -> HASHING (R4 + census, L2/M2)
       RETURN recovery_completed(ASSIGNMENT_TO_HASHING)
-  RETURNS: recovery_completed(target) | recovery_completion_stale_noop | abort_record
-  NOTE: N2/R13/R14: the EXECUTABLE recovery-completion owner. (A) live candidates -> SOLUTION_PROPAGATION
-        (contexts + events PRESERVED, G8); (B) no contexts, no assignment change -> HASHING; (C) redistribution
-        needed -> ASSIGNMENT -> CompleteAssignmentPhase -> HASHING (no new template); (D) floor unrecoverable ->
-        RoundAbort(floor_unrecoverable). Branches A/B/C reach a floor-applicable state through TransitionRoundState
-        / CompleteAssignmentPhase, so the applicability-entry census is ALWAYS captured (M2). It never fabricates
-        a template and never settles residency (that is FinalizeSimulationRun / the next RoundInitialise, N1).
+  RETURNS: recovery_completed(target) | recovery_completion_stale_noop | recovery_completion_duplicate_noop |
+           abort_record
+  NOTE: N2/R13/R14/O3/O4: the EXECUTABLE recovery-completion owner, keyed by RecoveryOutcome. RESTORED: (A)
+        live candidates -> SOLUTION_PROPAGATION (contexts + events PRESERVED, G8); (B) no contexts, no assignment
+        change -> HASHING; (C) redistribution needed -> ASSIGNMENT -> CompleteAssignmentPhase -> HASHING (no new
+        template). UNRECOVERABLE: (D) -> RoundAbort(floor_unrecoverable), round only (N1), reachable via the
+        seated RecoveryDeadlineEvent source (§9a). O4: the FIRST completion for a RecoveryEpisodeID finalises it
+        (recovery_outcome_finalised) — at most one applied outcome per episode; any duplicate/stale completion
+        is a deterministic no-op. Branches A/B/C reach a floor-applicable state through TransitionRoundState /
+        CompleteAssignmentPhase, so the applicability-entry census is ALWAYS captured (M2). It never fabricates a
+        template and never settles residency (that is FinalizeSimulationRun / the next RoundInitialise, N1).
 ```
 
 ## 11. Wake completion
@@ -2781,51 +2985,84 @@ PROCEDURE RoundAbort
         acceptance_batch_registry, so no stale candidate event or acceptance batch survives the abort (TV47).
 ```
 
-## 20a. Run-level finalisation (N1)
+## 20a. Run-level finalisation (N1; horizon sequence split O1)
 
-`FinalizeSimulationRun` is the SINGLE run-level terminal action: it runs EXACTLY ONCE at the fixed
-simulation horizon `T` (or an explicit run-end condition), regardless of whether the last round ended
-`ROUND_ACCEPTED`, `ROUND_ABORTED`, or remained NONTERMINAL at `T`. `RoundAbort` (§20) closes ONE round and
-reconciles NOTHING to the horizon; the run-end residency settle and the I5/I6/I7 reconciliation live HERE.
-It is a RUN-LEVEL terminal event seated on the queue at `(T, RUN_FINALISE)` (§0.7g/N3), NOT an ordinary
-round event.
+`FinalizeSimulationRun` is the SINGLE run-level terminal action for the run-end residency settle and the
+I5/I6/I7 reconciliation. **O1:** it is NO LONGER seated on the ordinary event queue and it NO LONGER drains
+the queue or closes a round itself. The RUN DRIVER `RunEventLoopToHorizon` (§0.7d-run) drains every
+`event_time <= T` via `ProcessEventTime` (the sole event-loop driver), and — when the run's current round is
+still nonterminal at `T` — `ProcessEventTime(T)` interposes the named `CloseRoundAtHorizon` hook (§20b)
+BETWEEN the `T` drain and the `T` epilogue. `FinalizeSimulationRun` is then invoked by the run driver as a
+POST-`ProcessEventTime(T)` run-level HOOK (NOT a queued event): by that point every `event_time <= T` is
+finalised, any nonterminal round is already horizon-closed, and the `T` epilogue has run
+(`terminal_stale_noop`). `RoundAbort` (§20) closes ONE round and reconciles NOTHING to the horizon.
 
 ```
 PROCEDURE FinalizeSimulationRun
-  INPUTS: RunContext, RoundContext, dispatch_envelope   # N1/N3: run-level terminal event at (T, RUN_FINALISE)
-  PRECONDITIONS: the fixed simulation horizon T is reached (or an explicit run-end condition holds);
-                 # N3: seated on the queue by the run driver at event_time = T, microphase = RUN_FINALISE, so
-                 #     dispatch_envelope = (T, delta_cycle, event_seq) is its own dispatched envelope.
+  INPUTS: RunContext, RoundContext   # O1: a run-level HOOK invoked by RunEventLoopToHorizon after ProcessEventTime(T);
+                                     #     NOT a queued event, so it carries NO dispatch_envelope.
+  PRECONDITIONS: RunEventLoopToHorizon has processed every event_time <= T (the queue is empty of ordinary
+                 events; O2 guarantees none was ever scheduled > T); any nonterminal round has been horizon-closed
+                 by CloseRoundAtHorizon (§20b) inside ProcessEventTime(T); the T epilogue has run.
   EFFECTS:
-    # N1: EXACTLY ONCE per run (guard); a re-dispatch is a no-op.
+    # N1: EXACTLY ONCE per run (guard); a re-invocation is a no-op.
     IF run_finalised: RETURN run_already_finalised
-    # (1) DRAIN all events PERMITTED up to the final event_time (I-02): every event_time <= T is finalised to
-    #     quiescence, including each event-time security epilogue. No ordinary event is scheduled beyond T.
-    DRAIN the event queue to quiescence for every event_time <= T          # I-02 (nothing scheduled past T)
-    # (2) if the CURRENT round is still NONTERMINAL at the horizon, CLOSE it through the DECLARED horizon-end
-    #     round disposition -- a terminal closure at T via the single closure path (D7). This records
-    #     round_terminal_time(RoundID) <- dispatch_envelope.event_time (= T) and moves miners off ACTIVE_HASHING.
-    #     ACCEPTED / ABORTED final rounds are already terminal and skip this step.
-    IF round_state NOT in {ROUND_ACCEPTED, ROUND_ABORTED}:
-      CALL CloseRoundAssignments(RoundContext, disposition = ROUND_ABORTED, stop_reason = ROUND_ABORTED,
-                                 dispatch_envelope = dispatch_envelope)     # declared horizon-end closure (D7)
-      RECORD horizon_end_disposition(RoundID) <- closed_at_horizon          # I14/I15 NA metrics retained
-      TRANSITION round_state -> ROUND_ABORTED                               # terminal at T (declared horizon-end)
-    # (3) SINGLE run-end residency settle: close EVERY open residency interval at the horizon T through the ONE
+    # O1: NO internal DRAIN (the run driver already drained every event_time <= T) and NO horizon-close (that is
+    #     CloseRoundAtHorizon, §20b). By the precondition round_state is now terminal for every run.
+    ASSERT round_state in {ROUND_ACCEPTED, ROUND_ABORTED}                  # O1: horizon-close already ran if needed
+    # (1) SINGLE run-end residency settle: close EVERY open residency interval at the horizon T through the ONE
     #     boundary owner, keyed by (RunID, RUN_END); idempotent (rebased_boundaries), NO reopen. This is the
     #     ONLY FINAL_RUN_END settle in the whole specification.
     CALL SettleResidencyBoundary(RoundContext, mode = FINAL_RUN_END,
                                  boundary_id = (RunID, RUN_END))            # N1/M4: the ONLY FINAL_RUN_END settle
-    # (4) I5/I6/I7 reconciliation runs ONLY AFTER the final settle (never inside RoundAbort).
+    # (2) I5/I6/I7 reconciliation runs ONLY AFTER the final settle (never inside RoundAbort).
     ASSERT per-miner state-energy sums (I6); ASSERT network energy sum (I7)
     ASSERT per-miner durations reconcile to the horizon T (I5)             # every miner's t_<state> sums to T
     SET run_finalised <- true
   RETURNS: run_finalised(T)
-  NOTE: N1: the SINGLE owner of run-end horizon reconciliation, run EXACTLY ONCE at T for a run whose last
-        round is ACCEPTED, ABORTED, or nonterminal alike. RoundAbort performs NO horizon settle; an early
-        abort at t < T is followed by RoundInitialise when simulated time remains. This procedure drains to T,
-        horizon-closes a nonterminal round, performs the ONE FINAL_RUN_END SettleResidencyBoundary, and THEN
-        runs the I5/I6/I7 reconciliation; it never reopens an interval (the run is over).
+  NOTE: N1/O1: the SINGLE owner of the run-end FINAL_RUN_END settle + I5/I6/I7 reconciliation, run EXACTLY
+        ONCE at T. O1 narrowed it: the drain and the horizon-close moved OUT (to RunEventLoopToHorizon /
+        ProcessEventTime and CloseRoundAtHorizon, §20b); this procedure performs ONLY the single settle,
+        the reconciliation, and the run_finalised guard. It is a run-level hook, never a queued event, and
+        never reopens an interval (the run is over). RoundAbort performs NO horizon settle; an early abort at
+        t < T is followed by RoundInitialise when simulated time remains.
+```
+
+## 20b. Horizon-close of a nonterminal round (O1)
+
+`CloseRoundAtHorizon` is the NAMED run-level hook that closes a still-nonterminal round AT the fixed horizon
+`T`. It is invoked by `ProcessEventTime(T)` (§0.7d) AFTER the `T` drain and BEFORE the `T` epilogue, so the
+round is already terminal when the horizon epilogue runs (making that epilogue a `terminal_stale_noop`). It
+is a DIRECT run-level CALL, NOT a queued event — no ordinary event exists at `T` after the drain, and O2
+guarantees none is scheduled beyond `T`. It uses ONE deterministic horizon envelope.
+
+```
+PROCEDURE CloseRoundAtHorizon
+  INPUTS: RoundContext   # O1: a run-level hook; it builds ONE deterministic horizon envelope (below), not a
+                         #     dispatched event envelope.
+  PRECONDITIONS: t = run_horizon_T has been drained to quiescence by ProcessEventTime; round_state is
+                 NONTERMINAL (ProcessEventTime only calls this when round_state NOT in {ROUND_ACCEPTED, ROUND_ABORTED})
+  EFFECTS:
+    # O1: ONE deterministic horizon envelope. Its event_time is T; its delta_cycle/event_seq are the fixed
+    #     run-level horizon-close values (there is no ambient seq — the run driver mints this ONE envelope for
+    #     the horizon close). No ordinary event is created after the drain.
+    SET horizon_envelope <- { event_time = run_horizon_T, delta_cycle = horizon_close_delta_cycle,
+                              event_seq = horizon_close_event_seq }        # O1: the single deterministic horizon envelope
+    # close ALL open assignments/miner paths through the single closure path (D7); records
+    # round_terminal_time(RoundID) <- run_horizon_T and moves miners off ACTIVE_HASHING. CloseRoundAssignments
+    # performs NO residency finalisation (M4) — that is the subsequent FinalizeSimulationRun FINAL_RUN_END settle.
+    CALL CloseRoundAssignments(RoundContext, disposition = ROUND_ABORTED, stop_reason = ROUND_ABORTED,
+                               dispatch_envelope = horizon_envelope)       # declared horizon-end closure (D7)
+    # O1: a DISTINCT horizon-end disposition, separate from an ordinary RoundAbort, so run-end closure is
+    #     auditable as horizon-end (not an unrecoverable-condition abort).
+    RECORD horizon_end_disposition(RoundID) <- closed_at_horizon          # I14/I15 NA metrics retained
+    TRANSITION round_state -> ROUND_ABORTED                               # terminal at T (declared horizon-end)
+  RETURNS: round_closed_at_horizon(RoundID, run_horizon_T)
+  NOTE: O1: the horizon-close owner, invoked ONLY by ProcessEventTime(T) between the T drain and the T epilogue.
+        It closes a nonterminal round via the single CloseRoundAssignments path with a DISTINCT horizon-end
+        disposition and ONE deterministic horizon envelope, and performs NO residency settle (that is the
+        run-level FinalizeSimulationRun, §20a). Because it runs before the T epilogue, the horizon epilogue is a
+        terminal_stale_noop. It is a run-level hook, never a queued event.
 ```
 
 ---
@@ -2905,16 +3142,21 @@ The contract has two levels:
       11  Wake completion               (WakeCompleteEvent)
       12  Resume-from-pause             (ResumeFromPause)
       13  Periodic monitoring           (ActiveHashRateUpdate / heartbeat)
-      13a Recovery completion           (CompleteSecurityRecovery -> R13 exit): a dispatched driver event,
-                                         always seated at a STRICTLY LATER event_time than the floor decision
-                                         that produced it (I-02/N2), microphase RECOVERY_COMPLETE
+      13a Recovery deadline             (RecoveryDeadlineEvent -> UNRECOVERABLE source, O3): a dispatched queued
+                                         event (§9a), microphase RECOVERY_DEADLINE; seats a strictly-later
+                                         CompleteSecurityRecovery only if the floor is still breached
+      13b Recovery completion           (CompleteSecurityRecovery -> R13/R14 exit): a dispatched queued event,
+                                         always seated at a STRICTLY LATER event_time than the decision/deadline
+                                         that produced it (I-02/N2/O3), microphase RECOVERY_COMPLETE
       —  Security-floor decision        (FinalizeEventTimeSecurityCensus -> SecurityFloorEvaluate):
                                          event-time EPILOGUE, run once AFTER quiescence (I-01/I-02), never
                                          as a same-timestamp queued event
-      —  Run-level finalisation         (FinalizeSimulationRun, microphase RUN_FINALISE, N1): a RUN-LEVEL
-                                         terminal action processed AFTER every ordinary round event of every
-                                         event_time up to and including the horizon T; NOT a round event and
-                                         NOT the same as RoundAbort (item 1)
+      —  Horizon-close (run-level)      (CloseRoundAtHorizon, O1/§20b): a RUN-LEVEL hook invoked INSIDE
+                                         ProcessEventTime(T) between the T drain and the T epilogue when the
+                                         round is nonterminal; NOT a queued event, NOT the same as RoundAbort (item 1)
+      —  Run-level finalisation         (FinalizeSimulationRun, O1/N1): a RUN-LEVEL hook invoked by
+                                         RunEventLoopToHorizon AFTER ProcessEventTime(T); NOT a queued microphase
+                                         (RUN_FINALISE is NOT in the queue map), NOT a round event
 
 2. **Intra-type tie-break.** Events of the SAME type at the SAME timestamp are ordered by
    `(CandidateID, MinerID, AssignmentID, seq)` lexicographically, where `seq` is the monotonic

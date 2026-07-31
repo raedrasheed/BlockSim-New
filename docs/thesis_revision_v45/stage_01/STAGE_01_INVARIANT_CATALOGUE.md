@@ -314,9 +314,11 @@ point, planned test stage, and consequence of violation.
   re-checks this identity at **every** `ACTIVE_HASHING` entry and exit boundary. Every
   adversarial-participation change is carried by a scheduled `AdversarialParticipationChangeEvent`
   (G3/H6) that mutates the census ONLY through this hook; `ActiveHashRateUpdate` is **compute-only**
-  (no sampling, no census mutation — G3). The single settled-census `FinalizeTimestampSecurityCensus`
-  (H3) reads the FINAL census once per settled timestamp and invokes `SecurityFloorEvaluate` exactly
-  once; no per-transition floor decision is scheduled.
+  (no sampling, no census mutation — G3). The single settled-census event-time epilogue
+  `FinalizeEventTimeSecurityCensus` (H3, keyed by `event_time` alone per I-01/I-02; O5) reads the FINAL
+  census once per settled `event_time` — AFTER the whole `event_time` is quiescent, never before
+  certificate/discovery events — and invokes `SecurityFloorEvaluate` exactly once; no per-transition floor
+  decision is scheduled.
 - **Planned test stage.** Stage 3 (time-varying hash rate, security floor, reserve activation).
 - **Consequence of violation.** Inconsistent hash-rate decomposition; `q_adv(t)` derived from an
   independently sampled adversarial term; a zero-active-rate regime silently reported as safe
@@ -400,8 +402,13 @@ replaced by two consistent invariants** (the old form was impossible while a lin
   `SettleResidencyBoundary` (M4/L5 — the ONLY boundary residency close/reopen: a SINGLE idempotent owner
   keyed by `boundary_id`, with `REBASE_TO_NEXT_ROUND` (from `RoundInitialise`) and `FINAL_RUN_END` (from
   `FinalizeSimulationRun` ONLY, N1) modes, superseding `FinalizeRoundResidency`/`BeginRoundResidency`);
-  `FinalizeSimulationRun` (N1 — the run-level finaliser that owns the single `FINAL_RUN_END` settle at the
-  horizon `T` and the subsequent I5/I6/I7 reconciliation; `RoundAbort` does NOT);
+  `FinalizeSimulationRun` (N1/O1 — the run-level HOOK that owns the single `FINAL_RUN_END` settle at the
+  horizon `T` and the subsequent I5/I6/I7 reconciliation; O1 narrowed it so it no longer drains the queue or
+  closes a round — the drain is the run driver's and the horizon-close is `CloseRoundAtHorizon`'s;
+  `RoundAbort` does NOT settle at the horizon);
+  `CloseRoundAtHorizon` (O1 — the run-level hook that closes a still-nonterminal round at `T` via
+  `CloseRoundAssignments` with a distinct horizon-end disposition, BEFORE the `FINAL_RUN_END` settle; performs
+  NO residency finalisation itself);
   `CloseRoundAssignments` (records `round_terminal_time` ONLY, performs NO residency finalisation — M4);
   `residency_ledger` (single writer). I5/I6 reconcile the
   resulting durations and energies.

@@ -180,11 +180,16 @@ every open interval at the run horizon `T` with **no** reopen. It is **idempoten
 `boundary_id` (`(prior_RoundID, new_RoundID)` or `(RunID, RUN_END)`): a replayed or retried
 `RoundInitialise` (`REBASE_TO_NEXT_ROUND`) or `FinalizeSimulationRun` (`FINAL_RUN_END`) re-invoking it is a
 no-op, so no boundary is ever applied twice. **N1:** the `FINAL_RUN_END` settle is owned SOLELY by
-`FinalizeSimulationRun` (Stage-1N, §20a) — the run-level finaliser that runs EXACTLY ONCE at the horizon
+`FinalizeSimulationRun` (§20a) — the run-level finaliser that runs EXACTLY ONCE at the horizon
 `T` for a run whose last round is ACCEPTED, ABORTED, or nonterminal alike, and runs the I5/I6/I7
-reconciliation ONLY AFTER that final settle. **`RoundAbort` no longer performs any run-end settle or
-horizon reconciliation** — it terminates ONE round, and an early abort at `t < T` is followed by
-`RoundInitialise` (a `REBASE_TO_NEXT_ROUND` boundary), never a horizon close. **M4:** `CloseRoundAssignments`
+reconciliation ONLY AFTER that final settle. **O1:** `FinalizeSimulationRun` performs ONLY that single
+`FINAL_RUN_END` settle + the I5/I6/I7 reconciliation; the horizon drain is the run driver's
+(`RunEventLoopToHorizon` via `ProcessEventTime`, §0.7d-run) and the horizon-close of a nonterminal round is
+`CloseRoundAtHorizon`'s (§20b), which runs BEFORE the settle. This does not change the energy accounting: the
+`FINAL_RUN_END` settle still closes every open interval once at `T` and the durations still partition
+`[0, T]` (I5). **`RoundAbort` no longer performs any run-end settle or horizon reconciliation** — it
+terminates ONE round, and an early abort at `t < T` is followed by `RoundInitialise` (a
+`REBASE_TO_NEXT_ROUND` boundary), never a horizon close. **M4:** `CloseRoundAssignments`
 performs **no** residency/energy finalisation — the earlier in-line `finalise state durations and energy to
 the exact closure time` is removed; it records `round_terminal_time` only, so there is no competing owner.
 Consequently the idle interval between a round's closure and the next round's `StartWake` (or the run

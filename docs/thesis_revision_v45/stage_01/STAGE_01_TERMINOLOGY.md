@@ -205,12 +205,15 @@ Catalogue" denotes the separate document defining I1..I19.
   cycle `k+1` at the same `event_time`. The authoritative same-`event_time` contract is
   `STAGE_01G_EVENT_MICROPHASE_SPEC.md` **extended by this delta-cycle rule**; the frozen Stage-1F
   `STAGE_01F_EVENT_PRIORITY_TABLE.md` is NOT authoritative.
-- **Single settled-census security evaluation (`FinalizeTimestampSecurityCensus`, H3).** A miner
-  transition never schedules its own floor decision; instead the hook sets
-  `security_evaluation_required[(event_time, delta_cycle)]`. Exactly ONE
-  `FinalizeTimestampSecurityCensus` runs in microphase 5 per settled `(event_time, delta_cycle)`,
-  reads the FINAL settled census, and calls `SecurityFloorEvaluate` at most once. Intermediate
-  same-time census values are retained for AUDIT ONLY and never drive a round-state transition.
+- **Single settled-census security evaluation (`FinalizeEventTimeSecurityCensus`, H3; renamed and relocated
+  to the event-time epilogue by I-01/I-02; O5).** A miner transition never schedules its own floor decision;
+  instead the coherent writers set `security_census_dirty[event_time]`. Exactly ONE
+  `FinalizeEventTimeSecurityCensus` runs as the event-time EPILOGUE per settled `event_time` — **AFTER the
+  whole `event_time` is quiescent** (never in a microphase placed before certificate/discovery events),
+  keyed by `event_time` ALONE — reads the FINAL settled census, and calls `SecurityFloorEvaluate` at most
+  once. Intermediate same-time census values are retained for AUDIT ONLY and never drive a round-state
+  transition. (The superseded H3 name `FinalizeTimestampSecurityCensus` and its `(event_time, delta_cycle)`
+  microphase-5 keying are no longer used, O5.)
 - **Legal `SECURITY_RECOVERY` sources (H4).** `SecurityFloorEvaluate` may transition to
   `SECURITY_RECOVERY` ONLY from `{HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY}`. From setup
   states (`ROUND_INITIALISING`/`TEMPLATE_COMMITMENT`/`ASSIGNMENT`), `TEMPLATE_REFRESH`,
@@ -431,12 +434,14 @@ Catalogue" denotes the separate document defining I1..I19.
   candidates, close assignments, record `round_terminal_time` at the abort `event_time`, transition to
   `ROUND_ABORTED`, and return control so `RoundInitialise` may start another round when simulated time
   remains. It performs NO `FINAL_RUN_END` settle and NO horizon-`T` reconciliation.
-- **`FinalizeSimulationRun` (N1).** The SINGLE run-level terminal action, run EXACTLY ONCE at the fixed
-  horizon `T` (or an explicit run-end condition), regardless of whether the last round is `ROUND_ACCEPTED`,
-  `ROUND_ABORTED`, or nonterminal. It drains events up to `T`, closes a nonterminal round through the
-  declared horizon-end disposition, performs the ONE `SettleResidencyBoundary(mode = FINAL_RUN_END,
-  boundary_id = (RunID, RUN_END))` (no reopen), and only THEN runs the I5/I6/I7 reconciliation. Guarded by
-  the per-run `run_finalised` flag. An early `RoundAbort` at `t < T` never closes residency at `T`.
+- **`FinalizeSimulationRun` (N1; narrowed by O1 — see the Stage-1O addendum).** The SINGLE run-level
+  finaliser, run EXACTLY ONCE at the fixed horizon `T`, guarded by the per-run `run_finalised` flag. It
+  performs the ONE `SettleResidencyBoundary(mode = FINAL_RUN_END, boundary_id = (RunID, RUN_END))` (no
+  reopen) and only THEN the I5/I6/I7 reconciliation. **O1 SUPERSESSION:** it is NO LONGER a queued event and
+  NO LONGER drains the queue or closes a round itself — the drain is the run driver's (`RunEventLoopToHorizon`
+  via `ProcessEventTime`) and the horizon-close of a nonterminal round is `CloseRoundAtHorizon`'s (§20b);
+  `FinalizeSimulationRun` is invoked as a post-`ProcessEventTime(T)` RUN-LEVEL hook. An early `RoundAbort` at
+  `t < T` never closes residency at `T`.
 - **`CompleteSecurityRecovery` (N2/R13/R14).** The EXECUTABLE recovery-exit owner. Seated on the queue by
   the epilogue's floor-restored decision (§9, at a strictly-later `event_time`, I-02), it branches: (A) live
   propagation contexts remain → `SECURITY_RECOVERY → SOLUTION_PROPAGATION` (contexts + events preserved,
@@ -452,4 +457,47 @@ Catalogue" denotes the separate document defining I1..I19.
   create same-time delta-cycle events (§0.7g-driver). No driver entry point receives a `dispatch_envelope`
   without a normative `ScheduleEvent` seating rule. `RoundAbort` keeps `TERMINAL_ABORT` priority (§21 item
   1); `FinalizeSimulationRun` is `RUN_FINALISE`, a run-level terminal processed after every ordinary round
-  event, not an ordinary round event.
+  event, not an ordinary round event. **(Superseded by O1: `FinalizeSimulationRun` is NOT seated on the queue
+  — see the Stage-1O addendum.)**
+
+## Stage-1O terminology addendum (horizon/recovery final lock)
+
+- **Run-level driver & canonical horizon sequence (O1).** `ProcessEventTime` is the SOLE event-loop driver
+  (no handler re-enters it). The RUN-LEVEL driver `RunEventLoopToHorizon` (pseudocode §0.7d-run) calls
+  `ProcessEventTime` for every `event_time <= T`, then invokes `FinalizeSimulationRun` as a
+  post-`ProcessEventTime(T)` run-level HOOK. Canonical order: process events `< T`; drain all ordinary +
+  delta-cycle events AT `T` to quiescence; if nonterminal, `CloseRoundAtHorizon` (§20b); the `T` epilogue
+  `FinalizeEventTimeSecurityCensus(T)` (a `terminal_stale_noop`); then the run-level `FinalizeSimulationRun`.
+- **`CloseRoundAtHorizon` (O1, §20b).** The NAMED run-level hook that closes a still-nonterminal round at the
+  horizon `T` via `CloseRoundAssignments` with a DISTINCT horizon-end disposition and ONE deterministic
+  horizon envelope, transitioning it to `ROUND_ABORTED`. It runs INSIDE `ProcessEventTime(T)` between the `T`
+  drain and the `T` epilogue; it is NOT a queued event and performs NO residency settle.
+- **`FinalizeSimulationRun` narrowed (O1, §20a).** A run-level HOOK (NOT a queued event, carries NO
+  `dispatch_envelope`). It performs ONLY the single `FINAL_RUN_END` `SettleResidencyBoundary` + the I5/I6/I7
+  reconciliation + sets `run_finalised`. The former internal DRAIN and horizon-close are REMOVED (they are
+  the run driver's and `CloseRoundAtHorizon`'s). `RUN_FINALISE` is NOT an ordinary microphase in the queue map.
+- **Binding horizon rule for `ScheduleEvent` (O2).** `ScheduleEvent` REJECTS any `target_event_time > T`
+  (`run_horizon_T`), records `post_horizon_event_rejected`, and enqueues nothing — a deterministic result.
+  `target_event_time = T` is legal. Consequently NO pending ordinary event ever has `event_time > T`. A
+  floor-restored decision AT `T` therefore seats NO `CompleteSecurityRecovery` (it would be past `T`): it
+  records `run_ending_no_recovery_action` and the round is closed by `CloseRoundAtHorizon`.
+- **`RecoveryOutcome` (O3).** The settled result carried by a recovery-completion event, one of `{RESTORED,
+  UNRECOVERABLE}` — replacing the contradictory `floor_result = restored` precondition/branch in
+  `CompleteSecurityRecovery`. `RESTORED` → branches A/B/C; `UNRECOVERABLE` → branch D →
+  `RoundAbort(reason = floor_unrecoverable)` (round only).
+- **`RecoveryDeadlineEvent` (O3, §9a).** The NAMED, seated source that makes R14 (FloorUnrecoverable)
+  REACHABLE. Seated through `ScheduleEvent` on entry to `SECURITY_RECOVERY`, carrying `RecoveryEpisodeID` +
+  epoch; when it fires with the floor still breached it seats `CompleteSecurityRecovery` with
+  `RecoveryOutcome = UNRECOVERABLE`. A concrete source and call path from a recovery episode to
+  `RoundAbort(floor_unrecoverable)` now exists.
+- **`RecoveryEpisodeID` and episode idempotence (O4).** `RecoveryEpisodeID = (RoundID, recovery_episode_seq)`
+  is the deterministic identity of one recovery episode, minted on entry to `SECURITY_RECOVERY`.
+  `recovery_completion_pending[episode]` guarantees AT MOST ONE completion event is seated per episode across
+  BOTH sources (a duplicate seats nothing); `recovery_outcome_finalised[episode]` guarantees AT MOST ONE
+  outcome is APPLIED per episode (a duplicate/stale completion is a deterministic no-op). Not prose "ENSURE
+  exactly one" — the registry keys are the mechanism.
+- **Round-state reconciliation & name replacement (O5).** No statement places the security decision BEFORE
+  certificate/discovery events; the decision is the post-quiescence event-time epilogue
+  `FinalizeEventTimeSecurityCensus` (I-01/I-02). The superseded name `FinalizeTimestampSecurityCensus` is
+  replaced everywhere by `FinalizeEventTimeSecurityCensus`. Historical Stage-1A–1N lettered artifacts are
+  unchanged; supersessions are recorded in `STAGE_01O_SUPERSESSION_REGISTER.md`.
