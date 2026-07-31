@@ -25,9 +25,11 @@ in `RESERVE`, or removed from active hashing), NEVER through partitioning itself
 The nonce domain of a round is partitioned into disjoint ranges (Protocol Scope, Section A,
 item 3). Under the idle policy an assignment of a range is granted as a **time-bounded lease**
 rather than an indefinite grant. Leasing makes range custody explicit and revocable, which is
-the precondition for reassigning coverage when a miner exhausts, abandons, departs, or is held
-in reserve — and therefore the precondition for reducing active participation without leaving
-regions of the nonce domain permanently unsearched.
+the precondition for reassigning the **unsearched** coverage of a miner that abandons,
+departs, or is held in reserve — and therefore the precondition for reducing active
+participation without leaving regions of the nonce domain permanently unsearched.
+(Exhaustion is not among these reasons: a fully exhausted range is complete, not reassigned;
+see Section 5.)
 
 This document specifies the lifecycle of a lease and the provenance rules that make
 reassignment auditable. It defines the coverage-state partition (I8a), the orthogonal
@@ -132,11 +134,14 @@ rather than a single frontier.
 
 ### 5.1 Abandonment
 
-**Abandonment** occurs when a holder ceases to make sanctioned progress on a live lease —
-for example on transition to `OFFLINE`, `EXHAUSTED_PENDING` without completing the range, or
-departure. On abandonment the range's searched prefix (as last checkpointed) is retained for
-accounting, and the unsearched suffix becomes eligible for reassignment. Abandonment is holder-
-originated (the holder stops); revocation (5.2) is authority-originated.
+**Abandonment** occurs when a holder ceases to make sanctioned progress on a live lease
+**before completing it** — for example on transition to `OFFLINE` or departure. On
+abandonment the range's searched prefix (as last checkpointed) is retained for accounting, and
+the unsearched suffix becomes eligible for reassignment. Abandonment is holder-originated (the
+holder stops); revocation (5.2) is authority-originated. Abandonment is distinct from
+**exhaustion**: a holder that fully searches its range reaches `EXHAUSTED_PENDING` with the
+range **completed** (Section 5.4), which is not abandonment and does not make the range
+reassignable.
 
 ### 5.2 Revocation
 
@@ -147,12 +152,23 @@ with the last checkpointed searched prefix retained.
 
 ### 5.3 Reassignment
 
-**Reassignment** issues a new Assignment object for a range (or the unsearched suffix of a range)
-to a DIFFERENT `MinerID`, following expiry, abandonment, revocation, or departure. Reassignment
-is the mechanism by which coverage of the nonce domain is maintained without requiring the
-original holder to continue. The reassigned Assignment object:
+**Reassignment** issues a new Assignment object for the **unsearched suffix** of a range
+(which may be the whole range when nothing has been searched) to a DIFFERENT `MinerID`.
+Reassignment is the mechanism by which unsearched coverage of the nonce domain is maintained
+without requiring the original holder to continue. Only an **unsearched suffix** may be
+reassigned; a searched prefix is never reassigned, and a **completed / exhausted** range is
+never reassigned (Section 5.4).
 
-- references the range or unsearched suffix being transferred;
+**Permitted reassignment reasons** are EXACTLY:
+
+```
+{ lease_expiry, abandonment, revocation, departure, conflict, security_recovery }
+```
+
+Exhaustion is NOT a reassignment reason and MUST NOT appear in any reassignment-reason set.
+The reassigned Assignment object:
+
+- references the unsearched suffix being transferred;
 - carries a fresh `AssignmentID` and the new holder's `MinerID`;
 - increments `assignment_version`;
 - sets `previous_assignment_reference` to the superseded `AssignmentID` (Section 6);
@@ -160,6 +176,24 @@ original holder to continue. The reassigned Assignment object:
 
 Reassignment of only the unsearched suffix narrows `range_start` to just after the transferred
 frontier so that the new lease does not re-cover the prior searched prefix (subject to Section 7).
+
+### 5.4 Completed / exhausted ranges are not reassignable
+
+A range that its holder **fully exhausts** — its entire assigned range searched with no valid
+solution found (PATH A, reaching `EXHAUSTED_PENDING` with the range completed) — is
+**complete**, not reclaimable. A completed / exhausted range:
+
+- has `custody_status = completed` (Section 8.3) and `coverage_state = searched`;
+- is **NOT** released to the reassignable pool;
+- is **NOT** marked `inactive_unsearched`;
+- is **NOT** reassigned under the same `TemplateID`.
+
+A **template refresh** does not reassign a completed range: it opens a **new**
+candidate-identity domain and issues **new original** assignments under the **new**
+`TemplateID` (`previous_assignment_reference = null`), which is not a reassignment of the
+completed old range. Only genuinely **unsearched** coverage (an unsearched suffix left by
+expiry, abandonment, revocation, departure, conflict, or security_recovery) is ever
+reassigned.
 
 ---
 
@@ -236,6 +270,8 @@ where, for the scope being reconciled:
 - **active_unsearched** — positions under a **live** lease not yet within a searched prefix;
 - **inactive_unsearched** — positions not currently under any live lease and not yet searched
   (their custody has lapsed — expired, abandoned, or revoked — or they await (re)assignment).
+  A **completed / exhausted** range is NOT `inactive_unsearched`: its positions are `searched`
+  and its custody status is `completed` (Sections 5.4, 8.3).
 
 The three coverage categories MUST be **pairwise disjoint** and **collectively exhaustive** over
 `assigned_domain` at every reconciliation point. A position is in exactly one coverage state at
@@ -265,7 +301,7 @@ alone. Aggregate counts are a summary of the positional partition, never a subst
 state, each assignment (and hence each position it covers) carries a custody/lineage status in:
 
 ```
-{original, renewed, reassigned, revoked, expired, abandoned}
+{original, renewed, reassigned, revoked, expired, abandoned, completed}
 ```
 
 - **original** — the first assignment of the range in its lineage (`previous_assignment_reference
@@ -274,7 +310,10 @@ state, each assignment (and hence each position it covers) carries a custody/lin
 - **reassigned** — custody transferred to a **different** holder (Section 5.3);
 - **revoked** — custody withdrawn by the authority before `lease_expiry` (Section 5.2);
 - **expired** — custody lapsed at `lease_expiry` without renewal (Section 3.2);
-- **abandoned** — custody relinquished by the holder ceasing sanctioned progress (Section 5.1).
+- **abandoned** — custody relinquished by the holder ceasing sanctioned progress (Section 5.1);
+- **completed** — the range was fully exhausted by its holder (PATH A; Section 5.4). A
+  `completed` range's coverage state is `searched`; it is not released to the reassignable
+  pool, not marked `inactive_unsearched`, and not reassigned under the same `TemplateID`.
 
 These are custody/lineage properties and **MUST NOT** appear as additive terms in the coverage
 equation of I8a. In particular, **`reassigned` is NOT a coverage term**: a reassigned position
@@ -298,9 +337,11 @@ together.
 - **Invariants used here:** **I8a** (coverage states partition the assigned domain:
   searched + active_unsearched + inactive_unsearched = assigned_domain, positionally with no
   hidden gap or overlap); **I8b** (custody/provenance model
-  `{original, renewed, reassigned, revoked, expired, abandoned}`, orthogonal to coverage — a
-  reassigned position keeps an independent coverage state, and `reassigned` is never an additive
-  coverage term); **I9** (every reassignment has full provenance).
+  `{original, renewed, reassigned, revoked, expired, abandoned, completed}`, orthogonal to
+  coverage — a reassigned position keeps an independent coverage state, `reassigned` is never
+  an additive coverage term, and a `completed`/exhausted range is `searched` in coverage and
+  not reassignable under the same `TemplateID`); **I9** (every reassignment has full
+  provenance).
 - **Related documents:** `STAGE_01_PROTOCOL_SCOPE.md`,
   `STAGE_01_PROGRESS_VERIFICATION_ABSTRACTION.md`, `STAGE_01_EARLY_STOP_CERTIFICATE.md`,
   `STAGE_01_REWARD_PENALTY_INTERFACE.md`.

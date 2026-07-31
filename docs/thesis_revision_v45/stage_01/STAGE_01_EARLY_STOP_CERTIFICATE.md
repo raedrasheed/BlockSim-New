@@ -17,9 +17,12 @@ appear.
 When a valid solution is found for a round, continued brute-force hashing by every other miner
 wastes active power-time. The idle policy uses an **early-stop certificate** to communicate, in
 an authenticated and independently verifiable form, that a round may halt active hashing. The
-certificate is the ONLY sanctioned trigger for a miner to stop hashing early. This is the direct
-lever on the energy model: stopping active hashing converts `ACTIVE_HASHING` time into listening
-or idle time, reducing `Σ_i P_hash,i · t_hash,i`.
+early-stop certificate is **the only solution-triggered mechanism that authorises miners to
+stop hashing before full-block propagation completes** (CR-B7). Miners may also cease hashing
+for reasons that are **not** solution-triggered: own-range exhaustion; assignment revocation;
+round acceptance; round abort; or offline/disqualification transitions. This certificate is the
+direct lever on the energy model: stopping active hashing converts `ACTIVE_HASHING` time into
+listening or idle time, reducing `Σ_i P_hash,i · t_hash,i`.
 
 The certificate carries a *found solution*; it is distinct from the progress-verification
 abstraction (`STAGE_01_PROGRESS_VERIFICATION_ABSTRACTION.md`), which concerns how much of a range
@@ -107,7 +110,11 @@ steps 1–7, dominated by hash recomputation (step 5). During this interval the 
 and **no `VERIFYING` miner state is introduced**. The verification work is energy-accounted
 separately as `E_verification` per Section 5. A miner MUST NOT anticipate the outcome and stop
 before verification completes; only after **all** of steps 1–7 pass may it leave `ACTIVE_HASHING`,
-and a failed certificate produces **no** hashing-state transition (I11).
+and a failed certificate produces **no** hashing-state transition (I11). On success the miner
+enters `LOW_POWER_LISTEN` **directly** (miner-level PATH B,
+`STAGE_01_MINER_STATE_MACHINE.md` T26), with `stop_reason = VALID_SOLUTION_VERIFIED` and its
+assignment **PAUSED** (retained `actual_frontier`, resumable); it does **NOT** pass through
+`EXHAUSTED_PENDING`, and its range is **not** marked searched or exhausted (CR-B1).
 
 ### 4.2 Invalid-certificate behaviour
 
@@ -162,6 +169,24 @@ final; if the full block ultimately fails to arrive or fails validation, the rou
 finalise on that certificate and normal round-progression/recovery handling applies. Stage 1
 specifies the ordering and does not claim a liveness guarantee for it.
 
+The network-arrival and early-stop ordering is (CR-B9):
+
+1. A candidate solution is found.
+2. Its certificate propagates with modeled per-recipient arrival times.
+3. Each recipient continues hashing while validating.
+4. After successful validation, that recipient enters `LOW_POWER_LISTEN` with
+   `stop_reason = VALID_SOLUTION_VERIFIED`, its assignment **PAUSED** (retained
+   `actual_frontier`) — **directly**, never via `EXHAUSTED_PENDING`.
+5. Full block propagation/validation continues.
+6. If the full block is accepted, the round closes (`ROUND_ACCEPTED`); remaining assignments
+   close because the round ended, not because their ranges were exhausted.
+7. If the full block is rejected or times out, stopped miners wake and resume their paused
+   assignments (`LOW_POWER_LISTEN → WAKING → ACTIVE_HASHING`) from the retained
+   `actual_frontier`, with wake and transition energy accounted.
+
+**No recipient is labeled `EXHAUSTED` merely because a valid solution was received**, and no
+chain-wide fork-choice proof is claimed.
+
 ---
 
 ## 5. Energy accounting during verification
@@ -176,9 +201,10 @@ Verification is not free and MUST be accounted in the energy model of `STAGE_01_
   increment added on top of the `ACTIVE_HASHING` residency energy and **not double-counted**. It
   is NOT folded into a listening term, and the miner does NOT leave `ACTIVE_HASHING` for
   verification.
-- **Transition on stop.** A miner that, after successful verification, leaves `ACTIVE_HASHING` for
-  a reduced-power state incurs the relevant transition term `E_transition,i` (and, on any later
-  resumption, the `WAKING` term `P_wake,i · t_wake,i`).
+- **Transition on stop.** A miner that, after successful verification, leaves `ACTIVE_HASHING`
+  enters `LOW_POWER_LISTEN` **directly** (PATH B, assignment PAUSED) and incurs the relevant
+  transition term `E_transition,i` (and, on any later **resume** of the paused assignment from
+  its retained `actual_frontier`, the `WAKING` term `P_wake,i · t_wake,i`).
 - **Net effect.** Early stop reduces active power-time by ending `ACTIVE_HASHING` sooner, at the
   cost of the (smaller) verification and transition terms. Any ΔE benefit claimed at
   later stages must be net of these verification and transition costs, and must arise from reduced
@@ -192,7 +218,10 @@ Verification is not free and MUST be accounted in the energy model of `STAGE_01_
 - **Certificate fields:** `RoundID`, `TemplateID`, `AssignmentID`, `MinerID`, `nonce`,
   `candidate hash`, `target`, `signature/authentication`.
 - **Round states touched:** `SOLUTION_PROPAGATION`, `ROUND_ACCEPTED`.
-- **Miner state touched:** `ACTIVE_HASHING` (the state a verified certificate authorises leaving).
+- **Miner states touched:** `ACTIVE_HASHING` (the state a verified certificate authorises
+  leaving) → `LOW_POWER_LISTEN` **directly** (PATH B, `stop_reason = VALID_SOLUTION_VERIFIED`,
+  assignment PAUSED; never via `EXHAUSTED_PENDING`), with resume through `WAKING` on
+  full-block rejection/timeout.
 - **Invariants used here:** **I2** (accepted solution lies in the signer's valid current
   assignment); **I3** (certificate matches current RoundID + TemplateID); **I11** (no false
   early-stop ends hashing without target verification).

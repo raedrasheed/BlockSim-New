@@ -34,23 +34,35 @@ across the round (Section 2), never over a single start-of-round snapshot (Secti
 
 ### 1.1 Definitions
 
-At modeled time `t` within a round:
+At modeled time `t` within a round, all three hash-rate quantities are computed
+**deterministically from the active-state census** — the set of miners that are in
+`ACTIVE_HASHING` at time `t`, read off **after** every miner's state has been determined:
 
 - **`H_active(t)`** — total active hash rate: the sum of the hash rates of all miners in
   `ACTIVE_HASHING` at time `t`.
-- **`H_honest(t)`** — active **honest** hash rate: the sum of the hash rates of the honest
+- **`H_honest(t)`** — active **honest** hash rate: the sum of the hash rates of the **honest**
   miners in `ACTIVE_HASHING` at time `t`.
 - **`H_adversarial(t)`** — active **adversarial** hash rate: the sum of the hash rates of the
-  adversarial miners in `ACTIVE_HASHING` at time `t`.
+  **adversarial** miners in `ACTIVE_HASHING` at time `t`.
 - **`q_adv(t)`** — instantaneous adversarial share of active hash rate:
 
         q_adv(t) = H_adversarial(t) / ( H_honest(t) + H_adversarial(t) ).           (S-1)
 
-By construction, over the active set, `H_active(t) = H_honest(t) + H_adversarial(t)` (the
-active set is partitioned into honest and adversarial contributors). `q_adv(t)` is defined
-whenever the denominator is positive; the degenerate zero-denominator case (no active hash
-rate at all) is itself a floor breach on `H_active` / `H_honest` (Section 4) and is recorded
-as such.
+**Exact, deterministic decomposition (invariant I17).** By construction
+`H_active(t) = H_honest(t) + H_adversarial(t)` holds **exactly** at every sampling and
+event-update time: the active set is partitioned into its honest and adversarial contributors,
+and `H_active`, `H_honest`, and `H_adversarial` are each read off the **same** active-state
+census once miner states are fixed. The adversarial-behaviour model may sample or decide
+**which adversarial miners** are in `ACTIVE_HASHING`; but **after** miner states are
+determined, all three quantities are computed **deterministically** from that census.
+`H_adversarial(t)` MUST NOT be sampled independently after `H_active(t)` has been computed —
+doing so would break the identity. This is invariant **I17** (Section 6).
+
+**Zero-active-hash-rate case.** `q_adv(t)` is defined whenever the denominator
+`H_active(t) = H_honest(t) + H_adversarial(t)` is strictly positive. When `H_active(t) = 0`,
+`q_adv(t)` is **undefined / NA** (not zero) and a security-floor breach on `H_active` /
+`H_honest` is recorded (Section 4); the degenerate zero-denominator case is itself a floor
+breach and is recorded as such.
 
 ### 1.2 Which miner states contribute
 
@@ -236,5 +248,8 @@ prompted them.
 - No fairness or incentive property is claimed for the security-floor policy.
 
 Invariant references: **I16** (breaches recorded, not silently repaired — Section 5);
-**I10** (reserve activation creates no overlapping active ranges — Section 5.5). All symbols
-and terms are defined in `STAGE_01_TERMINOLOGY.md`.
+**I17** (`H_active(t) = H_honest(t) + H_adversarial(t)` exactly, all three computed
+deterministically from the active-state census after states are determined; `q_adv(t)` is
+NA — not zero — with a recorded floor breach when `H_active(t) = 0` — Section 1.1); **I10**
+(reserve activation creates no overlapping active ranges — Section 5.5). All symbols and
+terms are defined in `STAGE_01_TERMINOLOGY.md`.

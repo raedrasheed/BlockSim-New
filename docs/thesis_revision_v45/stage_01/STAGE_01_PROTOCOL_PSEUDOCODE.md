@@ -21,7 +21,7 @@
   - Round states: `ROUND_INITIALISING`, `TEMPLATE_COMMITMENT`, `ASSIGNMENT`, `HASHING`,
     `SECURITY_RECOVERY`, `SOLUTION_PROPAGATION`, `ROUND_ACCEPTED`, `ROUND_EXHAUSTED`,
     `TEMPLATE_REFRESH`, `ROUND_ABORTED`.
-  - Invariants `I1..I16` are defined in `STAGE_01_INVARIANT_CATALOGUE.md`.
+  - Invariants `I1..I17` are defined in `STAGE_01_INVARIANT_CATALOGUE.md`.
   - Progress evidence is a **modeled progress-verification abstraction**, never a
     cryptographic proof. Target checks are a **modeled progress-verification abstraction**.
   - `q_adv(t) = H_adversarial(t) / (H_honest(t) + H_adversarial(t))`.
@@ -145,12 +145,14 @@ PROCEDURE RangeExhaust
   PRECONDITIONS: cursor has traversed all of range(assignment)
   EFFECTS:
     emit final ProgressCommit covering range(assignment)       # modeled progress abstraction
-    MARK range(assignment) as searched in assignment_ledger    # supports I8a
+    # CR-B5: local range exhaustion (PATH A) closes the range.
+    SET coverage_state(range(assignment)) <- searched          # supports I8a
     # CR5: separate simulator GROUND TRUTH from the PROTOCOL-LEVEL exhaustion claim.
     SET reported_exhaustion <- miner's claim that range(assignment) is fully searched
     # ---- honest path ----
     # EXHAUSTED_PENDING eligibility uses ACTUAL cursor completion (simulator ground truth).
     IF actual_exhaustion(assignment) is TRUE:                  # actual cursor completed the range
+      SET custody_status(range(assignment)) <- completed        # CR-B5: completed => NOT reassignable under same TemplateID
       TRANSITION miner_state(MinerID) -> EXHAUSTED_PENDING
     # ---- adversarial path ----
     ELSE:
@@ -165,13 +167,19 @@ PROCEDURE RangeExhaust
       ELSE:
         claim_accepted_or_rejected <- reported_exhaustion       # unaudited claim taken as reported
       IF claim_accepted_or_rejected:
+        SET custody_status(range(assignment)) <- completed       # CR-B5: accepted exhaustion completes the range
         TRANSITION miner_state(MinerID) -> EXHAUSTED_PENDING
       ELSE:
-        RECORD false_exhaustion_detected(MinerID, assignment)   # NO transition to EXHAUSTED_PENDING
+        RECORD false_exhaustion_detected(MinerID, assignment)   # NO transition; range NOT marked completed
   RETURNS: exhaustion_record(MinerID, range, RoundID, TemplateID)
-  NOTE: EXHAUSTED_PENDING is the ONLY legitimate precondition (besides explicit revocation)
-        for entering LOW_POWER_LISTEN -- see I4. A progress commitment NEVER proves that no valid
-        solution exists in the whole range; exhaustion findings are modeled, not proven.
+  NOTE: EXHAUSTED_PENDING is exclusive to this range-exhaustion path (PATH A) and is the ONLY
+        route to LOW_POWER_LISTEN that closes a range (coverage_state = searched,
+        custody_status = completed, stop_reason = RANGE_EXHAUSTED). It is NOT the only legal
+        trigger for entering LOW_POWER_LISTEN: I4 also permits explicit revocation, a fully
+        verified valid-solution certificate (PATH B, assignment PAUSED -- see EarlyStopVerify),
+        and round closure -- none of which pass through EXHAUSTED_PENDING. A progress commitment
+        NEVER proves that no valid solution exists in the whole range; exhaustion findings are
+        modeled, not proven.
 ```
 
 ## 7. Transition to low-power listening
@@ -197,17 +205,29 @@ PROCEDURE ActiveHashRateUpdate
   INPUTS: RoundContext, time t
   PRECONDITIONS: none
   EFFECTS:
-    SET H_active(t)     <- SUM over miners in ACTIVE_HASHING of their modeled hash rate
-    SET H_honest(t)     <- SUM over honest miners in ACTIVE_HASHING
     # ---- [SIMULATION SAMPLING] ----
-    # Adversarial active participation for the scenario is drawn from the simulation model.
-    H_adversarial(t) <- [SIMULATION SAMPLING] adversarial_participation_model(t)
+    # CR-B6: the adversarial-behavior model decides WHICH adversarial miners continue in
+    # ACTIVE_HASHING at t. This draw sets miner STATES only -- it does NOT produce a hash-rate
+    # total. It is the ONLY randomness in this procedure.
+    adversarial_active_set <- [SIMULATION SAMPLING] adversarial_participation_model(t)
+    APPLY adversarial_active_set to the ACTIVE_HASHING census   # which adversarial miners are active at t
     # ---- deterministic protocol logic ----
-    SET q_adv(t) <- H_adversarial(t) / (H_honest(t) + H_adversarial(t))
-    RECORD (H_active(t), H_honest(t), q_adv(t))
-  RETURNS: (H_active(t), H_honest(t), q_adv(t))
+    # CR-B6: after states are fixed, all three quantities are computed DETERMINISTICALLY from the
+    # active-state census. H_adversarial is NEVER sampled independently after H_active (I17).
+    SET H_honest(t)      <- SUM over honest miners in ACTIVE_HASHING of their modeled hash rate
+    SET H_adversarial(t) <- SUM over adversarial miners in ACTIVE_HASHING of their modeled hash rate
+    SET H_active(t)      <- H_honest(t) + H_adversarial(t)      # exact census decomposition (I17)
+    IF H_active(t) = 0:
+      SET q_adv(t) <- NA                                        # I17: undefined at zero active hash rate
+      RECORD breach_event(security_floor, t)                    # I16/I17: recorded, NEVER treated as zero
+    ELSE:
+      SET q_adv(t) <- H_adversarial(t) / H_active(t)
+    RECORD (H_active(t), H_honest(t), H_adversarial(t), q_adv(t))
+  RETURNS: (H_active(t), H_honest(t), H_adversarial(t), q_adv(t))
   NOTE: Only ACTIVE_HASHING contributes to active hash rate; LOW_POWER_LISTEN, WAKING,
-        RESERVE, OFFLINE contribute nothing to it.
+        RESERVE, OFFLINE contribute nothing to it. The simulation draws only WHICH adversarial
+        miners are active; H_honest(t), H_adversarial(t), and H_active(t) then follow
+        deterministically from the census (I17).
 ```
 
 ## 9. Security-floor evaluation
@@ -292,8 +312,15 @@ PROCEDURE LeaseExpiry
 ```
 PROCEDURE RangeReassign
   INPUTS: RoundContext, range, reason, from_miner
-  PRECONDITIONS: range is reassignable; reason in {lease_expiry, exhaustion, departure, conflict, recovery}
+  PRECONDITIONS: range is reassignable;
+                 # CR-B5: exhaustion is NOT a reassignment reason; permitted reasons are exactly:
+                 reason in {lease_expiry, abandonment, revocation, departure, conflict, security_recovery};
+                 custody_status(range) != completed;            # a completed range is NOT reassignable
+                 coverage_state(range) != searched              # only an UNSEARCHED suffix may be reassigned
   EFFECTS:
+    # CR-B5: never reassign a completed range under the same TemplateID; only the unsearched suffix.
+    ASSERT custody_status(range) != completed                   # completed range: coverage_state = searched
+    ASSERT coverage_state(range) != searched                    # reassign only the unsearched suffix
     SELECT to_miner from {RESERVE, REGISTERED} miners (or via ReserveActivate)
     FOR EACH active_assignment A in assignment_ledger:
       ASSERT range INTERSECT range(A) = EMPTY                   # I1 preserved
@@ -305,7 +332,7 @@ PROCEDURE RangeReassign
     UPDATE assignment_ledger so the coverage partition still holds (I8a):
         searched + active_unsearched + inactive_unsearched = assigned_domain
     # I8b custody/lineage status is orthogonal and is NEVER an additive coverage term.
-    SET custody_status(range) <- reassigned   # in {original, renewed, reassigned, revoked, expired, abandoned}
+    SET custody_status(range) <- reassigned   # in {original, renewed, reassigned, revoked, expired, abandoned, completed}
     # The reassigned range retains an INDEPENDENT coverage state
     # (searched / active_unsearched / inactive_unsearched).
   RETURNS: reassignment_record
@@ -393,15 +420,51 @@ PROCEDURE EarlyStopVerify
     ADD the incremental verification cost to E_verification
     IF step1 AND step2 AND step3 AND step4 AND step5 AND step6:
       MARK certificate VERIFIED
-      # Only AFTER ALL certificate-validation steps pass may the verifier leave ACTIVE_HASHING.
-      TRANSITION miner_state(verifying_MinerID) -> EXHAUSTED_PENDING
+      # CR-B1/CR-B2 (PATH B): only AFTER ALL certificate-validation steps pass, the verifier
+      # transitions ACTIVE_HASHING -> LOW_POWER_LISTEN DIRECTLY. It does NOT pass through
+      # EXHAUSTED_PENDING (which is exclusive to range exhaustion, PATH A / I4).
+      PAUSE assignment(verifying_MinerID)                        # retain actual_frontier
+      # The paused assignment is NOT closed: do NOT set coverage_state = searched and do NOT set
+      # custody_status = completed; no unsearched positions are credited as searched.
+      SET stop_reason <- VALID_SOLUTION_VERIFIED                 # recorded per I4
+      TRANSITION miner_state(verifying_MinerID) -> LOW_POWER_LISTEN
       RETURN VERIFIED
     ELSE:
       RECORD false_early_stop_rejected(certificate)
-      # CR2: a failed certificate produces NO hashing-state transition; verifier stays ACTIVE_HASHING.
+      # CR-B2: a failed or partial certificate produces NO hashing-state transition; the verifier
+      # stays in ACTIVE_HASHING and keeps hashing.
       DO NOT terminate hashing; NO state transition              # I11 upheld
       RETURN REJECTED
   RETURNS: VERIFIED | REJECTED
+  NOTE: On PATH B the assignment is PAUSED (actual_frontier retained), never marked searched or
+        exhausted. If the full block is later rejected, unavailable, or times out, the miner
+        resumes via ResumeFromPause (LOW_POWER_LISTEN -> WAKING -> ACTIVE_HASHING).
+```
+
+## 16a. Resume after a paused (PATH B) stop
+
+```
+PROCEDURE ResumeFromPause
+  INPUTS: RoundContext, MinerID, trigger
+  PRECONDITIONS: miner_state(MinerID) = LOW_POWER_LISTEN with recorded stop_reason = VALID_SOLUTION_VERIFIED;
+                 trigger in {BLOCK_REJECTED, BLOCK_UNAVAILABLE, PROPAGATION_TIMEOUT};
+                 the miner's assignment is PAUSED (actual_frontier retained), NOT searched/exhausted
+  EFFECTS:
+    # CR-B1: a paused PATH B assignment resumes; it was never marked searched or completed, so no
+    # coverage was falsely credited. The miner wakes and continues from where it paused.
+    TRANSITION miner_state(MinerID) -> WAKING                   # wake/transition energy accounted below
+    # ---- [SIMULATION SAMPLING] ----
+    wake_latency <- [SIMULATION SAMPLING] wake_latency_model(MinerID)
+    # ---- deterministic protocol logic ----
+    ACCUMULATE t_wake at P_wake for wake_latency; ADD E_transition   # supports I5, I6 (wake + transition energy)
+    SET cursor <- retained actual_frontier of the paused assignment  # resume exactly where it paused
+    TRANSITION miner_state(MinerID) -> ACTIVE_HASHING
+    RETURN CALL ActiveHashing(RoundContext, paused_assignment, step_budget)   # continues from actual_frontier
+  RETURNS: resume_record(MinerID, resumed_from = actual_frontier)
+  NOTE: Resume applies ONLY to PATH B pauses (stop_reason = VALID_SOLUTION_VERIFIED). A PATH A
+        exhausted range (coverage_state = searched, custody_status = completed) is NOT resumable.
+        If instead the full block is ACCEPTED, the round closes (ROUND_ACCEPTED) and the paused
+        assignment closes on round closure -- NOT by exhaustion.
 ```
 
 ## 17. Valid block acceptance
@@ -520,9 +583,11 @@ PROCEDURE RoundAbort
 The ONLY `[SIMULATION SAMPLING]` steps in the entire specification are:
 
 1. **ActiveHashing** — whether a modeled execution meets the fixed target `D`.
-2. **ActiveHashRateUpdate** — the adversarial active-participation contribution
-   `H_adversarial(t)`.
-3. **WakeComplete** — the wake latency draw.
+2. **ActiveHashRateUpdate** — WHICH adversarial miners continue in `ACTIVE_HASHING` at `t` (the
+   active-state census). `H_honest(t)`, `H_adversarial(t)`, and `H_active(t)` are then computed
+   **deterministically** from that census; `H_adversarial(t)` is **never** sampled independently
+   after `H_active(t)` (I17).
+3. **WakeComplete** and **ResumeFromPause** — the wake latency draw.
 4. **RangeExhaust** and **FullRangeExhaustNoSolution** — the adversarial-path audit selection
    (`audit_selection_model`) that decides whether a `reported_exhaustion` claim is audited
    against simulator ground truth (`actual_exhaustion`). This is the modeled audit/detection
@@ -530,6 +595,6 @@ The ONLY `[SIMULATION SAMPLING]` steps in the entire specification are:
    deterministic once the audit is selected.
 
 Every other step is deterministic protocol logic. This separation is deliberate: it keeps the
-protocol's decision logic reproducible and audit-checkable against `I1..I16`, while confining
+protocol's decision logic reproducible and audit-checkable against `I1..I17`, while confining
 all randomness to clearly labelled model draws that exist solely because Stage-1 evaluation is
 a simulation and not a real deployment. None of the above is executable source.

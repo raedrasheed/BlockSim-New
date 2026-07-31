@@ -123,6 +123,13 @@ Notes on conventions:
   in `ACTIVE_HASHING` and keeps drawing `P_hash`; the incremental verification cost is
   charged **separately** as `E_verification,i`, not folded into `P_hash·t_hash` and not
   double-counted (CR2).
+- **PATH-B resume accounting.** When a miner that paused on a verified valid-solution stop
+  (PATH B: assignment PAUSED in `LOW_POWER_LISTEN`) later resumes because the full block was
+  rejected, unavailable, or timed out, the resume transition
+  `LOW_POWER_LISTEN → WAKING → ACTIVE_HASHING` incurs wake and transition energy that is
+  charged entirely through the existing `P_wake,i * t_wake,i` (WAKING residency) and
+  `E_transition,i` (mode-switch) terms. No separate term is introduced for PATH-B resume and
+  no resume energy is left unaccounted.
 - **Sign conventions.** No term is negative. A "saving" is never represented as a negative
   energy term; it is the *difference of two totals* (Section 4).
 
@@ -181,13 +188,24 @@ The Stage-1 comparison quantity is
 
     ΔE = E_continuous_control − E_idle_policy.                          (E-3)
 
-The control is **explicit and matched**: `E_continuous_control` is exactly the A1 value
-(8.420833333 kWh) computed for the **same** frozen reference setting (same aggregate hash
-rate, efficiency, horizon, and therefore same total work opportunity) under **continuous
-full participation** — every miner in `ACTIVE_HASHING` for the whole horizon. `E_idle_policy`
-is `E_total` from (E-2) under PoCol with the idle policy enabled for the same setting. `ΔE`
-is therefore a like-for-like difference of two totals over one fixed horizon, not a
-comparison across different settings, difficulties, or horizons.
+The control and idle-policy scenario are **matched at the start on capacity, not on realised
+work**. They match on: the installed/registered **aggregate hash-rate capacity** at the
+start; miner hardware and efficiency; fixed difficulty; target; the fixed observation
+horizon; and workload/template rules where applicable. **They do not execute the same total
+work.** `E_continuous_control` is exactly the A1 value (8.420833333 kWh) computed for this
+matched frozen reference setting under **continuous full participation** — every miner in
+`ACTIVE_HASHING` for the whole horizon. `E_idle_policy` is `E_total` from (E-2) under PoCol
+with the idle policy enabled for the same matched setting. Under the idle policy `H_active(t)`
+may decrease, realised hash evaluations may decrease, the accepted-block count and block
+interval may change, and security exposure may change; the two scenarios therefore do NOT
+generally realise the same total work. `ΔE` is a difference of two energy totals over one
+fixed horizon at matched starting capacity, not a comparison across different settings,
+difficulties, or horizons.
+
+A fixed-capacity, fixed-horizon **energy** comparison is **not**, by itself, a
+service-equivalent or security-equivalent comparison. Nothing in this energy accounting
+asserts service or security equivalence; service and security non-inferiority are evaluated
+only after the frozen experiments.
 
 A positive `ΔE` (a saving) MUST be attributable to **reduced active power-time**
 (`Σ_i P_hash,i * t_hash,i` smaller than in the control) net of the listening, wake,

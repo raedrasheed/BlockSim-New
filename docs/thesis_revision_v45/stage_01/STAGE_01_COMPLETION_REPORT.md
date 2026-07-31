@@ -33,7 +33,7 @@ mechanism is claimed to be implemented, validated, secure, fair, or incentive-co
 | 13 | STAGE_01_EARLY_STOP_CERTIFICATE.md | §15 early-stop certificate + 7-step validation |
 | 14 | STAGE_01_REWARD_PENALTY_INTERFACE.md | §16 reward/penalty interface |
 | 15 | STAGE_01_FAILURE_AND_ADVERSARIAL_PATHS.md | §18 failure table (19 paths) |
-| 16 | STAGE_01_INVARIANT_CATALOGUE.md | §19 invariants I1–I16 |
+| 16 | STAGE_01_INVARIANT_CATALOGUE.md | §19 invariants I1–I17 |
 | 17 | STAGE_01_PROTOCOL_PSEUDOCODE.md | §20 pseudocode (20 procedures, non-executable) |
 | 18 | STAGE_01_THREAT_MODEL.md | §21 threat model + 5-way classification |
 | 19 | STAGE_01_OPEN_QUESTIONS.md | §22 open-question register |
@@ -71,7 +71,7 @@ mechanism is claimed to be implemented, validated, secure, fair, or incentive-co
 - Energy and security accounting specified: **yes** — the six-term energy model with units and
   the parameterised security floor over time-varying `H_active(t)`, `H_honest(t)`,
   `H_adversarial(t)`, `q_adv(t)`.
-- All invariants testable: **yes** — I1–I16 each carry a planned Stage-2/3/4/5 test.
+- All invariants testable: **yes** — I1–I17 each carry a planned Stage-2/3/4/5 test.
 - No Stage-2-blocking open question remains: **yes** — the open-question register fixes a
   minimal, conservative default for every semantics-affecting question (Q1–Q12); Q13–Q16 are
   non-blocking.

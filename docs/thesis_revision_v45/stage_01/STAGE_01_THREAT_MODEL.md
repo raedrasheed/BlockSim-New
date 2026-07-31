@@ -8,7 +8,7 @@ Stage 1 — it classifies **no** property as experimentally supported. The idle 
 operating policy inside PoCol, not a variant or fork.
 
 Canonical references: 8 miner states and 10 round states as listed in
-`STAGE_01_PROTOCOL_SCOPE.md`; invariants `I1..I16` in `STAGE_01_INVARIANT_CATALOGUE.md`;
+`STAGE_01_PROTOCOL_SCOPE.md`; invariants `I1..I17` in `STAGE_01_INVARIANT_CATALOGUE.md`;
 adversarial share `q_adv(t) = H_adversarial(t) / (H_honest(t) + H_adversarial(t))`; progress
 evidence is a **modeled progress-verification abstraction**, never a cryptographic proof;
 difficulty is FIXED (`I12`).
@@ -108,9 +108,12 @@ single classification label.
 ### 3.3 False completion (false exhaustion)
 - **Actor(s).** Byzantine, rational.
 - **Manifestation.** Claiming a range is exhausted while a remainder is unsearched, to idle
-  early. Adversarial **reported exhaustion** is compared against **simulator ground truth**
-  (`actual_exhaustion`) through the modeled audit/detection abstraction (`I8`); false-exhaustion
-  detection is **modeled, not proven** (CR5).
+  early. Adversarial **reported exhaustion** (`reported_exhaustion`) is compared against
+  **simulator ground truth** (`actual_exhaustion`/`actual_frontier`) through the modeled
+  audit/detection abstraction (`I8`); false-exhaustion detection is **modeled, not proven**
+  (CR-B4). When a reported claim is accepted it is recorded as **"accepted reported exhaustion
+  under the modeled audit abstraction"** — never a cryptographic proof or a verified actual
+  exhaustion.
 - **Coupled invariants.** I8, I4.
 - **Classification.** **SPECIFIED_FOR_LATER_TEST** (Stage 2 accounting + Stage 4 adversarial).
 
@@ -119,8 +122,12 @@ single classification label.
 - **Manifestation.** Finding a valid block and not propagating it. Not directly detectable at
   Stage 1 (no proof-of-possession); prolongs honest active power-time. Where competing valid
   solutions do arrive, they are resolved by **network-arrival semantics** (earliest valid
-  arrival; ties by `candidate_hash` then `MinerID`; others recorded competing/stale), consistent
-  with `STAGE_01_EARLY_STOP_CERTIFICATE.md`; **no chain-wide fork-choice proof** is claimed (CR6).
+  arrival; ties by `candidate_hash` then `MinerID`; others recorded competing/stale): each
+  recipient continues hashing while validating and, on successful validation, **pauses** its
+  assignment (PATH B, `stop_reason = VALID_SOLUTION_VERIFIED`, retained `actual_frontier`
+  preserved) rather than marking its range exhausted, and resumes if the full block is later
+  rejected or times out — consistent with `STAGE_01_EARLY_STOP_CERTIFICATE.md`; **no chain-wide
+  fork-choice proof** is claimed (CR-B9).
 - **Coupled invariants.** none directly enforceable at Stage 1.
 - **Classification.** **UNRESOLVED** (detection/mitigation design not fixed; tracked in Open
   Questions).

@@ -123,17 +123,24 @@ power-time**, consistent with the accepted baseline and A1.
 5. **Range leases.** An assignment of a nonce range may be granted as a time-bounded
    **lease** (with a lease_start and lease_expiry), after which the range may be reclaimed
    or renewed rather than held indefinitely.
-6. **Range reassignment.** Leased or abandoned ranges may be reassigned to other miners
-   (for example, on lease expiry, exhaustion, or miner departure) so that coverage of the
-   nonce domain can be maintained without continuous full participation.
+6. **Range reassignment.** The **unsearched suffix** of a leased or abandoned range may be
+   reassigned to other miners (for example, on lease expiry, abandonment, revocation, miner
+   departure, assignment conflict, or security recovery) so that coverage of the nonce domain
+   can be maintained without continuous full participation. A fully exhausted range is
+   **completed** (`custody_status = completed`) and is NOT reassignable; exhaustion is never a
+   reassignment reason.
 7. **Progress commitments.** A miner may emit a **progress commitment** attesting how far
    its assigned range has been searched. This is treated ONLY as a *modeled
    progress-verification abstraction*; it is NOT a cryptographic proof of range
    exhaustion.
-8. **Early-stop certificates.** The protocol may form an **early-stop certificate**
-   summarising sufficient covered progress to justify halting active hashing for a round
-   before brute-force exhaustion. As with progress commitments, this is a modeled
-   abstraction only and carries none of the Section C guarantees.
+8. **Early-stop certificates.** The protocol may form an **early-stop certificate** generated
+   ONLY from a found valid candidate solution satisfying the current target (never from
+   progress commitments, covered progress, or a claimed exhaustion). It is **the only
+   solution-triggered mechanism that authorises miners to stop hashing before full-block
+   propagation completes.** Miners may also cease hashing for reasons that are not
+   solution-triggered: own-range exhaustion; assignment revocation; round acceptance; round
+   abort; or offline/disqualification transitions. As with progress commitments, this is a
+   modeled abstraction only and carries none of the Section C guarantees.
 
 ---
 
@@ -183,6 +190,15 @@ partitioned**. Consequently:
   `E_continuous_control` is exactly the A1 value (8.420833333 kWh) under continuous full
   participation, and `E_idle_policy` is the modeled total under PoCol with the idle policy
   enabled.
+- **Matched-control basis.** The continuous full-participation control and the idle-policy
+  scenario match on: installed/registered aggregate hash-rate capacity at the start; miner
+  hardware and efficiency; fixed difficulty; target; fixed observation horizon; and
+  workload/template rules where applicable. They do **not** execute the same total work: under
+  the idle policy `H_active(t)` may decrease, realised hash evaluations may decrease, and
+  accepted-block count, block interval, and security exposure may change. A fixed-capacity,
+  fixed-horizon **energy** comparison (`ΔE`) is therefore **not** by itself a service-equivalent
+  or security-equivalent comparison; service and security non-inferiority are evaluated only
+  after the frozen experiments.
 
 Any positive ΔE claimed at later stages must be attributable to reduced active power-time
 under the energy model, NEVER to partitioning. At Stage 1, ΔE is defined but no particular
@@ -200,7 +216,7 @@ actually preserved is out of scope here (Section C).
 - **Round states (10):** `ROUND_INITIALISING`, `TEMPLATE_COMMITMENT`, `ASSIGNMENT`,
   `HASHING`, `SECURITY_RECOVERY`, `SOLUTION_PROPAGATION`, `ROUND_ACCEPTED`,
   `ROUND_EXHAUSTED`, `TEMPLATE_REFRESH`, `ROUND_ABORTED`.
-- **Invariants:** referenced by ID as I1..I16, defined in the separate Invariant Catalogue;
+- **Invariants:** referenced by ID as I1..I17, defined in the separate Invariant Catalogue;
   the accounting invariant A1 is stated in Section 0.2.
 
 Terminology for every symbol and term above is defined in

@@ -1,7 +1,7 @@
-# Stage 1 — PoCol Invariant Catalogue (I1..I16)
+# Stage 1 — PoCol Invariant Catalogue (I1..I17)
 
 **Document status:** Stage-1 specification-only. This catalogue DEFINES the numbered
-invariants `I1..I16` of **PoCol** with **the idle policy within PoCol** enabled. Defining an
+invariants `I1..I17` of **PoCol** with **the idle policy within PoCol** enabled. Defining an
 invariant is a specification act. It is NOT a claim that the invariant is implemented,
 enforced in code, validated, or that any security, fairness, or incentive property follows
 from it. At Stage 1 no invariant is experimentally supported.
@@ -83,14 +83,19 @@ point, planned test stage, and consequence of violation.
 - **Consequence of violation.** Cross-round or stale-template acceptance; replay of prior
   work; template disagreement admitted into the chain.
 
-### I4 — No miner enters LOW_POWER_LISTEN before valid exhaustion or explicit revocation.
+### I4 — Entry to LOW_POWER_LISTEN requires one of four legal triggers, each recording a stop_reason.
 
-- **Formal statement.** A transition `X → LOW_POWER_LISTEN` is permitted only if the miner
-  has reached `EXHAUSTED_PENDING` with accepted exhaustion accounting for its assigned range,
-  OR its assignment has been explicitly revoked.
+- **Formal statement.** A miner may enter `LOW_POWER_LISTEN` only after **one** of: (1) accepted
+  range-exhaustion accounting via `EXHAUSTED_PENDING`; (2) explicit assignment revocation; (3) a
+  fully verified valid-solution early-stop certificate; or (4) round closure. Each such transition
+  records exactly one `stop_reason ∈ {RANGE_EXHAUSTED, ASSIGNMENT_REVOKED,
+  VALID_SOLUTION_VERIFIED, ROUND_ACCEPTED, ROUND_ABORTED}`. **No unverified certificate may cause
+  the transition.** `EXHAUSTED_PENDING` is **exclusive** to the range-exhaustion path.
 - **Scope.** Idle-policy state transitions; transition to low-power listening.
-- **Required inputs.** Miner state; exhaustion/progress accounting; revocation records.
-- **Enforcement point.** Guard in the transition-to-low-power-listening procedure.
+- **Required inputs.** Miner state; exhaustion/progress accounting; revocation records; a fully
+  verified early-stop certificate; round-closure disposition; the recorded `stop_reason`.
+- **Enforcement point.** Guard in the transition-to-low-power-listening procedure (and the direct
+  ACTIVE_HASHING → LOW_POWER_LISTEN transition on the verified-solution path).
 - **Planned test stage.** Stage 2 (state machine and complete energy accounting), with Stage 4
   (exhaustion / reassignment cases).
 - **Consequence of violation.** Premature idling; coverage gap over an unsearched range;
@@ -151,11 +156,13 @@ point, planned test stage, and consequence of violation.
 ### I8b — Custody / provenance model (orthogonal to coverage).
 
 - **Formal statement.** Each assignment carries a custody / lineage status in
-  `{original, renewed, reassigned, revoked, expired, abandoned}`. These are custody / provenance
-  properties and **MUST NOT** appear as additive terms in the coverage-state equation of I8a. A
-  `reassigned` position still has an **independent coverage state**
+  `{original, renewed, reassigned, revoked, expired, abandoned, completed}`. These are custody /
+  provenance properties and **MUST NOT** appear as additive terms in the coverage-state equation of
+  I8a. A `reassigned` position still has an **independent coverage state**
   (`searched` / `active_unsearched` / `inactive_unsearched`); custody and coverage are two
-  orthogonal models of the same position.
+  orthogonal models of the same position. A fully exhausted range has `coverage_state = searched`
+  together with `custody_status = completed`, and is **NOT** reassignable under the same
+  `TemplateID`.
 - **Scope.** Custody / lineage of assignments across renewal and reassignment.
 - **Required inputs.** Assignment / lease records; reassignment provenance; lineage links
   (`previous_assignment_reference`, `assignment_version`).
@@ -169,7 +176,7 @@ point, planned test stage, and consequence of violation.
 
 - **Formal statement.** Each reassignment event `r` carries a complete record
   `(range, from_miner, to_miner, reason, timestamp, prior_progress_commitment)` with
-  `reason ∈ {lease_expiry, exhaustion, departure, conflict, recovery}`.
+  `reason ∈ {lease_expiry, abandonment, revocation, departure, conflict, security_recovery}`.
 - **Scope.** Range reassignment.
 - **Required inputs.** Reassignment events with all required fields.
 - **Enforcement point.** Logging inside the range-reassignment procedure.
@@ -189,19 +196,26 @@ point, planned test stage, and consequence of violation.
 - **Consequence of violation.** Overlap introduced during recovery; duplicate coverage; I1
   and I13 violated exactly when the protocol is under floor stress.
 
-### I11 — A false early-stop message cannot terminate hashing without target verification.
+### I11 — An early-stop certificate cannot terminate hashing unless it passes full certificate validation.
 
-- **Formal statement.** Termination of hashing via an early-stop certificate requires the
-  certificate to pass verification against target verification and retained progress
-  evidence; an unverified or false certificate MUST NOT cause termination.
-- **Scope.** Early-stop certificate generation and verification; security recovery.
-- **Required inputs.** Early-stop certificate; round target; retained progress commitments.
+- **Formal statement.** A miner may stop hashing because of an early-stop certificate **only
+  after** validating: the current `RoundID`, the current `TemplateID`, the current `AssignmentID`,
+  the `MinerID`, `nonce` membership in the identified assignment's range, the recomputed
+  `candidate_hash`, `target` satisfaction under fixed `D`, and authentication/signature. A failed
+  or partially verified certificate causes **no** hashing-state transition.
+- **Scope.** Early-stop certificate validation only. I11 has **no** dependency on progress
+  commitments, coverage frontiers, range exhaustion, searched-domain coverage, or any proof of no
+  solution. Range exhaustion is governed by **I4, I8a, and the actual-vs-reported progress model**,
+  not by I11.
+- **Required inputs.** Early-stop certificate; current `RoundID` / `TemplateID` / `AssignmentID`;
+  `MinerID`; the nonce range of the identified assignment; the recomputed `candidate_hash`; the
+  round target; authentication material.
 - **Enforcement point.** Guard in the early-stop-verification procedure, evaluated before any
-  transition out of `HASHING` toward stopping.
+  transition out of `ACTIVE_HASHING` toward stopping.
 - **Planned test stage.** Stage 4 (early-stop certificate verification) with Stage 5 (adversarial
   false-certificate / halting tests).
-- **Consequence of violation.** Forced premature stop (a halting attack); coverage abandoned;
-  direct security degradation.
+- **Consequence of violation.** Forced premature stop (a halting attack) on a false or partial
+  certificate; direct security degradation.
 
 ### I12 — Difficulty remains constant in the confirmatory protocol.
 
@@ -266,6 +280,27 @@ point, planned test stage, and consequence of violation.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest
   reporting of the reduced-participation regime.
 
+### I17 — Active hash rate decomposes exactly into honest and adversarial contributions.
+
+- **Formal statement.** For every event-update time `t`,
+  `H_active(t) = H_honest(t) + H_adversarial(t)` **exactly**, where `H_honest(t)` is the sum of the
+  hash rates of honest miners in `ACTIVE_HASHING`, `H_adversarial(t)` is the sum of the hash rates
+  of adversarial miners in `ACTIVE_HASHING`, and `H_active(t)` is the sum of the hash rates of all
+  miners in `ACTIVE_HASHING`. `H_adversarial(t)` is computed **deterministically** from the
+  active-state census and is **never** sampled independently after `H_active(t)`. When
+  `H_active(t) = 0`, `q_adv(t)` is **undefined / NA** and a security-floor breach is recorded — it
+  is **not** treated as zero.
+- **Scope.** Time-varying hash-rate accounting; adversarial-share (`q_adv`) computation;
+  security-floor evaluation.
+- **Required inputs.** Per-miner honest/adversarial classification; the per-miner active-state
+  census at `t`; per-miner modeled hash rates.
+- **Enforcement point.** Active-hash-rate update step (census-based decomposition), consumed by the
+  security-floor-evaluation step.
+- **Planned test stage.** Stage 3 (time-varying hash rate, security floor, reserve activation).
+- **Consequence of violation.** Inconsistent hash-rate decomposition; `q_adv(t)` derived from an
+  independently sampled adversarial term; a zero-active-rate regime silently reported as safe
+  instead of as a recorded floor breach.
+
 ---
 
 ## Cross-reference summary
@@ -275,7 +310,7 @@ point, planned test stage, and consequence of violation.
 | I1 | No overlap among valid active assignments | Stage 2 (+4) | assignment / reassignment overlap guard |
 | I2 | Accepted solution lies in signer's valid assignment | Stage 2 (+4/5) | acceptance predicate |
 | I3 | Accepted solution matches current RoundID/TemplateID | Stage 2 (+4/5) | acceptance + commitment check |
-| I4 | No early LOW_POWER_LISTEN without exhaustion/revocation | Stage 2 (+4) | listen-transition guard |
+| I4 | LOW_POWER_LISTEN entry needs one of four triggers, each with a stop_reason | Stage 2 (+4) | listen-transition guard |
 | I5 | Non-negative durations reconcile to horizon T | Stage 2 (+3) | duration reconciliation |
 | I6 | State energies sum to per-miner energy | Stage 2 (+3) | per-miner aggregation |
 | I7 | Per-miner energies sum to network energy | Stage 2 | network aggregation |
@@ -283,12 +318,13 @@ point, planned test stage, and consequence of violation.
 | I8b | Custody / provenance model (orthogonal to coverage) | Stage 4 | custody / lineage tracking |
 | I9 | Reassignments carry complete provenance | Stage 4 | reassignment logging |
 | I10 | Reserve activation adds no overlap | Stage 3 (+5) | reserve-activation guard |
-| I11 | No termination without target verification | Stage 4 (+5) | early-stop verification guard |
+| I11 | No stop without full early-stop certificate validation | Stage 4 (+5) | early-stop verification guard |
 | I12 | Difficulty fixed in confirmatory design | Stage 2 (all) | round init / commitment |
 | I13 | No double-counting of shared executions | Stage 2 (+7) | accounting de-duplication |
 | I14 | Zero-block outcomes retained | Stage 8 (+7) | results recording |
 | I15 | Undefined block-normalised metrics are NA | Stage 8 | metrics computation |
 | I16 | Floor breaches recorded, never silently repaired | Stage 3 (+5/8) | floor eval + recording |
+| I17 | H_active = H_honest + H_adversarial (census-deterministic); q_adv NA at zero active rate | Stage 3 | active-hash-rate decomposition |
 
 No invariant above is asserted to hold in any implementation at Stage 1; each is a
 specification target with a planned verification stage.

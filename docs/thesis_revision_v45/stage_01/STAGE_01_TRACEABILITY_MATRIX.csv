@@ -3,21 +3,21 @@ R01,Common immutable block template / TemplateID commitment,TEMPLATE_COMMITMENT 
 R02,Disjoint nonce-range assignment (base; linear/circular; integer apportionment),ASSIGNMENT round state; assignment object,I1;I2;I8a,mining outside assigned range; assignment manipulation,Stage 2,Stage 2,Ch5 protocol design,SPECIFIED
 R03,Miner registration,REGISTERED miner state,I13,Sybil registration,Stage 2,Stage 5,Ch5 protocol design,SPECIFIED
 R04,Target validation with fixed difficulty,HASHING; target field,I12,false completion,Stage 2,Stage 7,Ch6 methods,SPECIFIED
-R05,Accepted-block handling (competing solutions by earliest valid arrival),ROUND_ACCEPTED; SOLUTION_PROPAGATION,I2;I3,conflicting valid solutions; solution withholding,Stage 2,Stage 5,Ch5 protocol design,SPECIFIED
-R06,Template refresh,TEMPLATE_REFRESH round state,I3,template disagreement,Stage 2,Stage 4,Ch5 protocol design,SPECIFIED
-R07,Low-power listening (idle policy within PoCol),LOW_POWER_LISTEN miner state,I4;I6,continuing to mine while honest miners idle,Stage 2,Stage 2,Ch5/Ch6 idle policy,SPECIFIED
-R08,Exact range exhaustion then idle entry,ACTIVE_HASHING->EXHAUSTED_PENDING->LOW_POWER_LISTEN,I4;I8a,false exhaustion claim; strategic early exhaustion,Stage 2,Stage 2,Ch5 idle policy,SPECIFIED
-R09,Multi-state energy accounting (state-complete; E_verification),all miner states; energy terms,I5;I6;I7,hidden deletion of failed/zero-block runs,Stage 2,Stage 2,Ch6 energy model,SPECIFIED
-R10,Time-varying active hash rate and adversarial share,H_active(t);H_honest(t);H_adversarial(t);q_adv(t),I16,continuing to mine while honest miners idle; coalition,Stage 3,Stage 3,Ch6 methods,SPECIFIED
-R11,Security-floor monitoring,SECURITY_RECOVERY round state,I16,adversarial share above threshold; honest hash below floor,Stage 3,Stage 3,Ch5/Ch6,SPECIFIED
+R05,Accepted-block handling (competing solutions by earliest valid arrival; recipients pause),ROUND_ACCEPTED; SOLUTION_PROPAGATION,I2;I3,conflicting valid solutions; solution withholding,Stage 2,Stage 5,Ch5 protocol design,SPECIFIED
+R06,Template refresh (new candidate-identity domain; new original assignments),TEMPLATE_REFRESH round state,I3,template disagreement,Stage 2,Stage 4,Ch5 protocol design,SPECIFIED
+R07,Low-power listening (idle policy within PoCol) with mandatory stop_reason,LOW_POWER_LISTEN miner state,I4;I6,continuing to mine while honest miners idle,Stage 2,Stage 2,Ch5/Ch6 idle policy,SPECIFIED
+R08,PATH A range exhaustion then idle entry (RANGE_EXHAUSTED; completed),ACTIVE_HASHING->EXHAUSTED_PENDING->LOW_POWER_LISTEN,I4;I8a,false exhaustion claim; strategic early exhaustion,Stage 2,Stage 2,Ch5 idle policy,SPECIFIED
+R09,Multi-state energy accounting (state-complete; E_verification; matched capacity control),all miner states; energy terms,I5;I6;I7,hidden deletion of failed/zero-block runs,Stage 2,Stage 2,Ch6 energy model,SPECIFIED
+R10,Time-varying active hash rate; exact deterministic decomposition; q_adv NA at zero,H_active(t);H_honest(t);H_adversarial(t);q_adv(t),I16;I17,continuing to mine while honest miners idle; coalition,Stage 3,Stage 3,Ch6 methods,SPECIFIED
+R11,Security-floor monitoring,SECURITY_RECOVERY round state,I16;I17,adversarial share above threshold; honest hash below floor,Stage 3,Stage 3,Ch5/Ch6,SPECIFIED
 R12,Reserve-miner policy and activation,RESERVE->WAKING->ACTIVE_HASHING,I10,reserve exhaustion; delayed wake,Stage 3,Stage 3,Ch5 protocol design,SPECIFIED
-R13,Wake-up transitions and wake energy,WAKING miner state,I5;I6,delayed wake attacks,Stage 3,Stage 3,Ch6 energy model,SPECIFIED
+R13,Wake-up transitions and wake energy (incl. PATH B resume),WAKING miner state,I5;I6,delayed wake attacks,Stage 3,Stage 3,Ch6 energy model,SPECIFIED
 R14,Range leases and expiry,lease_start;lease_expiry,I8a;I8b;I9,assignment abandonment,Stage 4,Stage 4,Ch5 protocol design,SPECIFIED
-R15,Range reassignment with custody provenance,assignment_version;previous_assignment_reference,I8a;I8b;I9,assignment splitting/manipulation,Stage 4,Stage 4,Ch5 protocol design,SPECIFIED
+R15,Range reassignment (unsearched suffix only; completed not reassignable),assignment_version;previous_assignment_reference,I8a;I8b;I9,assignment splitting/manipulation,Stage 4,Stage 4,Ch5 protocol design,SPECIFIED
 R16,Modeled progress verification (actual vs reported layers),progress checkpoint/frontier,I8a,withholding progress; false completion,Stage 4,Stage 4,Ch5 (open problem noted),SPECIFIED
-R17,Early-stop certificate (from found solution only) and 7-step validation,SOLUTION_PROPAGATION; certificate,I2;I3;I11,false/replayed early-stop certificate; delayed certificate,Stage 4,Stage 5,Ch5 protocol design,SPECIFIED
+R17,PATH B verified valid-solution stop (early-stop certificate; assignment PAUSED),ACTIVE_HASHING->LOW_POWER_LISTEN (VALID_SOLUTION_VERIFIED),I2;I3;I11,false/replayed early-stop certificate; delayed certificate,Stage 4,Stage 5,Ch5 protocol design,SPECIFIED
 R18,Reward and penalty parameterised interface,reward/penalty interface,none-direct,free riding; self-reported hash-rate manipulation,Stage 5,Stage 5,Ch5 (no IC claim),SPECIFIED
-R19,Failure and adversarial paths,all states; SECURITY_RECOVERY; ROUND_ABORTED,I11;I16,all listed adversarial/failure scenarios,Stage 5,Stage 5,Ch5/Ch6 limitations,SPECIFIED
+R19,Failure and adversarial paths (incl. PATH B resume on block reject),all states; SECURITY_RECOVERY; ROUND_ABORTED,I11;I16,all listed adversarial/failure scenarios,Stage 5,Stage 5,Ch5/Ch6 limitations,SPECIFIED
 R20,Threat model classification,actors and capabilities,all,coalition; network partition,Stage 5,Stage 5,Ch5 threat model,SPECIFIED
 R21,Zero-block retention and NA policy,zero-block outcome; NA metric,I14;I15,none-direct,Stage 6/7,Stage 8,Ch6 methods,SPECIFIED
 R22,No double-counting of shared physical executions,physical run / master seed,I13,none-direct,Stage 6/7,Stage 8,Ch6 methods,SPECIFIED

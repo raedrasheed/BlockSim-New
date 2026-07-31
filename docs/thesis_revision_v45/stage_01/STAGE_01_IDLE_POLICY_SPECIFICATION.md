@@ -92,8 +92,16 @@ new one.
 
 Every event that causes a miner to stop hashing on an assignment MUST be classified into
 exactly one of the following. The classification is load-bearing: only **true range
-exhaustion** is eligible to progress toward `LOW_POWER_LISTEN` under the exhaustion path,
-and the classifications differ in their energy accounting and their security-floor effect.
+exhaustion** is eligible to progress toward `LOW_POWER_LISTEN` under the exhaustion path
+(PATH A), and the classifications differ in their energy accounting and their security-floor
+effect.
+
+Separately from these range-search terminations, a **verified valid-solution stop (PATH B,
+CR-B1)** — a miner verifying a valid early-stop certificate for the round — also causes a
+miner to cease hashing; it is **not** an exhaustion and **not** one of the classes below. It
+**PAUSES** the assignment (retained `actual_frontier`, resumable) and enters `LOW_POWER_LISTEN`
+**directly** with `stop_reason = VALID_SOLUTION_VERIFIED` (Section 4.1); it never passes
+through `EXHAUSTED_PENDING` and never marks the range searched or exhausted.
 
 | # | Class | Trigger | `p = N` required? | Range coverage disposition |
 |---|---|---|---|---|
@@ -156,11 +164,16 @@ basis for the miner to cease hashing on that range, but it is not exhaustion.
 
 ## 4. The low-power transition chain
 
-### 4.1 Chain
+### 4.1 Two separate low-power paths (CR-B1)
 
-The exhaustion-driven low-power path is the ordered chain
+A miner reaches `LOW_POWER_LISTEN` by one of **two completely separate paths that never
+merge**. Every entry records exactly one `stop_reason` from `{RANGE_EXHAUSTED,
+ASSIGNMENT_REVOKED, VALID_SOLUTION_VERIFIED, ROUND_ACCEPTED, ROUND_ABORTED}`.
 
-    ACTIVE_HASHING → EXHAUSTED_PENDING → LOW_POWER_LISTEN
+**PATH A — local range exhaustion** (own assigned range fully searched, no valid solution
+found). The ordered chain is
+
+    ACTIVE_HASHING → EXHAUSTED_PENDING → LOW_POWER_LISTEN     (stop_reason = RANGE_EXHAUSTED)
 
 - **`ACTIVE_HASHING`** — the miner is searching its assigned range and contributes to the
   active hash rate. Its energy accrues to `P_hash,i * t_hash,i`.
@@ -172,29 +185,66 @@ The exhaustion-driven low-power path is the ordered chain
   yet in `LOW_POWER_LISTEN` and is NOT yet credited as exhausted.
 - **`LOW_POWER_LISTEN`** — the miner monitors round progress at reduced power. Its energy
   accrues to `P_listen,i * t_listen,i`, NOT to the active hash rate. This is the state in
-  which the idle policy realises reduced active power-time.
+  which the idle policy realises reduced active power-time. On PATH A the range is **closed**:
+  `coverage_state = searched`, `custody_status = completed`.
+
+**`EXHAUSTED_PENDING` is reachable ONLY on PATH A** (via `RANGE_EXHAUSTED`).
+
+**PATH B — verified valid-solution stop** (the miner verifies a valid early-stop certificate
+for the current round). The transition is **direct**:
+
+    ACTIVE_HASHING → LOW_POWER_LISTEN     (stop_reason = VALID_SOLUTION_VERIFIED)
+
+PATH B **MUST NOT pass through `EXHAUSTED_PENDING`.** During verification the miner **stays in
+`ACTIVE_HASHING`** and keeps contributing to `H_active(t)`; only after **all** certificate-
+validation steps pass (`STAGE_01_EARLY_STOP_CERTIFICATE.md`, Section 3) does it enter
+`LOW_POWER_LISTEN`. On this path the assignment is **PAUSED, not exhausted**: the retained
+`actual_frontier` is preserved and **no unsearched positions are credited as searched**. The
+range is **not** marked `searched` and `custody_status` is **not** `completed`.
+
+**Resume after a paused (PATH B) stop.** If the full block is later rejected, unavailable, or
+times out, the miner resumes:
+
+    LOW_POWER_LISTEN → WAKING → ACTIVE_HASHING
+
+resuming from the retained `actual_frontier`, with wake and transition energy fully accounted.
+
+**Round closure and revocation.** If the full block is accepted, all remaining assignments
+close because the **round ended** (`stop_reason = ROUND_ACCEPTED`), not because their ranges
+were exhausted; `ROUND_ABORTED` closes assignments with `stop_reason = ROUND_ABORTED`.
+Assignment revocation is `ACTIVE_HASHING → LOW_POWER_LISTEN` **directly**
+(`stop_reason = ASSIGNMENT_REVOKED`), returning only the unsearched suffix for reassignment —
+not via `EXHAUSTED_PENDING`. None of these mark the range exhausted.
 
 ### 4.2 The I4 gate (binding)
 
-**Invariant I4:** *no `LOW_POWER_LISTEN` before valid exhaustion or valid revocation.* The
-transition `EXHAUSTED_PENDING → LOW_POWER_LISTEN` MUST NOT occur merely because the miner
-*says* it is finished. Entry into `LOW_POWER_LISTEN` on the exhaustion path is permitted
-ONLY when the pending exhaustion assertion has been **adjudicated as true range exhaustion**
+**Invariant I4 (amended, CR-B2):** *no `LOW_POWER_LISTEN` before one of the recorded
+`stop_reason` triggers* (the full set is enumerated below). This subsection governs the
+**exhaustion-path gate (PATH A)**: the transition `EXHAUSTED_PENDING → LOW_POWER_LISTEN` MUST
+NOT occur merely because the miner *says* it is finished. Entry into `LOW_POWER_LISTEN` on the
+exhaustion path is permitted ONLY when the pending exhaustion assertion has been **adjudicated
+as true range exhaustion**
 under Section 2 using the evidence of Section 5 — i.e. `p = N` is established, not claimed.
 A self-reported "finished" with insufficient evidence is a class-5 event (Section 3.5), not
 an exhaustion, and leaves the miner blocked at `EXHAUSTED_PENDING` (or escalated), never
 advanced to `LOW_POWER_LISTEN`.
 
-The only sanctioned entries into `LOW_POWER_LISTEN` are therefore:
+The sanctioned entries into `LOW_POWER_LISTEN` are therefore (amended I4, CR-B2), each
+recording exactly one `stop_reason`:
 
-1. **Valid exhaustion path** — `ACTIVE_HASHING → EXHAUSTED_PENDING → LOW_POWER_LISTEN`,
-   gated by adjudicated true range exhaustion (this document); or
-2. **Valid revocation path** — where the protocol has validly revoked the assignment
-   (class 6) such that the miner has no active range to search, subject to the same I4
-   requirement that the revocation be *valid*.
+1. **Valid exhaustion path (PATH A)** — `ACTIVE_HASHING → EXHAUSTED_PENDING → LOW_POWER_LISTEN`,
+   gated by adjudicated true range exhaustion (this document), `stop_reason = RANGE_EXHAUSTED`;
+2. **Verified valid-solution stop (PATH B)** — `ACTIVE_HASHING → LOW_POWER_LISTEN` **directly**,
+   after all early-stop-certificate validation steps pass, `stop_reason =
+   VALID_SOLUTION_VERIFIED`, assignment **PAUSED** (resumable); this path never passes through
+   `EXHAUSTED_PENDING` and never marks the range searched/exhausted (Section 4.1);
+3. **Valid revocation** — `ACTIVE_HASHING → LOW_POWER_LISTEN` **directly** (class 6), the
+   revocation being *valid*, `stop_reason = ASSIGNMENT_REVOKED`;
+4. **Round closure** — `stop_reason = ROUND_ACCEPTED` (accepted block) or `ROUND_ABORTED`.
 
-No other class in Section 3 — early abandonment, lease expiry, communication loss, false
-claim — is a valid basis for `LOW_POWER_LISTEN` on the exhaustion path.
+No unverified certificate and no self-reported "finished" may open the gate. No other class in
+Section 3 — early abandonment, lease expiry, communication loss, false claim — is a valid
+basis for `LOW_POWER_LISTEN`. `EXHAUSTED_PENDING` remains exclusive to PATH A.
 
 ### 4.3 States that are NOT on this chain
 
@@ -202,7 +252,9 @@ claim — is a valid basis for `LOW_POWER_LISTEN` on the exhaustion path.
 (unreachable/departed), and `DISQUALIFIED` (excluded) are reached by other transitions and
 are specified elsewhere. In particular, a reserve becoming active passes through `WAKING`
 into `ACTIVE_HASHING` (see `STAGE_01_RESERVE_POLICY_SPECIFICATION.md`), not through
-`EXHAUSTED_PENDING`.
+`EXHAUSTED_PENDING`. Likewise, a miner **resuming a paused (PATH B) assignment** after a
+full-block rejection or timeout passes `LOW_POWER_LISTEN → WAKING → ACTIVE_HASHING` (Section
+4.1), resuming from its retained `actual_frontier` — also not through `EXHAUSTED_PENDING`.
 
 ---
 
@@ -277,9 +329,9 @@ energy-model document.
 A saving is possible only when **all** of the following hold:
 
 1. **A miner legitimately reaches a reduced-power state.** Some miner is adjudicated into
-   `LOW_POWER_LISTEN` (valid exhaustion or valid revocation, Section 4) or held in
-   `RESERVE`, for a strictly positive duration. If no miner ever leaves `ACTIVE_HASHING`
-   early, active power-time is unchanged and `ΔE = 0`.
+   `LOW_POWER_LISTEN` (valid exhaustion, verified valid-solution stop, or valid revocation —
+   Section 4) or held in `RESERVE`, for a strictly positive duration. If no miner ever leaves
+   `ACTIVE_HASHING` early, active power-time is unchanged and `ΔE = 0`.
 2. **Reduced-power draw is below hashing draw.** For the miners that go idle,
    `P_listen,i < P_hash,i` (and reserve/offline draw is below hashing draw). If listening
    costs as much as hashing, moving to it saves nothing.
@@ -321,8 +373,10 @@ the conditions that make a saving *eligible*; it asserts no saving.
 
 ## 7. Invariant references
 
-- **I4** — no `LOW_POWER_LISTEN` before valid exhaustion or valid revocation; the
-  self-report "finished" never suffices (Sections 3.5, 4.2, 5).
+- **I4 (amended, CR-B2)** — no `LOW_POWER_LISTEN` before one of the recorded `stop_reason`
+  triggers: `RANGE_EXHAUSTED` (PATH A), `VALID_SOLUTION_VERIFIED` (PATH B, assignment PAUSED),
+  `ASSIGNMENT_REVOKED`, `ROUND_ACCEPTED`, or `ROUND_ABORTED`; the self-report "finished" never
+  suffices and `EXHAUSTED_PENDING` remains exclusive to PATH A (Sections 3.5, 4.1, 4.2, 5).
 - **I5–I7** — duration and energy conservation; no hidden deletion of failed or zero-block
   runs (Section 6.1, item 4; full statement in `STAGE_01_ENERGY_MODEL_SPECIFICATION.md`).
 - **I16** — security-floor breaches and unsubstantiated claims are recorded, not silently

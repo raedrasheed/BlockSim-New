@@ -11,7 +11,7 @@ and "Enhanced PoCol" are prohibited.
 
 **Reference cross-links.** "Scope §X" denotes the corresponding section of
 `STAGE_01_PROTOCOL_SCOPE.md`. "Preamble" denotes the canonical Stage-1 preamble. "Invariant
-Catalogue" denotes the separate document defining I1..I16.
+Catalogue" denotes the separate document defining I1..I17.
 
 ---
 
@@ -41,21 +41,26 @@ Catalogue" denotes the separate document defining I1..I16.
 | searched | Coverage state | Positions counted as searched under reliable, provenance-complete checkpoints (counted at most once per position per template). A coverage state, not a custody status. | This document (§1) |
 | active_unsearched | Coverage state | Positions under a live lease not yet within a searched prefix. | This document (§1) |
 | inactive_unsearched | Coverage state | Positions not under any live lease and not yet searched (custody lapsed — expired, abandoned, or revoked — or awaiting (re)assignment). | This document (§1) |
-| Custody status | Per-assignment lineage status | Exactly one of `{original, renewed, reassigned, revoked, expired, abandoned}` (I8b): the lineage/event history of an assignment. Orthogonal to coverage state and NOT an additive coverage term. | This document (§1) |
+| Custody status | Per-assignment lineage status | Exactly one of `{original, renewed, reassigned, revoked, expired, abandoned, completed}` (I8b): the lineage/event history of an assignment. Orthogonal to coverage state and NOT an additive coverage term. | This document (§1) |
 | original | Custody status | First assignment of a range in its lineage (`previous_assignment_reference = null`). | This document (§1) |
 | renewed | Custody status | Custody extended to the SAME holder past `lease_expiry`. | This document (§1) |
 | reassigned | Custody status | Custody transferred to a DIFFERENT holder. A custody status, never a coverage term; a reassigned position keeps its own independent coverage state. | This document (§1) |
 | revoked | Custody status | Custody withdrawn by the authority before `lease_expiry`. | This document (§1) |
 | expired | Custody status | Custody lapsed at `lease_expiry` without renewal. | This document (§1) |
 | abandoned | Custody status | Custody relinquished by the holder ceasing sanctioned progress on a live lease. | This document (§1) |
+| completed | Custody status | Terminal lineage status of a range fully exhausted under the same `RoundID`/`TemplateID` via PATH A (`coverage_state = searched`). A `completed` range is NOT reassignable: it is not released to the reassignable pool, not marked `inactive_unsearched`, and exhaustion is never a reassignment reason (permitted reassignment reasons are exactly `lease_expiry`, `abandonment`, `revocation`, `departure`, `conflict`, `security_recovery`). Continuation is via new `original` assignments under a new `TemplateID` on template refresh. | This document (§1) |
 | REGISTERED | Miner state (1 of 8) | Miner is admitted to PoCol with a MinerID but is not described by any more specific active/reserve/idle state. Mutually exclusive with the other seven miner states. | Preamble; Scope §E |
 | RESERVE | Miner state (2 of 8) | Registered and available but not currently assigned an active range; draws no active hashing power until promoted. | Preamble; Scope §B.2, §E |
 | ACTIVE_HASHING | Miner state (3 of 8) | Miner is actively hashing an assigned range. The ONLY state that contributes to the active hash rate and to the P_hash·t_hash term. | Preamble; Scope §0.3, §E |
-| EXHAUSTED_PENDING | Miner state (4 of 8) | Miner has exhausted (or reported completion of) its assigned range and awaits reassignment or round resolution. | Preamble; Scope §E |
+| EXHAUSTED_PENDING | Miner state (4 of 8) | Miner has exhausted its assigned range (own range fully searched, no valid solution found) and awaits round resolution. Reachable ONLY via PATH A range exhaustion (`stop_reason = RANGE_EXHAUSTED`); the verified valid-solution stop (PATH B) never passes through this state. On PATH A the range closes (`coverage_state = searched`, `custody_status = completed`). | Preamble; Scope §E |
 | LOW_POWER_LISTEN | Miner state (5 of 8) | Miner monitors round progress at reduced power rather than hashing; contributes to P_listen·t_listen and NOT to the active hash rate. | Preamble; Scope §B.1, §E |
 | WAKING | Miner state (6 of 8) | Transitional state entered when leaving a reduced-power state to resume hashing; incurs wake latency and the P_wake·t_wake and E_transition terms. | Preamble; Scope §B.3, §E |
 | OFFLINE | Miner state (7 of 8) | Miner is not participating; contributes to the P_offline·t_offline term and not to the active hash rate. | Preamble; Scope §E |
 | DISQUALIFIED | Miner state (8 of 8) | Miner has been excluded from participation; produces no valid contribution to the round. | Preamble; Scope §E |
+| stop_reason | Transition-reason enum | The mandatory reason recorded on every entry into `LOW_POWER_LISTEN`, exactly one of `{RANGE_EXHAUSTED, ASSIGNMENT_REVOKED, VALID_SOLUTION_VERIFIED, ROUND_ACCEPTED, ROUND_ABORTED}` (amended I4). No unverified certificate may cause the transition. | This document (§1) |
+| PATH A | Transition path (range exhaustion) | The local range-exhaustion stop: own assigned range fully searched with no valid solution found, `ACTIVE_HASHING → EXHAUSTED_PENDING → LOW_POWER_LISTEN`, `stop_reason = RANGE_EXHAUSTED`. The range is closed (`coverage_state = searched`, `custody_status = completed`). The ONLY path through `EXHAUSTED_PENDING`. | This document (§1) |
+| PATH B | Transition path (verified valid-solution stop) | The verified valid-solution stop: after validating a valid early-stop certificate for the current round, `ACTIVE_HASHING → LOW_POWER_LISTEN` **directly**, `stop_reason = VALID_SOLUTION_VERIFIED`. MUST NOT pass through `EXHAUSTED_PENDING`; during verification the miner stays in `ACTIVE_HASHING`, entering `LOW_POWER_LISTEN` only after all validation steps pass. The assignment is PAUSED, not searched or exhausted. | This document (§1) |
+| PAUSED assignment | Assignment status | The status of an assignment after a PATH B valid-solution stop: **resumable** and NOT searched or exhausted. The retained `actual_frontier` is preserved and no unsearched positions are credited as searched. If the full block is later rejected, unavailable, or times out, the miner resumes from the retained `actual_frontier` (`LOW_POWER_LISTEN → WAKING → ACTIVE_HASHING`), with wake and transition energy fully accounted. | This document (§1) |
 | ROUND_INITIALISING | Round state (1 of 10) | Round is being set up prior to template commitment. | Preamble; Scope §E |
 | TEMPLATE_COMMITMENT | Round state (2 of 10) | The common immutable block template is committed and its TemplateID fixed for the round. | Preamble; Scope §E |
 | ASSIGNMENT | Round state (3 of 10) | Disjoint nonce ranges are assigned (or leased) to participating miners. | Preamble; Scope §E |
@@ -69,7 +74,8 @@ Catalogue" denotes the separate document defining I1..I16.
 | Active hash rate | H_active(t) [hash/s] | Total hash rate contributed at time t by miners in ACTIVE_HASHING only. No other miner state contributes to it. | Preamble; Scope §0.3 |
 | Honest hash rate | H_honest(t) [hash/s] | The portion of active hash rate contributed by honest (protocol-following) miners at time t. | This document (§1) |
 | Adversarial hash rate | H_adversarial(t) [hash/s] | The portion of active hash rate contributed by adversarial miners at time t. | This document (§1) |
-| Adversarial share | q_adv(t) [dimensionless, 0..1] | Fraction of active hash rate that is adversarial: q_adv(t) = H_adversarial(t) / (H_honest(t) + H_adversarial(t)). | This document (§1) |
+| Adversarial share | q_adv(t) [dimensionless, 0..1] | Fraction of active hash rate that is adversarial: q_adv(t) = H_adversarial(t) / (H_honest(t) + H_adversarial(t)). Undefined/NA when H_active(t) = 0 — a security-floor breach is recorded, not treated as zero (I17). | This document (§1) |
+| I17 hash-rate identity | Invariant (hash-rate decomposition) | For every event-update time, `H_active(t) = H_honest(t) + H_adversarial(t)` exactly. After miner states are determined, all three quantities are computed **deterministically** from the `ACTIVE_HASHING` census; `H_adversarial` is never sampled independently once `H_active` is known. When `H_active(t) = 0`, `q_adv(t)` is undefined/NA and a security-floor breach is recorded — not treated as zero. | This document (§1) |
 | Security floor | Modeled bound | A modeled lower bound on active honest hash rate that participation reduction must not violate. Monitored by the protocol; its enforcement soundness is out of scope at Stage 1. | Scope §B.4, §C |
 | Reserve miner | Miner in RESERVE | A registered miner held in RESERVE: available but not actively hashing, promotable to ACTIVE_HASHING when needed. | Scope §B.2 |
 | Wake latency | Duration [s] | The delay a miner incurs while in WAKING before it resumes ACTIVE_HASHING after leaving a reduced-power state. | Scope §B.3 |
@@ -95,6 +101,7 @@ Catalogue" denotes the separate document defining I1..I16.
 | audit_selected | Protocol-level claim | Whether a reported claim was selected for audit under the modeled audit abstraction. | This document (§1) |
 | audit_result | Protocol-level claim | The outcome of the modeled audit of a reported claim (compared against ground truth in adversarial simulations). | This document (§1) |
 | claim_accepted_or_rejected | Protocol-level claim | Whether the reported claim was accepted or rejected after audit. All such findings are modeled, not cryptographically proven. | This document (§1) |
+| Accepted reported exhaustion under the modeled audit abstraction | Protocol-level claim outcome | The canonical phrase for an adversarial-path `reported_exhaustion` accepted after comparison with simulator ground truth through the modeled audit/detection abstraction. It is NEVER a cryptographic proof or a verified actual exhaustion. | This document (§1) |
 | Early-stop certificate | Certificate object | A certificate generated ONLY after a miner finds a valid candidate solution satisfying the current target; it contains exactly RoundID, TemplateID, AssignmentID, MinerID, nonce, candidate_hash, target, signature/authentication. It is NOT generated from progress commitments, searched-domain coverage, claimed exhaustion, or a progress frontier (CR1); progress verification and early-stop certification are completely separate mechanisms. Carries no security or soundness guarantee at Stage 1. | Scope §B.8, §C |
 | Target | Threshold value | The acceptance threshold for a round: a solution is valid only if its digest satisfies the target under the committed template. | Scope §A.5 |
 | arrival_time | Reproducible time [s] | The reproducible propagation/arrival time assigned to a valid solution. Under network-arrival semantics (CR6) local acceptance takes the earliest valid arrival; only exact arrival-time ties break by smallest `candidate_hash`, then smallest `MinerID`. | This document (§1) |

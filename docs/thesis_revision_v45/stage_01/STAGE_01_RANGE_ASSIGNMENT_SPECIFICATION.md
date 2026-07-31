@@ -292,11 +292,17 @@ accounted for (I8a):
 
 - A `RESERVE` miner holds no active range and draws no active hashing power; it is not
   allocated a range until promoted to `ACTIVE_HASHING`.
-- A range whose owner ceases active search (miner departs, goes `OFFLINE`, enters
-  `LOW_POWER_LISTEN`, is `DISQUALIFIED`, or reaches `EXHAUSTED_PENDING`) becomes eligible for
-  cancellation (Section 14) and/or reassignment (Section 15). Until reassigned, the region it
-  covered is recorded in the coverage accounting as **inactive_unsearched**
-  (unsearched-and-unassigned) rather than silently dropped.
+- A range whose owner ceases active search **before completing it** (miner departs, goes
+  `OFFLINE`, enters `LOW_POWER_LISTEN` on a paused valid-solution stop, or is `DISQUALIFIED`)
+  becomes eligible for cancellation (Section 14) and/or reassignment of its **unsearched
+  suffix** (Section 15). Until reassigned, the unsearched region it covered is recorded in the
+  coverage accounting as **inactive_unsearched** (unsearched-and-unassigned) rather than
+  silently dropped.
+- A range that its owner **fully exhausts** (PATH A: own assigned range searched to
+  completion via `ACTIVE_HASHING → EXHAUSTED_PENDING`, no valid solution encountered) is
+  **complete**, not inactive: its coverage state is `searched` and its custody status is
+  `completed` (Section 15). A completed range is **not** returned for reassignment, is **not**
+  recorded as `inactive_unsearched`, and is **not** reassignable under the same `TemplateID`.
 - Inactive regions MUST appear in the I8a coverage accounting (Section 15) so that
   searched + active_unsearched + inactive_unsearched reconciles to the full domain. An inactive
   miner's former range is never both "assigned to it" and "available for reassignment"
@@ -329,9 +335,11 @@ expiry) — e.g. on miner departure, disqualification, lease reclamation, or `TE
 
 ## 15. Reassignment provenance (previous_assignment_reference; I8a/I8b)
 
-When a range (or part of a range) is granted to a new miner after cancellation, lease expiry,
-exhaustion, or departure, the successor assignment records its origin via
-`previous_assignment_reference`.
+When an **unsearched suffix** of a range is granted to a new miner after cancellation, lease
+expiry, or departure, the successor assignment records its origin via
+`previous_assignment_reference`. Exhaustion is **not** a reassignment trigger: a fully
+exhausted range is complete (`coverage_state = searched`, `custody_status = completed`) and is
+not reassigned under the same `TemplateID` (Section 13).
 
 - `previous_assignment_reference` holds the `AssignmentID` of the assignment being superseded;
   it is null only for an original grant.
@@ -349,10 +357,13 @@ exhaustion, or departure, the successor assignment records its origin via
   integer arithmetic, Section 6).
 - **Invariant I8b: custody/provenance, orthogonal to coverage.** Independently of its coverage
   state, each assignment carries a custody status in
-  `{original, renewed, reassigned, revoked, expired, abandoned}`. These are custody/lineage
-  properties and MUST NOT appear as additive terms in the I8a coverage equation: **`reassigned`
-  is a custody status, not a coverage class.** A reassigned position still has an independent
-  coverage state (`searched`, `active_unsearched`, or `inactive_unsearched`).
+  `{original, renewed, reassigned, revoked, expired, abandoned, completed}`. These are
+  custody/lineage properties and MUST NOT appear as additive terms in the I8a coverage
+  equation: **`reassigned` is a custody status, not a coverage class.** A reassigned position
+  still has an independent coverage state (`searched`, `active_unsearched`, or
+  `inactive_unsearched`). The `completed` custody status marks a range that its owner fully
+  exhausted (PATH A); a completed range's coverage state is `searched`, and — unlike a lapsed
+  custody — it is **not** reassignable under the same `TemplateID`.
   `previous_assignment_reference` is the link that lets reassigned regions be traced to their
   origin so the coverage accounting closes without double-counting.
 - Provenance is **per TemplateID**: a lineage lives within one candidate-identity domain and
@@ -388,7 +399,21 @@ assignment membership, not merely on satisfying the target.
 
 Progress toward exhausting an assigned range is handled only via the **modeled
 progress-verification abstraction**; it is NOT a cryptographic proof of range exhaustion, and
-nothing in this section claims otherwise.
+nothing in this section claims otherwise. Exhaustion has two distinct, non-cryptographic
+meanings and MUST NOT be described as "target-verified exhaustion" or as a proof that no valid
+solution exists in the range:
+
+- **Honest simulation path:** a range is exhausted by **actual cursor completion** —
+  `actual_frontier = range_end`, `actual_positions_evaluated = range_size`,
+  `actual_exhaustion = true`, and no valid solution was encountered during the actual
+  evaluated sequence.
+- **Adversarial simulation path:** exhaustion is an **accepted reported exhaustion under the
+  modeled audit abstraction** (`reported_exhaustion` compared with simulator ground truth
+  through the modeled audit/detection abstraction), never a cryptographic proof and never
+  verified actual exhaustion.
+
+A fully exhausted range is complete: its coverage state is `searched` and its custody status
+is `completed` (Section 15); it is not reassignable under the same `TemplateID`.
 
 ---
 
@@ -428,8 +453,10 @@ under the idle policy, specified elsewhere and not claimed here.
   solution matches the current RoundID and TemplateID; Section 16); I8a (coverage states
   partition the assigned domain: searched + active_unsearched + inactive_unsearched =
   assigned_domain; Section 15); I8b (custody/provenance model
-  `{original, renewed, reassigned, revoked, expired, abandoned}`, orthogonal to coverage —
-  `reassigned` is custody, not a coverage class; Section 15); I12 (difficulty constant in the
+  `{original, renewed, reassigned, revoked, expired, abandoned, completed}`, orthogonal to
+  coverage — `reassigned` is custody, not a coverage class; a `completed` (fully exhausted)
+  range is `searched` in coverage and not reassignable under the same `TemplateID`;
+  Section 15); I12 (difficulty constant in the
   confirmatory protocol; referenced via the target rule of
   `STAGE_01_TEMPLATE_SPECIFICATION.md`).
 - **Accounting invariant A1:** continuous full-participation energy is fixed at

@@ -104,11 +104,20 @@ The abstraction is represented at two distinct layers, which MUST NOT be conflat
   `audit_result`, `claim_accepted_or_rejected`.
 
 The modeled progress-verification abstraction does **not** prove actual exhaustion, and **no**
-progress commitment verifies that no valid solution exists in the whole range. In **honest**
-simulations, `EXHAUSTED_PENDING` eligibility **may** use actual cursor completion (ground truth).
-In **adversarial** simulations, reported exhaustion is compared with ground truth and passed
-through the modeled audit/detection abstraction. All findings are **modeled, not cryptographically
-proven**.
+progress commitment — and no target check — verifies that no valid solution exists in the
+whole range. There is no "target-verified exhaustion" and no progress commitment that proves a
+range contains no solution. The two paths are:
+
+- **Honest simulation path:** `EXHAUSTED_PENDING` eligibility uses **actual cursor completion**
+  (simulator ground truth) — `actual_frontier = range_end`,
+  `actual_positions_evaluated = range_size`, `actual_exhaustion = true`, and no valid solution
+  was encountered during the actual evaluated sequence.
+- **Adversarial simulation path:** `reported_exhaustion` is compared with simulator ground
+  truth through the modeled audit/detection abstraction; when the claim is accepted it is an
+  **accepted reported exhaustion under the modeled audit abstraction** — never a cryptographic
+  proof, never "target-verified exhaustion", and never verified actual exhaustion.
+
+All findings are **modeled, not cryptographically proven**.
 
 ---
 

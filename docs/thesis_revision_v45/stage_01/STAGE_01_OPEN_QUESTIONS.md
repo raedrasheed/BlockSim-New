@@ -20,7 +20,7 @@ Every blocking question below is given a **minimal default decision** that fixes
 just enough for Stage 2 to proceed. Adopting the default is itself the resolution-for-Stage-2;
 deeper study is deferred to the noted later stage. Defaults are chosen to be the most
 conservative / least-claiming option consistent with the canonical preamble, `A1`, and
-`I1..I16`.
+`I1..I17`.
 
 Field order per entry: **question | why it matters | candidate options | scientific risk |
 implementation dependency | stage where it must be resolved | Stage-2-blocking?** followed by
@@ -38,9 +38,17 @@ the **Stage-2 default** where blocking.
 - **Implementation dependency.** State-machine guard; progress-accounting reconciliation.
 - **Stage where resolved.** Stage 2 (state machine); revisited Stage 3 (energy).
 - **Stage-2-blocking?** **YES** (state transitions).
-- **Stage-2 default.** Adopt (a) **plus** (c): a miner may enter `LOW_POWER_LISTEN` only from
-  `EXHAUSTED_PENDING` with accepted full-range exhaustion accounting, or on explicit
-  revocation. Exactly the `I4` guard; no partial-coverage idling in the confirmatory design.
+- **Stage-2 default.** A miner may enter `LOW_POWER_LISTEN` only via one of the enumerated
+  `stop_reason` triggers of the amended `I4`, each recording exactly one `stop_reason`:
+  (1) **PATH A** local range exhaustion (`ACTIVE_HASHING → EXHAUSTED_PENDING → LOW_POWER_LISTEN`,
+  `RANGE_EXHAUSTED`; range closed with `coverage_state = searched`, `custody_status = completed`);
+  (2) explicit assignment revocation (`ACTIVE_HASHING → LOW_POWER_LISTEN` directly,
+  `ASSIGNMENT_REVOKED`); (3) a fully verified valid-solution early-stop certificate — **PATH B**
+  (`ACTIVE_HASHING → LOW_POWER_LISTEN` directly, `VALID_SOLUTION_VERIFIED`), which **PAUSES** the
+  assignment (retained `actual_frontier` preserved, range not searched or exhausted) and never
+  passes through `EXHAUSTED_PENDING`; or (4) round closure (`ROUND_ACCEPTED`/`ROUND_ABORTED`).
+  `EXHAUSTED_PENDING` is reachable only via PATH A. No partial-coverage idling in the
+  confirmatory design; no unverified certificate may cause the transition.
 
 ### Q2 — `WAKING` deadline overrun disposition (`OFFLINE` vs `DISQUALIFIED`)
 - **Why it matters.** Determines the terminal state after a failed wake and whether the
@@ -86,7 +94,8 @@ the **Stage-2 default** where blocking.
 - **Why it matters.** Determines whether a range's `searched` coverage state survives lease
   expiry and reassignment; drives the `I8a` coverage-state partition
   (`searched` / `active_unsearched` / `inactive_unsearched`), the `I8b` custody status of the
-  range (`{original, renewed, reassigned, revoked, expired, abandoned}`), and possible re-search.
+  range (`{original, renewed, reassigned, revoked, expired, abandoned, completed}`), and possible
+  re-search.
 - **Candidate options.** (a) the `searched` coverage state persists across the custody change;
   (b) reset the range to unsearched on expiry; (c) retain only if renewed by the same miner.
 - **Scientific risk.** Discarding valid progress double-charges active power-time; retaining
@@ -127,7 +136,10 @@ the **Stage-2 default** where blocking.
 - **Stage-2-blocking?** **YES** (round termination; template identity).
 - **Stage-2 default.** Default to `TEMPLATE_REFRESH` (new `TemplateID`, difficulty fixed per
   `I12`); the zero-block outcome is still retained (`I14`) with `NA` block-normalised metrics
-  (`I15`). `ROUND_ABORTED` is used only for unrecoverable conditions.
+  (`I15`). `ROUND_ABORTED` is used only for unrecoverable conditions. Exhausted ranges are
+  marked `custody_status = completed` and are **not** returned to the reassignable pool
+  (exhaustion is never a reassignment reason); `TEMPLATE_REFRESH` continues via **new original**
+  assignments under the new `TemplateID`, not a reassignment of the completed old ranges.
 
 ### Q8 — Accepted-solution rule for competing valid solutions (network arrival)
 - **Why it matters.** Determines which of several valid blocks is accepted, i.e. how the round
@@ -147,7 +159,12 @@ the **Stage-2 default** where blocking.
   the other valid solutions are recorded as `competing`/`stale`. Only exact arrival-time ties
   break deterministically by smallest `candidate_hash`, then smallest `MinerID`. Deterministic and
   reproducible; satisfies `I2`/`I3`; **no chain-wide fork-choice proof is claimed**. The former
-  global-oracle rule ("smallest `(TemplateID, nonce, MinerID)`") is **not** used.
+  global-oracle rule ("smallest `(TemplateID, nonce, MinerID)`") is **not** used. Recipients of a
+  validated solution **pause** via **PATH B** (`ACTIVE_HASHING → LOW_POWER_LISTEN` directly,
+  `stop_reason = VALID_SOLUTION_VERIFIED`, assignment PAUSED, retained `actual_frontier`
+  preserved) rather than marking their ranges exhausted, and resume
+  (`LOW_POWER_LISTEN → WAKING → ACTIVE_HASHING`) from that frontier if the full block is later
+  rejected or times out (see Q1).
 
 ### Q9 — Definition and cadence of the security floors
 - **Why it matters.** Fixes when `SECURITY_RECOVERY` triggers; three distinct floors exist
@@ -161,7 +178,12 @@ the **Stage-2 default** where blocking.
 - **Stage-2-blocking?** **YES** (security-floor triggering).
 - **Stage-2 default.** Evaluate all three floors event-driven on every active-hash-rate update
   and every miner state change; a breach of any floor triggers `SECURITY_RECOVERY` and is
-  recorded (`I16`). Numeric floor values are configuration inputs, fixed per experiment.
+  recorded (`I16`). The hash-rate quantities are read from a **deterministic census** of the
+  active-state population per the new invariant **I17**: after miner states are determined,
+  `H_active(t) = H_honest(t) + H_adversarial(t)` is computed exactly from the `ACTIVE_HASHING`
+  census, and `H_adversarial` is **not** sampled independently once `H_active` is known. When
+  `H_active(t) = 0`, `q_adv(t)` is **undefined/NA** and a security-floor breach is recorded — not
+  treated as zero. Numeric floor values are configuration inputs, fixed per experiment.
 
 ### Q10 — Reserve-promotion selection rule
 - **Why it matters.** Determines which `RESERVE` miner is promoted during recovery; affects
@@ -257,7 +279,7 @@ the seven blocking semantics (state transitions, energy accounting, range validi
 termination, security-floor triggering, reserve activation, template identity) — Q1–Q12 — has
 an adopted **minimal default decision** above that fixes its semantics for Stage 2 while
 remaining the most conservative, least-claiming option consistent with the canonical preamble,
-the `A1` accounting invariant, and `I1..I16`. The remaining open items (Q13, Q14 `UNRESOLVED`;
+the `A1` accounting invariant, and `I1..I17`. The remaining open items (Q13, Q14 `UNRESOLVED`;
 Q15, Q16 non-blocking) affect later-stage soundness, incentives, reporting, or numeric tuning
 only, and do not block Stage 2. No default above asserts that any security, fairness,
 incentive, or energy-reduction property is achieved; each merely fixes semantics so Stage 2 can

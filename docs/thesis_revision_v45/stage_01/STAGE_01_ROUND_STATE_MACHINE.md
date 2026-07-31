@@ -131,11 +131,33 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
   certificate-validation steps (`STAGE_01_EARLY_STOP_CERTIFICATE.md`, Section 3), with
   verification energy recorded separately as `E_verification`. No `VERIFYING` miner state exists,
   and a failed certificate produces no hashing-state transition.
+- **Network-arrival and early-stop ordering (CR-B9).** Early stop within
+  `SOLUTION_PROPAGATION` follows this seven-step ordering:
+  1. A candidate solution is found.
+  2. Its certificate propagates with modeled per-recipient arrival times.
+  3. Each recipient continues hashing while validating.
+  4. After successful validation, that recipient enters `LOW_POWER_LISTEN` with
+     `stop_reason = VALID_SOLUTION_VERIFIED`, its assignment **PAUSED** (retained
+     `actual_frontier`) — miner-level PATH B (`STAGE_01_MINER_STATE_MACHINE.md`, T26),
+     **directly** and never via `EXHAUSTED_PENDING`.
+  5. Full block propagation/validation continues.
+  6. If the full block is accepted, the round closes (`SOLUTION_PROPAGATION → ROUND_ACCEPTED`);
+     remaining assignments close because the **round ended** (`stop_reason = ROUND_ACCEPTED`),
+     not because their ranges were exhausted.
+  7. If the full block is rejected or times out, stopped miners wake and resume their paused
+     assignments (`LOW_POWER_LISTEN → WAKING → ACTIVE_HASHING`, T30 → T5) from the retained
+     `actual_frontier`, with wake and transition energy accounted.
+
+  **No recipient is labeled `EXHAUSTED` merely because a valid solution was received** — a
+  received solution PAUSES the assignment (PATH B); it never marks the range searched or
+  exhausted. No chain-wide fork-choice proof is claimed.
 - **Entry condition.** From `HASHING` when a miner submits a candidate digest satisfying the
   target.
 - **Exit condition(s).** To `ROUND_ACCEPTED` when the solution validates (I2 ∧ I3 hold and
-  target is satisfied); back to `HASHING` if the candidate is invalid or withheld and
-  searching should continue; to `SECURITY_RECOVERY` if invalidation coincides with a
+  target is satisfied) and the full block is accepted; back to `HASHING` if the candidate is
+  invalid or withheld, or the full block is rejected or times out — in which case stopped
+  (PATH-B paused) miners wake and resume from their retained `actual_frontier` (T30 → T5) and
+  searching continues; to `SECURITY_RECOVERY` if invalidation coincides with a
   security-floor breach.
 
 ### 2.7 `ROUND_ACCEPTED`
@@ -150,8 +172,8 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
 
 ### 2.8 `ROUND_EXHAUSTED`
 
-- **Meaning.** Every active range has been searched to verified exhaustion (each contributing
-  miner passed I11 target verification and reached `EXHAUSTED_PENDING`) with no valid
+- **Meaning.** Every active range has been searched to accepted exhaustion (each contributing
+  miner reached `EXHAUSTED_PENDING` via PATH A range-exhaustion accounting (governed by I4/I8a and the actual-vs-reported progress model, not I11)) with no valid
   solution found for the committed template.
 - **Entry condition.** From `HASHING` when the "all active ranges exhausted" predicate holds
   over the current assignment set.
@@ -254,9 +276,9 @@ incentive or fairness claim is made about withholding (scope §C).
 
 An invalid (unverified) early-stop message MUST NOT end hashing (invariant **I11**). At the
 round level it does not move `HASHING → ROUND_EXHAUSTED`, because that predicate requires
-verified exhaustion of every active range. At the miner level, emitting an unverified
+accepted exhaustion of every active range. At the miner level, emitting an unverified
 early-stop is a protocol violation routing the emitter to `DISQUALIFIED` (miner T18). The
-round remains in `HASHING`. Only verified target-checked exhaustion counts toward
+round remains in `HASHING`. Only accepted range-exhaustion accounting counts toward
 `ROUND_EXHAUSTED`.
 
 ### 3.10 What happens after a security-floor violation
@@ -327,10 +349,10 @@ the notes and specified in `STAGE_01_MINER_STATE_MACHINE.md`.
 | R3 | `TEMPLATE_COMMITMENT` | TemplateCommitted | Immutable template finalised; difficulty fixed (I12) | Publish `TemplateID` | `ASSIGNMENT` | Template content frozen until `TEMPLATE_REFRESH` |
 | R4 | `ASSIGNMENT` | AssignmentSetValid | Ranges pairwise disjoint (I1), bound to `RoundID`+`TemplateID` (I3), leased with `lease_start`/`lease_expiry` | Distribute range leases; emit assignment offers | `HASHING` | Emits miner offers → `REGISTERED/RESERVE/… → WAKING → ACTIVE_HASHING`; hashing may begin (§3.2–3.3) |
 | R5 | `HASHING` | CandidateSolution | A submitted digest satisfies the fixed target | Begin propagation/validation | `SOLUTION_PROPAGATION` | Validation checks I2 (in signer's assignment) and I3 (current round/template) |
-| R6 | `SOLUTION_PROPAGATION` | SolutionValid | Target satisfied AND I2 ∧ I3 hold | Accepted-block handling: record block, credit solver, close round | `ROUND_ACCEPTED` | Solver is the `ACTIVE_HASHING` miner whose assignment contained the solution (I2); competing valid solutions resolved by earliest valid arrival, ties by `candidate_hash` then `MinerID` (§3.13, CR6) |
+| R6 | `SOLUTION_PROPAGATION` | SolutionValid | Target satisfied AND I2 ∧ I3 hold AND full block accepted | Accepted-block handling: record block, credit solver, close round | `ROUND_ACCEPTED` | Solver is the `ACTIVE_HASHING` miner whose assignment contained the solution (I2); competing valid solutions resolved by earliest valid arrival, ties by `candidate_hash` then `MinerID` (§3.13, CR6); all remaining assignments — including PATH-B paused miners in `LOW_POWER_LISTEN` — close because the **round ended** (`stop_reason = ROUND_ACCEPTED`), NOT because their ranges were exhausted (CR-B1, CR-B9) |
 | R7 | `SOLUTION_PROPAGATION` | SolutionInvalidOrWithheld | Candidate fails validation or was not propagated; floor still satisfied | Discard candidate; resume searching | `HASHING` | Withheld/invalid solution does not advance the round (§3.8) |
 | R8 | `SOLUTION_PROPAGATION` | InvalidWithFloorBreach | Candidate invalid AND `H_honest(t)` below floor | Enter remediation | `SECURITY_RECOVERY` | Coverage shortfall handled by reserve activation |
-| R9 | `HASHING` | AllActiveRangesExhausted | Every active range reached verified exhaustion (I11) and `EXHAUSTED_PENDING` | Close current template's search | `ROUND_EXHAUSTED` | Only verified exhaustion counts (§3.5, §3.9) |
+| R9 | `HASHING` | AllActiveRangesExhausted | Every active range reached accepted exhaustion (I4/I8a; PATH A) and `EXHAUSTED_PENDING` | Close current template's search | `ROUND_EXHAUSTED` | Only accepted exhaustion counts (§3.5, §3.9) |
 | R10 | `HASHING` | SecurityFloorViolation | Modeled `H_honest(t)` below the security floor, or invariant-risk detected | Trigger reserve activation | `SECURITY_RECOVERY` | Emits miner activation → `RESERVE → WAKING` (T4), `LOW_POWER_LISTEN → WAKING` (T10) |
 | R11 | `HASHING` | RefreshTrigger | A superseding immutable template is available | Prepare template replacement | `TEMPLATE_REFRESH` | Refresh is the only way mined content changes (§3.11) |
 | R12 | `HASHING` | FatalFault / RoundTimeout | Unrecoverable fault or round-level timeout | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.4) |
@@ -350,13 +372,16 @@ the notes and specified in `STAGE_01_MINER_STATE_MACHINE.md`.
   R18.
 - **I2 / I3** (accepted solution in signer's assignment / matching current
   `RoundID`+`TemplateID`) gate acceptance: R6 (via the R5 validation).
-- **I4** (no `LOW_POWER_LISTEN` before valid exhaustion/revocation) is a miner-level
-  invariant; at round level it means only verified exhaustion (R9) — never an early-stop —
-  precedes the miner-level idle drops.
+- **I4 (amended, CR-B2)** (no `LOW_POWER_LISTEN` before one of the recorded `stop_reason`
+  triggers) is a miner-level invariant. At round level, `ROUND_EXHAUSTED` (R9) still requires
+  accepted exhaustion of every active range and is **never** driven by an unverified
+  early-stop. A **verified valid-solution** early-stop is a separate, legitimate miner-level
+  idle drop (PATH B, `stop_reason = VALID_SOLUTION_VERIFIED`, assignment PAUSED) that does
+  **not** move the round to `ROUND_EXHAUSTED` and marks no range exhausted (§2.6, CR-B1,
+  CR-B9).
 - **I5** (durations ≥ 0, reconcile to horizon) governs the preserved energy accumulators
   carried across R20/R21.
-- **I11** (false early-stop cannot end hashing) means R9 requires verified target-checked
-  exhaustion of every active range; an unverified early-stop keeps the round in `HASHING`
+- **I11** (false early-stop cannot end hashing) means R9 is never triggered by an unverified early-stop certificate; range exhaustion is governed by I4/I8a and the actual-vs-reported progress model (not I11); an unverified early-stop keeps the round in `HASHING`
   (§3.9) and disqualifies the emitter at the miner level.
 - **I12** (difficulty constant) holds across every round state; no transition changes
   difficulty.
