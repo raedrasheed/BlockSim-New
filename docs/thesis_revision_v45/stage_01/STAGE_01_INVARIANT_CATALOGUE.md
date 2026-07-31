@@ -2,7 +2,8 @@
 
 **Document status:** Stage-1 specification-only. This catalogue DEFINES the numbered
 invariants `I1..I18` of **PoCol** with **the idle policy within PoCol** enabled (I18 added in
-Stage 1F for immutable assignment versioning). Defining an
+Stage 1F for immutable assignment versioning; in Stage 1G, I2 is corrected to discovery-time
+eligibility (G1) and I18 is split into the consistent pair I18a/I18b (G2)). Defining an
 invariant is a specification act. It is NOT a claim that the invariant is implemented,
 enforced in code, validated, or that any security, fairness, or incentive property follows
 from it. At Stage 1 no invariant is experimentally supported.
@@ -57,20 +58,25 @@ point, planned test stage, and consequence of violation.
   provenance; unsound acceptance provenance (couples to I2); double-counting risk (couples to
   I13).
 
-### I2 — Every accepted solution belongs to the signer's valid current assignment.
+### I2 — Every accepted solution binds to the assignment version that was eligible at DISCOVERY time (corrected, G1).
 
-- **Formal statement.** If solution `s` is accepted, then `nonce(s) ∈ range(A)` for some
-  assignment `A` that is VALID and CURRENT for `signer(s)` at acceptance time under the
-  committed `(RoundID, TemplateID)`.
-- **Scope.** Valid block acceptance; solution submission.
-- **Required inputs.** Solution nonce; signer identity; current assignment set;
-  `(RoundID, TemplateID)`.
-- **Enforcement point.** Acceptance predicate (range-membership check) in the valid-block
-  acceptance procedure.
-- **Planned test stage.** Stage 2 (structural), with Stage 4 (acceptance under leases) and
-  Stage 5 (adversarial out-of-range tests).
-- **Consequence of violation.** Out-of-range acceptance; enables the mining-outside-range
-  attack; coverage accounting becomes unsound.
+- **Formal statement (discovery-time eligibility, G1).** If solution `s` is accepted, then `s`
+  binds to an IMMUTABLE assignment version `A` such that: (i) `A` was VALID and `CURRENT` for
+  `signer(s)` at the solution's `discovery_time`; (ii) `A` was NOT revoked before `discovery_time`;
+  (iii) `A` belonged to `signer(s)` at `discovery_time`; (iv) `nonce(s) ∈ range(A)`; (v) `A` is
+  bound to the candidate's `(RoundID, TemplateID)`; and (vi) `A` remains resolvable from the
+  `SolutionEligibilitySnapshot`. **`A` need NOT remain `CURRENT` at certificate or block arrival —
+  it may later be `PAUSED` or `SUPERSEDED`.** Acceptance-time `CURRENT` semantics are NOT used.
+- **Scope.** Valid block acceptance; solution submission; discovery-snapshot resolution.
+- **Required inputs.** Solution nonce; signer identity; the immutable version resolved from the
+  discovery snapshot `(AssignmentID, assignment_version)`; `discovery_time`; `(RoundID, TemplateID)`.
+- **Enforcement point.** `ValidateCandidate` (the canonical discovery-snapshot predicate) invoked by
+  `AcceptanceBatchFinalize`, `EarlyStopVerify`, and `SelfValidateFoundSolution`.
+- **Planned test stage.** Stage 2 (structural), with Stage 4 (acceptance under leases/renewal) and
+  Stage 5 (adversarial out-of-range / stale-version tests).
+- **Consequence of violation.** Either a genuinely-discovered solution is wrongly rejected because
+  its assignment later paused/superseded (the Stage-1F defect), or an out-of-range/never-eligible
+  solution is accepted; coverage accounting becomes unsound.
 
 ### I3 — Every accepted solution matches the current RoundID and TemplateID.
 
@@ -311,25 +317,34 @@ point, planned test stage, and consequence of violation.
 
 ---
 
-### I18 — Exactly one CURRENT version per assignment lineage (Stage 1F, F7).
+### I18a / I18b — Assignment-lineage version invariants (Stage 1F I18, corrected in G2).
 
-- **Formal statement.** An assignment is an immutable versioned object with a stable `lineage_id`
-  shared by all its versions. For each `lineage_id`, **exactly one** version has `status = CURRENT`
-  at any instant. A same-range lease renewal is an **atomic** operation that marks the old version
+An assignment is an immutable versioned object with a stable `lineage_id` shared by all versions of
+one holder-range. **The Stage-1F formulation "exactly one CURRENT per lineage at every instant" is
+replaced by two consistent invariants** (the old form was impossible while a lineage's unique head is
+`PENDING` or `PAUSED`, or after closure):
+
+- **I18a (at-most-one CURRENT).** For each `lineage_id`, `count(versions with status = CURRENT) <= 1`
+  at all observable times. Zero CURRENT versions is LEGAL.
+- **I18b (unique live head).** For each OPEN `lineage_id`, EXACTLY ONE version is a live head in
+  `{PENDING, CURRENT, PAUSED}`; after lineage closure, ZERO live heads exist. A same-range lease
+  renewal is an **atomic** operation linearised at `renewal_time`: it marks the old `CURRENT` version
   `SUPERSEDED` (with `superseded_at`) and publishes a new `CURRENT` version on the SAME range/holder
-  with copied actual/reported/accepted frontiers and provenance; the old version's identity is never
-  mutated in place. Old (`SUPERSEDED`) versions remain immutable and resolvable, so a
-  `SolutionEligibilitySnapshot` taken under an old version resolves to that exact version.
-- **Scope.** Range-lease renewal; assignment versioning; discovery-snapshot resolution. This is an
-  internal structural consistency invariant; it introduces no new consensus feature.
+  with copied actual/reported/accepted frontiers and provenance, in ONE step, so no observer sees two
+  CURRENT versions. The old version's identity is never mutated in place; it stays immutable and
+  resolvable, so a `SolutionEligibilitySnapshot` taken under it resolves to that exact version.
+
+- **Scope.** Range-lease renewal; assignment versioning; discovery-snapshot resolution. Internal
+  structural consistency invariants; they introduce no new consensus feature.
 - **Required inputs.** The assignment version ledger keyed by `(lineage_id, assignment_version)`;
-  per-version `status`; the renewal timestamp.
-- **Enforcement point.** `RenewAssignment` (the atomic supersede-and-publish); `ValidateCandidate`
+  per-version `status`; the `renewal_time`.
+- **Enforcement point.** `RenewAssignment` (atomic supersede-and-publish, SOLE renewal path — G2);
+  `CreatePendingAssignment` (opens ORIGINAL/REASSIGNED fresh lineages, never RENEWED); `ValidateCandidate`
   resolves each snapshot's `(AssignmentID, assignment_version)` to its immutable version.
 - **Planned test stage.** Stage 4 (leases, reassignment, renewal).
-- **Consequence of violation.** Two CURRENT versions in one lineage (ambiguous acceptance target);
-  or a renewal that mutates identity in place, invalidating an already-discovered solution's snapshot
-  and violating E1.
+- **Consequence of violation.** Two CURRENT versions in one lineage (ambiguous acceptance target); a
+  renewal that mutates identity in place (invalidating a discovery snapshot, violating E1/I2); or an
+  impossible "always exactly one CURRENT" requirement that a PENDING/PAUSED head cannot satisfy.
 
 ---
 
@@ -338,7 +353,7 @@ point, planned test stage, and consequence of violation.
 | ID | one-line statement | primary test stage | primary enforcement point |
 |---|---|---|---|
 | I1 | No overlap among valid active assignments | Stage 2 (+4) | assignment / reassignment overlap guard |
-| I2 | Accepted solution lies in signer's valid assignment | Stage 2 (+4/5) | acceptance predicate |
+| I2 | Accepted solution binds to the assignment version eligible at DISCOVERY time (not CURRENT-at-acceptance; G1) | Stage 2 (+4/5) | ValidateCandidate discovery-snapshot predicate |
 | I3 | Accepted solution matches current RoundID/TemplateID | Stage 2 (+4/5) | acceptance + commitment check |
 | I4 | LOW_POWER_LISTEN entry needs one of four triggers, each with a stop_reason | Stage 2 (+4) | listen-transition guard |
 | I5 | Non-negative durations reconcile to horizon T | Stage 2 (+3) | duration reconciliation |
@@ -355,7 +370,8 @@ point, planned test stage, and consequence of violation.
 | I15 | Undefined block-normalised metrics are NA | Stage 8 | metrics computation |
 | I16 | Floor breaches recorded, never silently repaired | Stage 3 (+5/8) | floor eval + recording |
 | I17 | H_active = H_honest + H_adversarial (census-deterministic; recomputed at every ACTIVE_HASHING boundary via ApplyMinerStateTransition, F6); q_adv NA at zero active rate | Stage 3 | central transition hook + active-hash-rate decomposition |
-| I18 | Exactly one CURRENT version per assignment lineage; renewal is atomic supersede-and-publish (F7) | Stage 4 | RenewAssignment / version ledger |
+| I18a | At most one CURRENT version per lineage; zero CURRENT is legal (G2) | Stage 4 | RenewAssignment / version ledger |
+| I18b | Every OPEN lineage has exactly one live head in {PENDING, CURRENT, PAUSED}; zero after closure; renewal atomic at renewal_time (G2) | Stage 4 | RenewAssignment / CreatePendingAssignment |
 
 No invariant above is asserted to hold in any implementation at Stage 1; each is a
 specification target with a planned verification stage.

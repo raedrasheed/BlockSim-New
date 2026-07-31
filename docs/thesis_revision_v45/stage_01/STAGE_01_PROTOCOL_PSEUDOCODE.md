@@ -32,10 +32,12 @@
 
 ---
 
-## 0. Concurrency and discrete-event model (Stage 1F)
+## 0. Concurrency and discrete-event model (Stage 1F, refined in Stage 1G)
 
-Stage-1F makes the concurrency and discrete-event semantics of PoCol explicit. Seven normative
-rules govern the whole specification; every procedure below conforms to them.
+Stage-1F made the concurrency and discrete-event semantics of PoCol explicit; **Stage 1G refines
+them for causal consistency and determinism**. The normative rules below govern the whole
+specification; every procedure conforms to them. Where a Stage-1G rule amends a Stage-1F rule, the
+Stage-1G form is authoritative.
 
 **(0.1) Single-threaded discrete-event loop.** The simulator advances one global discrete-event
 queue. Each event fires at a definite `event_time`; a handler runs to completion without
@@ -64,39 +66,79 @@ not appear in any procedure; a state change is always written `CALL ApplyMinerSt
 `StartWake` (non-blocking) and its scheduled `WakeCompleteEvent`. Miners starting to wake at the
 same instant wake independently on their own completion timestamps; no wake serialises another.
 
-**(0.5) Immutable assignment versions (F7).** An assignment is an immutable versioned object.
-Renewal creates a NEW version and SUPERSEDES the old one; EXACTLY ONE version per lineage is
-`CURRENT`. A `SolutionEligibilitySnapshot` resolves to the exact version that was `CURRENT` at
-discovery, so a solution discovered under an old version stays verifiable after renewal.
+**(0.5) Immutable assignment versions (F7, corrected in G2).** An assignment is an immutable
+versioned object. Renewal creates a NEW version and SUPERSEDES the old one, linearised atomically at
+`renewal_time`. The lineage invariants are **I18a** (`count(status = CURRENT) <= 1` per lineage at
+every observable time) and **I18b** (every OPEN lineage has exactly one live head in
+`{PENDING, CURRENT, PAUSED}`; a CLOSED lineage has zero live heads). ZERO `CURRENT` versions is legal
+while the unique live head is `PENDING` or `PAUSED`, and after closure. A `SolutionEligibilitySnapshot`
+resolves to the exact immutable version that was `CURRENT` at discovery, so a solution discovered
+under an old version stays verifiable after renewal even once that version is `SUPERSEDED` or `PAUSED`.
 
-**(0.6) Active propagation set (F3).** `active_propagation_set` holds every live
-`CandidatePropagationContext`. The round is `SOLUTION_PROPAGATION` iff this set is non-empty OR a
-same-timestamp acceptance batch or a live candidate-specific acceptance event remains. A context is
-"live" while its `status ∈ {DISCOVERED, SELF_VALIDATED, PROPAGATING, PENDING_ACCEPTANCE}`; it
-leaves the set on `FAILED` (candidate-scoped failure) or on round acceptance
-(`ACCEPTED`/`COMPETING`/`STALE`/`CANCELLED`). The predicate
+**(0.5g) Discovery-time acceptance eligibility (G1).** Acceptance binds to the immutable version that
+was VALID and `CURRENT` at the solution's `discovery_time` (invariant **I2**, corrected). The
+assignment need NOT remain `CURRENT` at certificate or block arrival; it may later be `PAUSED` or
+`SUPERSEDED`. No procedure uses "CURRENT at acceptance" semantics.
+
+**(0.6) Active propagation set (F3, refined in G6).** `active_propagation_set` holds exactly the
+contexts whose `status ∈ {PROPAGATING, PENDING_ACCEPTANCE}` — the **propagation-active** contexts.
+`DISCOVERED` and `SELF_VALIDATED` contexts exist but are NOT yet propagation-active (they have not
+been added to the set). A context leaves the set on `FAILED` (candidate-scoped failure) or on round
+acceptance (`ACCEPTED`/`COMPETING`/`STALE`/`CANCELLED`). "A live candidate exists" means a
+propagation-active context exists. The predicate
 
     propagation_quiescent(RoundContext) :=
         active_propagation_set is empty
-        AND no ACCEPTED_CANDIDATE same-timestamp acceptance batch is pending
+        AND acceptance_batch_registry has no pending batch for any acceptance timestamp
         AND no live candidate-specific CertificateArrival / BlockAcceptancePoint event remains
-        AND no block has been accepted this round
+        AND block_accepted flag is false
 
-is the ONLY condition under which `SOLUTION_PROPAGATION → HASHING` is permitted (F3). Failure of one
-candidate removes only that candidate; the round stays `SOLUTION_PROPAGATION` while any other
-candidate is live.
+is the ONLY condition under which the round returns to `HASHING` (from `SOLUTION_PROPAGATION`, or
+from `SECURITY_RECOVERY` once the floor is restored). Failure of one candidate removes only that
+candidate; the round stays in propagation while any other candidate is live. **The round-state and
+the propagation set are NOT identified**: `SECURITY_RECOVERY` may coexist with a non-empty
+`active_propagation_set` (G8), and there is no "iff" forbidding that coexistence.
 
-**(0.7) Global event-priority contract (F8).** Same-timestamp events of different types are
-ordered by the deterministic priority table of `STAGE_01F_EVENT_PRIORITY_TABLE.md`; ties within a
-type break by the event's `(CandidateID, MinerID, AssignmentID, seq)`, NEVER by data-structure
-iteration order. The order is reproducible across reruns.
+**(0.7) Timestamp microphase contract (G5, replacing the F8 priority sequence).** At each
+`event_time` the loop processes events in explicit **microphases** (full contract in
+`STAGE_01G_EVENT_MICROPHASE_SPEC.md`): PHASE 1 terminal abort / previously-committed closure; PHASE 2
+template invalidation/refresh; PHASE 3 collect ALL full-block arrivals at this timestamp into
+`acceptance_batch_registry` (each `BlockAcceptancePoint` only REGISTERS and returns); PHASE 4 run
+`AcceptanceBatchFinalize` exactly once per (timestamp, acceptance point) — validate all collected
+candidates, select a winner, commit acceptance and close the round ATOMICALLY; PHASE 5 security-floor
+evaluation (with the terminal-round guard, G10); PHASE 6+ certificate arrivals, solution-discovery,
+range completion, reported exhaustion, lease expiry, wake completion, resume, periodic monitoring.
+Round-acceptance closure is NOT an independent event that precedes arbitration — it is the atomic
+result of `AcceptanceBatchFinalize`. Within a microphase, ties break by the deterministic key
+`(CandidateID, MinerID, AssignmentID, seq)` (G7), NEVER by data-structure iteration order.
+
+**(0.7a) Deterministic identifiers and iteration (G7).** `CandidateID` and `PropagationID` are
+DETERMINISTIC, not random: `CandidateID = (RoundID, candidate_discovery_seq)` and
+`PropagationID = (CandidateID, propagation_attempt_seq)`, where the seqs are monotonic per-scope
+counters advanced in deterministic order. Every loop that creates, cancels, or schedules events
+iterates in a STABLE sorted order over intrinsic keys (`MinerID`, `CandidateID`, `AssignmentID`,
+`assignment_version`); the event-envelope `seq` is assigned ONLY after that deterministic order is
+established. The resulting queue order is independent of any hash-map / set iteration order and is
+identical across reruns with the same seeds and inputs.
+
+**(0.7b) Event-scheduled hashing (G9).** Hashing is modeled by discrete `HashWorkEvent`s
+(`StartHashing` / `HashWorkEvent` / `ScheduleNextHashWork`), NOT by a blocking `WHILE` loop. Each
+`HashWorkEvent` evaluates one candidate position or one explicitly bounded chunk, accounts residency
+by elapsed event time, may emit a candidate or range-completion event, then schedules the next
+`HashWorkEvent` and returns to the loop. A pending `HashWorkEvent` becomes a no-op (or is cancelled)
+once its miner is no longer `ACTIVE_HASHING` or its exact assignment version is no longer `CURRENT`.
+
+**(0.7c) Terminal-round security guard (G10).** `SecurityFloorEvaluate` is always SCHEDULED (never
+called inline) and carries `(RoundID, TemplateID, state_version)`. It returns `stale_noop` — never
+transitioning to `SECURITY_RECOVERY` — when the round is already `ROUND_ACCEPTED`/`ROUND_ABORTED` or
+the evaluation belongs to a stale `RoundID`/`TemplateID`/`state_version`.
 
 ### 0.8 Core data model (Stage 1F)
 
 ```
 STRUCTURE CandidatePropagationContext (CPC)   # F1: one per discovered candidate solution; immutable identity
-  CandidateID                 : fresh globally-unique id (immutable)
-  PropagationID               : fresh globally-unique id (immutable)
+  CandidateID                 : DETERMINISTIC id = (RoundID, candidate_discovery_seq)   # G7, immutable
+  PropagationID               : DETERMINISTIC id = (CandidateID, propagation_attempt_seq)  # G7, immutable
   RoundID, TemplateID
   certificate                 : signed early-stop certificate (EarlyStopGenerate)
   snapshot                    : SolutionEligibilitySnapshot (immutable, discovery-time)
@@ -104,15 +146,27 @@ STRUCTURE CandidatePropagationContext (CPC)   # F1: one per discovered candidate
   discovery_time
   certificate_arrival_events  : set of scheduled per-recipient events (each carries CandidateID/PropagationID)
   block_arrival_event         : the scheduled BlockAcceptancePoint event (carries CandidateID/PropagationID)
-  acceptance_timestamp        : set when a block-arrival with outcome ACCEPTED_CANDIDATE fires (else null)
+  acceptance_timestamp        : set when a block-arrival with outcome ACCEPTED_CANDIDATE registers (else null)
   status                      : one of the candidate statuses below
   failure_reason              : one of {REJECTED, BLOCK_UNAVAILABLE, PROPAGATION_TIMEOUT, NO_VALID_CANDIDATE} or null
 
-# F1 candidate status enum (mutually exclusive):
-#   DISCOVERED -> SELF_VALIDATED -> PROPAGATING -> PENDING_ACCEPTANCE -> {ACCEPTED | FAILED}
-#   plus, set by another candidate's acceptance: COMPETING, STALE, CANCELLED
+# candidate status enum (mutually exclusive). Every status is REACHABLE (G6):
+#   CreatePropagationContext -> DISCOVERED
+#   after SelfValidateFoundSolution ok -> SELF_VALIDATED
+#   added to active_propagation_set + events scheduled -> PROPAGATING
+#   block-arrival registered at the acceptance point -> PENDING_ACCEPTANCE
+#   AcceptanceBatchFinalize winner -> ACCEPTED ; candidate-scoped failure -> FAILED
+#   other live contexts on another candidate's acceptance -> COMPETING / STALE / CANCELLED
 CANDIDATE_STATUS in {DISCOVERED, SELF_VALIDATED, PROPAGATING, PENDING_ACCEPTANCE,
                      FAILED, ACCEPTED, COMPETING, STALE, CANCELLED}
+# active_propagation_set membership (G6) = { cpc : status(cpc) in {PROPAGATING, PENDING_ACCEPTANCE} }
+
+STRUCTURE RoundContext registries (initialised by RoundInitialise, cleared on closure; G8)
+  active_propagation_set      : set of propagation-active CPCs (status PROPAGATING/PENDING_ACCEPTANCE)
+  acceptance_batch_registry   : map (acceptance_timestamp, acceptance_point) -> list of registered block arrivals
+  candidate_discovery_seq     : monotonic per-round counter for CandidateID (G7)
+  block_accepted              : boolean flag, false until a block is accepted this round
+  state_version               : monotonic round-state epoch, bumped on every round-state transition (G10)
 
 STRUCTURE Assignment (immutable version object)   # F7: renewal makes a NEW version; never mutate in place
   AssignmentID                : identity of THIS version (immutable once created)
@@ -132,7 +186,13 @@ STRUCTURE Assignment (immutable version object)   # F7: renewal makes a NEW vers
   pause_cause_propagation_id  : the matching PropagationID (or null)
   retained_actual_frontier    : the frontier retained at pause (or null)
 
-INVARIANT (F7): for each lineage_id, EXACTLY ONE version has status = CURRENT at any instant.
+# G2 lineage invariants (replacing the impossible "exactly one CURRENT at every instant"):
+INVARIANT I18a: for each lineage_id, count(versions with status = CURRENT) <= 1 at all observable times.
+INVARIANT I18b: for each OPEN lineage_id, EXACTLY ONE live head exists in {PENDING, CURRENT, PAUSED};
+                after lineage closure, ZERO live heads exist. Same-range renewal is atomic and
+                linearised at renewal_time: old CURRENT -> SUPERSEDED and new -> CURRENT in one step,
+                so no observer sees two CURRENT versions. ZERO CURRENT is legal while the unique live
+                head is PENDING or PAUSED, and after closure.
 ```
 
 ### 0.9 Central miner-state transition hook (F6)
@@ -203,26 +263,50 @@ PROCEDURE WakeCompleteEvent
       # validate the bound PENDING (or resumed PAUSED) assignment before hashing.
       VALIDATE target_assignment against I1, current RoundID, committed TemplateID   # re-checks I1/I10/I3
       # WAKING -> ACTIVE_HASHING (T5); the edge activates PENDING -> CURRENT for a fresh assignment,
-      # or restores a resumed PAUSED assignment to CURRENT from its retained actual_frontier.
+      # or restores a resumed PAUSED assignment to CURRENT from its retained actual_frontier (I18b: the
+      # unique live head becomes CURRENT again).
       CALL ApplyMinerStateTransition(MinerID, WAKING, ACTIVE_HASHING, now, reason = ramp_complete,
                                      assignment_ref = target_assignment, candidate_ref = null)   # F6 (activates status, recomputes I17)
-      # begin (or resume) hashing from the assignment's frontier; identical for a fresh or resumed range.
-      RETURN CALL ActiveHashing(RoundContext, target_assignment, step_budget)
-      # activation_record is recorded by ApplyMinerStateTransition above
+      # G9: begin EVENT-SCHEDULED hashing (NOT a blocking loop); identical for a fresh or resumed range.
+      RETURN CALL StartHashing(RoundContext, MinerID, target_assignment)
     ELSE:
-      RECORD reserve_wake_failure(MinerID)
+      # G4: STATUS-AWARE wake failure. Move the miner OFFLINE via the hook, then branch on the target
+      #     assignment's status; a PAUSED resume failure MUST NOT use the PENDING-only "whole range
+      #     inactive" rule.
+      RECORD wake_failure(MinerID, target_assignment, status = status(target_assignment))
       CALL ApplyMinerStateTransition(MinerID, WAKING, OFFLINE, now, reason = wake_deadline_expiry,
                                      assignment_ref = target_assignment, candidate_ref = null)   # T12
-      # E4/F5: never leave a bound-but-un-activated range as if held; release it cleanly.
-      MARK range(target_assignment) as inactive_unsearched / reassignable   # supports I8a (unsearched only)
-      SET custody_status(target_assignment) <- abandoned
-      CLOSE target_assignment as not-activated (status PENDING -> CLOSED)   # no CURRENT assignment recorded
+      SWITCH status(target_assignment):
+
+        CASE PENDING:                                          # (A) failed activation of a fresh/reassigned PENDING
+          PRESERVE accepted searched prefix [range_start, accepted_frontier]   # preserve accepted coverage
+          IF accepted_frontier(range) = range_end:      SET reassignable <- none
+          ELSE IF no accepted positions exist:          SET reassignable <- whole range
+          ELSE:                                         SET reassignable <- [accepted_frontier + 1, range_end]
+          IF reassignable != none: MARK reassignable as inactive_unsearched / reassignable   # I8a (unsearched only)
+          SET custody_status(target_assignment) <- abandoned
+          CLOSE target_assignment (status PENDING -> CLOSED)   # no CURRENT recorded; ORIGINAL/REASSIGNED provenance kept
+          RECORD wake_failure_energy_and_provenance(MinerID, target_assignment, origin = assignment_origin(target_assignment))
+
+        CASE PAUSED:                                           # (B) failed RESUME of a PAUSED (PATH-B) assignment
+          # preserve ALL three frontiers; do NOT label the whole range inactive_unsearched.
+          PRESERVE actual_frontier, reported_frontier, accepted_frontier of target_assignment
+          IF no accepted positions exist:  SET reassignable <- whole range
+          ELSE:                            SET reassignable <- [accepted_frontier + 1, range_end]   # SUFFIX only
+          MARK reassignable as inactive_unsearched / reassignable
+          # explicit disposition: abandoned under resume_wake_failed -- NOT a PENDING-only PAUSED->CLOSED.
+          SET custody_status(target_assignment) <- abandoned
+          CLOSE/ABANDON target_assignment (status PAUSED -> CLOSED, disposition = resume_wake_failed)
+          CLEAR pause_cause_candidate_id(target_assignment), pause_cause_propagation_id(target_assignment),
+                retained_actual_frontier(target_assignment)    # candidate pause fields cleared (G4/G11)
+          RECORD wake_failure_energy_and_provenance(MinerID, target_assignment, resumed = true)
+
       RETURN activation_failure
   RETURNS: activation_record | activation_failure
-  NOTE: Three miners that call StartWake at the same timestamp schedule three independent
-        WakeCompleteEvents at three (generally different) completion timestamps; they never wake
-        serially inside one handler (F5). The former synchronous WakeComplete is replaced by this
-        pair; no procedure performs a blocking wake.
+  NOTE: G4: the PENDING and PAUSED wake-failure paths differ -- a PAUSED resume failure preserves the
+        three frontiers and reassigns ONLY the accepted unsearched suffix, never the whole range under
+        the PENDING-only rule, and clears the candidate pause fields. G9: on success the miner begins
+        event-scheduled hashing via StartHashing (no blocking loop). Concurrent wakes stay independent (F5).
 ```
 
 ### 0.11 Shared pending-assignment constructor (F4)
@@ -230,18 +314,24 @@ PROCEDURE WakeCompleteEvent
 ```
 PROCEDURE CreatePendingAssignment
   INPUTS: RoundContext, MinerID, range, assignment_origin, source_assignment, reason
-  PRECONDITIONS: assignment_origin in {ORIGINAL, RENEWED, REASSIGNED};
+  PRECONDITIONS: assignment_origin in {ORIGINAL, REASSIGNED};        # G2: RENEWED removed from this constructor
                  range disjoint from all valid active assignments (I1);
                  custody_status(range) != completed AND coverage_state(range) != searched
   EFFECTS:
-    # F4: the SINGLE constructor used by RangeAssign, ReserveActivate, RangeReassign, TemplateRefresh.
-    #     It sets provenance CORRECTLY from assignment_origin -- a reassignable suffix is NEVER
-    #     labelled ORIGINAL.
-    SET new_lineage <- (assignment_origin = REASSIGNED ? lineage_id(source_assignment) : fresh lineage_id)
+    # F4/G2: the SINGLE PENDING constructor used by RangeAssign, ReserveActivate, RangeReassign,
+    #        TemplateRefresh. It sets provenance CORRECTLY from assignment_origin -- a reassignable
+    #        suffix is NEVER labelled ORIGINAL. RENEWAL is NOT handled here: RenewAssignment (F7/G2) is
+    #        the SOLE renewal path and reuses the SOURCE lineage_id; this constructor never renews and
+    #        never reuses a lineage for RENEWED.
+    # G2/I18b: ORIGINAL and REASSIGNED both open a FRESH lineage (version 1). A reassignment to a
+    #          different holder/sub-range is a NEW lineage linked to its source only by
+    #          previous_assignment_reference (cross-lineage I9 provenance) -- it is NOT a new version of
+    #          the source lineage, so no lineage ever holds two live heads. In-lineage continuity is
+    #          RENEWAL only, and RenewAssignment (F7) is the sole path for that.
     CREATE assignment version A WITH
         AssignmentID       = fresh id
-        assignment_version = (assignment_origin = REASSIGNED ? version(source_assignment)+1 : 1)
-        lineage_id         = new_lineage
+        assignment_version = 1
+        lineage_id         = fresh lineage_id
         MinerID, range, RoundID, TemplateID
         status             = PENDING
         assignment_origin  = assignment_origin
@@ -252,19 +342,16 @@ PROCEDURE CreatePendingAssignment
       CASE REASSIGNED:
         ASSERT source_assignment is not null AND reason is a permitted reassignment reason
         SET custody_status(range)                <- reassigned
-        SET previous_assignment_reference(A)     <- AssignmentID(source_assignment)
+        SET previous_assignment_reference(A)     <- AssignmentID(source_assignment)   # cross-lineage provenance
         SET prior_pc <- last accepted ProgressCommit covering range(source_assignment)    # I13 de-dup key
         APPEND provenance(A) <- reassignment_record(range, from = source_assignment, reason,
                                                      timestamp = now, prior_pc)          # I9 complete provenance
-      CASE RENEWED:
-        SET custody_status(range)                <- renewed
-        SET previous_assignment_reference(A)     <- AssignmentID(source_assignment)
-        COPY actual/reported/accepted frontiers AND provenance FROM source_assignment    # F7 continuity
     APPEND A to assignment_ledger                                        # supports I8a
   RETURNS: A
-  NOTE: ORIGINAL is used ONLY for a fresh never-assigned range; a previously-assigned unsearched
-        suffix MUST use REASSIGNED with full I9 provenance (F4). RENEWED is used by RenewAssignment
-        (F7) and copies the lineage's coverage forward.
+  NOTE: G2: only ORIGINAL (fresh never-assigned range) and REASSIGNED (accepted unsearched suffix,
+        fresh lineage + full I9 provenance) are constructed here. Same-range RENEWAL is performed
+        EXCLUSIVELY by RenewAssignment (F7), which creates the new CURRENT version on the SOURCE
+        lineage; RENEWED is never a case here and can never create a fresh lineage.
 ```
 
 ---
@@ -283,9 +370,19 @@ PROCEDURE RoundInitialise
     INITIALISE reassignment_log  <- empty           # supports I9
     INITIALISE energy_ledger     <- empty           # supports I5, I6, I7
     INITIALISE floor_state       <- config.floor parameters
-    TRANSITION round_state -> ROUND_INITIALISING
+    # G8: initialise the propagation/acceptance registries and counters used across the round.
+    INITIALISE active_propagation_set    <- empty
+    INITIALISE acceptance_batch_registry <- empty
+    SET        candidate_discovery_seq   <- 0        # G7: deterministic CandidateID counter
+    SET        block_accepted            <- false
+    SET        state_version             <- 0        # G10: round-state epoch
+    TRANSITION round_state -> ROUND_INITIALISING     # each round-state change bumps state_version (G10)
     TRANSITION round_state -> TEMPLATE_COMMITMENT
-  RETURNS: RoundContext(RoundID, D, nonce_domain, ledgers)
+  RETURNS: RoundContext(RoundID, D, nonce_domain, ledgers,
+                        active_propagation_set, acceptance_batch_registry,
+                        candidate_discovery_seq, block_accepted, state_version)
+  NOTE: G10: every `TRANSITION round_state -> S` in this document also bumps `state_version` (a round
+        epoch); `SecurityFloorEvaluate` carries the epoch to reject stale evaluations.
 ```
 
 ## 2. Template commitment
@@ -351,56 +448,77 @@ PROCEDURE RangeAssign
         event loop immediately; the miner reaches ACTIVE_HASHING at its own wake-completion event (F5).
 ```
 
-## 5. Active hashing
+## 5. Active hashing (event-scheduled, G9)
+
+Hashing is modeled by a chain of discrete `HashWorkEvent`s (G9), NOT by a blocking `WHILE` loop.
+`StartHashing` schedules the first unit; each `HashWorkEvent` evaluates one bounded unit, may emit a
+candidate or range-completion event, then schedules the next unit and returns to the event loop, so
+other miners' events (and certificate arrivals) interleave. A pending unit becomes a no-op once its
+miner is no longer `ACTIVE_HASHING` or its exact assignment version is no longer `CURRENT`.
 
 ```
-PROCEDURE ActiveHashing
-  INPUTS: RoundContext, assignment, step_budget
-  PRECONDITIONS: miner_state = ACTIVE_HASHING; assignment VALID and CURRENT;
-                 # E6: hashing is permitted while the round is HASHING, and it CONTINUES for
-                 #     not-yet-paused miners during SOLUTION_PROPAGATION and SECURITY_RECOVERY.
-                 round_state in {HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY}
+PROCEDURE StartHashing
+  INPUTS: RoundContext, MinerID, assignment
+  PRECONDITIONS: miner_state(MinerID) = ACTIVE_HASHING; assignment VALID and CURRENT
   EFFECTS:
-    SET cursor <- next unsearched nonce in range(assignment)
-    # E6: an unpaused miner keeps hashing after the FIRST valid found-solution moves the round to
-    #     SOLUTION_PROPAGATION; it stops only when it pauses (PATH B), exhausts (PATH A), the round
-    #     closes, or its step budget is spent.
-    WHILE cursor within range(assignment)
-          AND round_state in {HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY}
-          AND step_budget > 0:
-      # ---- deterministic protocol logic ----
-      ASSERT cursor in range(assignment)                       # supports I2 at submission time
-      # ---- [SIMULATION SAMPLING] ----
-      # Whether this modeled execution meets the fixed target D is drawn from the simulation
-      # model; it replaces real hashing. It is the ONLY randomness in this procedure.
-      hit <- [SIMULATION SAMPLING] Bernoulli(target_hit_probability(D))
-      # ---- deterministic protocol logic ----
-      ACCUMULATE t_hash for miner over this step               # supports I5, I6
-      CONTRIBUTE this step to active hash rate                 # only ACTIVE_HASHING contributes
-      IF hit:
-        # A valid candidate solution satisfying the fixed target D was found (active-hashing path).
-        candidate_hash <- modeled digest of TemplateID and cursor    # deterministic protocol logic
-        candidate_solution <- (RoundID, TemplateID, AssignmentID(assignment), MinerID,
-                               cursor AS nonce, candidate_hash, D AS target)
-        # CR1: an early-stop certificate is generated ONLY here, from a found valid solution --
-        #      NEVER from aggregated progress commitments, searched coverage, or claimed exhaustion.
-        # E1: capture an IMMUTABLE eligibility snapshot at DISCOVERY time (assignment CURRENT now).
-        snapshot <- CALL CreateSolutionEligibilitySnapshot(RoundContext, assignment, candidate_solution)
-        # CR1/E2: the SIGNED early-stop certificate is generated ONLY here, from the found solution
-        #         and its snapshot -- NEVER from coverage/frontier/claimed exhaustion.
-        certificate <- CALL EarlyStopGenerate(RoundContext, candidate_solution, snapshot)
-        # C6: do NOT accept the block here; acceptance occurs later ONLY at the modeled acceptance
-        #     point. E6: entry to SOLUTION_PROPAGATION happens in ScheduleSolutionPropagation.
-        RETURN CALL ScheduleSolutionPropagation(RoundContext, certificate, snapshot, finder = MinerID)
-      ADVANCE cursor
-      DECREMENT step_budget
-      PERIODICALLY CALL ProgressCommit(assignment, cursor)     # emits progress evidence
+    # G9: begin EVENT-SCHEDULED hashing; do NOT loop. Schedule the first unit and return.
+    CALL ScheduleNextHashWork(RoundContext, MinerID, assignment,
+                              from_cursor = next unsearched nonce in range(assignment))
+  RETURNS: hashing_started
+
+PROCEDURE ScheduleNextHashWork
+  INPUTS: RoundContext, MinerID, assignment, from_cursor
+  PRECONDITIONS: none
+  EFFECTS:
+    # G9: schedule ONE bounded unit of hash work as a discrete event carrying the exact identity keys.
+    SCHEDULE event HashWorkEvent(RoundContext, MinerID, AssignmentID(assignment),
+                                 assignment_version(assignment), RoundID, TemplateID, from_cursor)
+             AT now + modeled_hash_step_time
+  RETURNS: scheduled
+
+PROCEDURE HashWorkEvent
+  INPUTS: RoundContext, MinerID, AssignmentID, assignment_version, RoundID, TemplateID, cursor
+  PRECONDITIONS: this is the scheduled hash-work unit for MinerID (envelope carries the identity keys)
+  EFFECTS:
+    SET assignment <- version(AssignmentID, assignment_version)
+    # G9: STALE/CANCELLED-WORK GUARD -- a no-op once the miner is not ACTIVE_HASHING or the EXACT
+    #     version is not CURRENT, or the round/template changed, or the round left a hashing-capable
+    #     state (covers pause / exhaustion / revocation / offline / disqualification / template refresh
+    #     / round closure). Pending units for a stopped miner therefore self-cancel.
+    IF miner_state(MinerID) != ACTIVE_HASHING
+       OR status(assignment) != CURRENT
+       OR RoundID != RoundID_current OR TemplateID != TemplateID_committed
+       OR round_state not in {HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY}:   # E6/G8 hashing-capable states
+      RETURN hash_work_noop
+    ASSERT cursor in range(assignment)                          # supports I2 at submission time
+    ACCUMULATE t_hash for MinerID over the elapsed event time since its last hash boundary   # I5, I6
+    # ---- [SIMULATION SAMPLING] ----
+    hit <- [SIMULATION SAMPLING] Bernoulli(target_hit_probability(D))    # one modeled position/chunk
+    # ---- deterministic protocol logic ----
+    IF hit:
+      candidate_hash <- modeled digest of TemplateID and cursor
+      candidate_solution <- (RoundID, TemplateID, AssignmentID, MinerID, cursor AS nonce, candidate_hash, D AS target)
+      # E1: IMMUTABLE discovery snapshot at DISCOVERY time (this version is CURRENT now). CR1/E2: the
+      #     SIGNED certificate is generated ONLY here, never from coverage/frontier/claimed exhaustion.
+      snapshot <- CALL CreateSolutionEligibilitySnapshot(RoundContext, assignment, candidate_solution)
+      certificate <- CALL EarlyStopGenerate(RoundContext, candidate_solution, snapshot)
+      # C6/E6: acceptance occurs later ONLY at the modeled acceptance point; the finder PAUSES here, so
+      #        no further HashWorkEvent is scheduled for it (its next unit, if any, no-ops).
+      RETURN CALL ScheduleSolutionPropagation(RoundContext, certificate, snapshot, finder = MinerID)
+    ADVANCE cursor
+    PERIODICALLY CALL ProgressCommit(assignment, cursor)        # emits progress evidence
     IF cursor beyond range(assignment):
-      # D3: actual completion -> record ground truth, then the reported claim, then adjudicate.
+      # D3: actual completion -> ground truth, reported claim, adjudicate.
       CALL ActualRangeCompletion(RoundContext, assignment)
       CALL ReportedExhaustionClaim(RoundContext, assignment, MinerID)
       RETURN CALL ExhaustionAdjudicate(RoundContext, assignment, MinerID, mode)
-  RETURNS: continuation marker (solution | exhausted | preempted)
+    # G9: schedule the NEXT unit and return to the loop (non-blocking; other miners/events interleave).
+    RETURN CALL ScheduleNextHashWork(RoundContext, MinerID, assignment, from_cursor = cursor)
+  RETURNS: hash_work_result (solution | exhausted | continued | noop)
+  NOTE: G9: hashing is a chain of discrete units, so a certificate-arrival (or any event) scheduled
+        between two units is processed in queue order -- no blocking loop delays it (TV48). Multiple
+        miners hash through independently scheduled units, never through nested blocking calls from
+        WakeCompleteEvent. Only ACTIVE_HASHING contributes to the active hash rate.
 ```
 
 ## 6. Range exhaustion (D3: three separate procedures)
@@ -548,39 +666,74 @@ PROCEDURE ActiveHashRateUpdate
   INPUTS: RoundContext, time t
   PRECONDITIONS: none
   EFFECTS:
-    # ---- [SIMULATION SAMPLING] ----
-    # CR-B6: the adversarial-behavior model decides WHICH adversarial miners continue in
-    # ACTIVE_HASHING at t. This draw sets miner STATES only -- it does NOT produce a hash-rate
-    # total. It is the ONLY randomness in this procedure.
-    adversarial_active_set <- [SIMULATION SAMPLING] adversarial_participation_model(t)
-    APPLY adversarial_active_set to the ACTIVE_HASHING census   # which adversarial miners are active at t
-    # ---- deterministic protocol logic ----
-    # CR-B6: after states are fixed, all three quantities are computed DETERMINISTICALLY from the
-    # active-state census. H_adversarial is NEVER sampled independently after H_active (I17).
-    SET H_honest(t)      <- SUM over honest miners in ACTIVE_HASHING of their modeled hash rate
-    SET H_adversarial(t) <- SUM over adversarial miners in ACTIVE_HASHING of their modeled hash rate
+    # G3: COMPUTE-ONLY. It READS the current miner-state census and records the rates. It has NO
+    #     [SIMULATION SAMPLING] step. It MUST NOT (a) apply a sampled adversarial active set directly
+    #     to miner states, (b) alter the ACTIVE_HASHING census without a state transition, or (c) add
+    #     or remove a miner from H_active independently of miner_state. Every membership change is made
+    #     by ApplyMinerStateTransition (F6) -- for adversarial miners via scheduled
+    #     AdversarialParticipationChangeEvents (§8a), for honest miners via the ordinary transitions.
+    SET H_honest(t)      <- SUM over honest miners currently in ACTIVE_HASHING of their modeled hash rate
+    SET H_adversarial(t) <- SUM over adversarial miners currently in ACTIVE_HASHING of their modeled hash rate
     SET H_active(t)      <- H_honest(t) + H_adversarial(t)      # exact census decomposition (I17)
-    IF H_active(t) = 0:
-      SET q_adv(t) <- NA                                        # I17: undefined at zero active hash rate
-      # C7: ActiveHashRateUpdate does NOT record breaches or trigger recovery -- it only computes.
-      #     SecurityFloorEvaluate alone records the active/honest-floor breaches when H_active = 0.
-    ELSE:
-      SET q_adv(t) <- H_adversarial(t) / H_active(t)
-    RECORD (H_active(t), H_honest(t), H_adversarial(t), q_adv(t))   # values only; no breach/recovery here
+    IF H_active(t) = 0: SET q_adv(t) <- NA                      # I17: undefined at zero active hash rate
+    ELSE:               SET q_adv(t) <- H_adversarial(t) / H_active(t)
+    RECORD (H_active(t), H_honest(t), H_adversarial(t), q_adv(t))   # values only; no state change, no breach
   RETURNS: (H_active(t), H_honest(t), H_adversarial(t), q_adv(t))
-  NOTE: Only ACTIVE_HASHING contributes to active hash rate; LOW_POWER_LISTEN, WAKING,
-        RESERVE, OFFLINE contribute nothing to it. The simulation draws only WHICH adversarial
-        miners are active; H_honest(t), H_adversarial(t), and H_active(t) then follow
-        deterministically from the census (I17).
+  NOTE: G3: read-only re-derivation of the I17 identity at t. The same identity is also recomputed by
+        the hook at every ACTIVE_HASHING boundary (F6); this procedure is a periodic snapshot, not a
+        writer. Only ACTIVE_HASHING contributes; other states contribute nothing.
+```
+
+## 8a. Adversarial participation change (G3)
+
+```
+PROCEDURE AdversarialParticipationChangeEvent
+  INPUTS: RoundContext, MinerID, direction   # direction in {enter, exit}
+  PRECONDITIONS: this is a scheduled event emitted by the adversarial-participation model for one
+                 adversarial-classified MinerID (the model's [SIMULATION SAMPLING] draw is WHEN/WHICH
+                 adversarial miner changes participation -- see the sampling summary)
+  EFFECTS:
+    # G3: the ONLY carrier of a modeled adversarial participation change. It changes miner_state ONLY
+    #     through the hook, so residency, transition energy, the H_active/H_honest/H_adversarial
+    #     recompute, I17, and the scheduled SecurityFloorEvaluate all happen exactly once (F6).
+    IF direction = exit AND miner_state(MinerID) = ACTIVE_HASHING:
+      # a modeled adversarial withdrawal leaves the active census via the legal departure edge (T11).
+      CALL ApplyMinerStateTransition(MinerID, ACTIVE_HASHING, OFFLINE, now,
+             reason = adversarial_withdrawal, assignment_ref = current_assignment(MinerID),
+             candidate_ref = null)                              # T11
+      RELEASE the miner's assignment for reclamation (only the accepted unsearched suffix is reassignable, C4)
+    ELSE IF direction = enter AND miner_state(MinerID) in {OFFLINE, RESERVE, REGISTERED, LOW_POWER_LISTEN}:
+      # a modeled adversarial (re)entry activates through the NORMAL path; it reaches ACTIVE_HASHING
+      # only at its WakeCompleteEvent (F5) -- never a direct census add.
+      IF miner_state(MinerID) = OFFLINE:
+        CALL ApplyMinerStateTransition(MinerID, OFFLINE, REGISTERED, now, reason = adversarial_rejoin,
+               assignment_ref = null, candidate_ref = null)     # T17
+      CALL RangeAssign(RoundContext, MinerID, requested_size = modeled, lease_duration = default_lease_duration)
+    ELSE:
+      RETURN no_change                                          # already in the target participation state
+  RETURNS: participation_change_record
+  NOTE: G3: the adversarial-participation SAMPLING is entirely in the SCHEDULING of these events (the
+        model draws each miner's enter/exit times); the STATE CHANGE is deterministic and routes
+        through the hook. ActiveHashRateUpdate never mutates the census (C7 preserved: floor breaches
+        are still recorded only by SecurityFloorEvaluate, which the hook schedules at the boundary).
 ```
 
 ## 9. Security-floor evaluation
 
 ```
 PROCEDURE SecurityFloorEvaluate
-  INPUTS: RoundContext, (H_active(t), H_honest(t), q_adv(t)), floor_state
-  PRECONDITIONS: none
+  INPUTS: RoundContext, event_RoundID, event_TemplateID, event_state_version,
+          (H_active(t), H_honest(t), q_adv(t)), floor_state
+  PRECONDITIONS: this is a SCHEDULED evaluation (never called inline, G10); it carries the
+                 (RoundID, TemplateID, state_version) of the boundary that scheduled it
   EFFECTS:
+    # G10: TERMINAL-ROUND / STALE GUARD. Never transition a terminal round to SECURITY_RECOVERY, and
+    #      never act on a stale round/template/epoch.
+    IF round_state in {ROUND_ACCEPTED, ROUND_ABORTED}
+       OR event_RoundID != RoundID_current
+       OR event_TemplateID != TemplateID_committed
+       OR event_state_version != state_version_current:
+      RETURN stale_noop                                         # G10: no breach recorded, no transition
     breach <- FALSE
     # C7: this procedure ALONE records breaches and triggers recovery. RECORD_ONCE suppresses
     #     duplicate breach records for the same (event, threshold, t).
@@ -600,13 +753,16 @@ PROCEDURE SecurityFloorEvaluate
       IF q_adv(t) != NA AND q_adv(t) > floor_state.q_adv_threshold:
         RECORD_ONCE breach_event(adversarial_share, t)        # I16
         breach <- TRUE
-    IF breach:
+    IF breach AND round_state not in {ROUND_ACCEPTED, ROUND_ABORTED}:
+      # G8: SECURITY_RECOVERY may be entered from HASHING or SOLUTION_PROPAGATION and PRESERVES any
+      #     live propagation contexts; block arrivals/arbitration remain processable during recovery.
       TRANSITION round_state -> SECURITY_RECOVERY
-  RETURNS: breach
-  NOTE: I17 (`H_active = H_honest + H_adversarial`) holds exactly at every event-update time.
-        ActiveHashRateUpdate computes the quantities only; this procedure is the SOLE owner of
-        breach recording and recovery. `q_adv = NA` is never numerically compared. Recovery
-        actions are logged separately and never overwrite breach_event records (I16).
+  RETURNS: breach | stale_noop
+  NOTE: G10: SecurityFloorEvaluate is always SCHEDULED (per §0.7 microphase 5), never inlined, and
+        rejects stale/terminal evaluations. I17 holds exactly at every boundary. ActiveHashRateUpdate
+        computes the quantities only; this procedure is the SOLE owner of breach recording and
+        recovery. `q_adv = NA` is never numerically compared; recovery logs never overwrite breach
+        records (I16). Entering SECURITY_RECOVERY does NOT cancel live candidates (G8).
 ```
 
 ## 10. Reserve activation
@@ -887,16 +1043,19 @@ PROCEDURE EarlyStopVerify
 
 ```
 PROCEDURE ResumeFromPause
-  INPUTS: RoundContext, MinerID, trigger, pause_cause_candidate_id
+  INPUTS: RoundContext, MinerID, trigger, pause_cause_candidate_id, pause_cause_propagation_id
   PRECONDITIONS: miner_state(MinerID) = LOW_POWER_LISTEN with entry_stop_reason = VALID_SOLUTION_VERIFIED;
                  trigger in {REJECTED, BLOCK_UNAVAILABLE, PROPAGATION_TIMEOUT, NO_VALID_CANDIDATE};
-                 # F2: resume ONLY because THIS miner's pause cause failed.
-                 pause_cause_candidate_id(paused_assignment(MinerID)) = pause_cause_candidate_id;
+                 # F2/G11: resume ONLY because THIS miner's pause cause failed -- match BOTH ids.
+                 pause_cause_candidate_id(paused_assignment(MinerID))   = pause_cause_candidate_id
+                 AND pause_cause_propagation_id(paused_assignment(MinerID)) = pause_cause_propagation_id;
                  the miner's assignment is PAUSED (retained_actual_frontier retained), NOT searched/exhausted
   EFFECTS:
-    # CR-B1/F2: a paused PATH B assignment resumes because the SPECIFIC candidate that paused it
-    # failed; it was never marked searched or completed, so no coverage was falsely credited.
+    # CR-B1/F2/G11: a paused PATH B assignment resumes because the SPECIFIC candidate (matched on BOTH
+    # CandidateID and PropagationID) that paused it failed; it was never marked searched or completed.
     SET paused_assignment <- the miner's PAUSED assignment (paused_assignment_id)
+    # G11: a resume MUST NOT fire for a miner paused by a different propagation context; the two-id
+    #      precondition above guarantees this.
     # F2: the miner is no longer paused by any candidate.
     CLEAR pause_cause_candidate_id(paused_assignment), pause_cause_propagation_id(paused_assignment)
     # F5/F6/D5: resume passes through WAKING via the NON-BLOCKING StartWake (T30). The paused
@@ -933,16 +1092,18 @@ PROCEDURE SelfValidateFoundSolution
 ```
 PROCEDURE CreatePropagationContext
   INPUTS: RoundContext, certificate, snapshot, finder
-  PRECONDITIONS: certificate self-validated (SelfValidateFoundSolution ok)
+  PRECONDITIONS: called at solution discovery, BEFORE self-validation (G6: DISCOVERED is reachable)
   EFFECTS:
-    # F1: mint IMMUTABLE unique identifiers and build the candidate's propagation context.
-    SET CandidateID   <- fresh globally-unique id (immutable)
-    SET PropagationID <- fresh globally-unique id (immutable)
+    # G7: mint DETERMINISTIC immutable identifiers (never random UUIDs).
+    SET candidate_discovery_seq <- candidate_discovery_seq + 1        # per-round monotonic (RoundContext)
+    SET CandidateID   <- (RoundID, candidate_discovery_seq)           # G7 deterministic
+    SET PropagationID <- (CandidateID, propagation_attempt_seq = 1)   # G7 deterministic (first attempt)
+    # G6: the context is born DISCOVERED; it is NOT yet propagation-active (not in active_propagation_set).
     CREATE cpc = CandidatePropagationContext WITH
         CandidateID, PropagationID, RoundID = certificate.RoundID, TemplateID = certificate.TemplateID,
         certificate, snapshot, finder_MinerID = finder, discovery_time = snapshot.discovery_time,
         certificate_arrival_events = empty, block_arrival_event = null,
-        acceptance_timestamp = null, status = SELF_VALIDATED, failure_reason = null
+        acceptance_timestamp = null, status = DISCOVERED, failure_reason = null
     RETURN cpc
   RETURNS: cpc
 
@@ -951,42 +1112,44 @@ PROCEDURE ScheduleSolutionPropagation
   PRECONDITIONS: round_state in {HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY};
                  certificate produced by EarlyStopGenerate from a found valid solution + snapshot
   EFFECTS:
+    # G6: build the context DISCOVERED first (so DISCOVERED is reachable), then self-validate.
+    cpc <- CALL CreatePropagationContext(RoundContext, certificate, snapshot, finder)   # status = DISCOVERED
     # D4/E2: the finder MUST self-validate the SIGNED certificate BEFORE it may stop or propagate.
     self_ok <- CALL SelfValidateFoundSolution(RoundContext, certificate, snapshot)
     IF NOT self_ok:
       RECORD invalid_self_certificate(finder, certificate)       # finder does NOT stop; stays ACTIVE_HASHING
+      SET status(cpc) <- FAILED ; SET failure_reason(cpc) <- NO_VALID_CANDIDATE   # never propagation-active
       RETURN not_scheduled
-    # F1: build the candidate's immutable propagation context (fresh CandidateID/PropagationID).
-    cpc <- CALL CreatePropagationContext(RoundContext, certificate, snapshot, finder)
-    # F3: register the live context. The round is SOLUTION_PROPAGATION iff active_propagation_set
-    #     is non-empty; entering the FIRST live context performs HASHING -> SOLUTION_PROPAGATION (E6).
+    SET status(cpc) <- SELF_VALIDATED                            # G6: reachable status
+    # F3/G6/G8: register the PROPAGATION-ACTIVE context. Entering the FIRST propagation-active context
+    #           performs HASHING -> SOLUTION_PROPAGATION (E6). Round-state and the set are NOT identified:
+    #           the set may be non-empty in SECURITY_RECOVERY too (G8).
     SET was_empty <- (active_propagation_set is empty)
-    ADD cpc to active_propagation_set
     SET status(cpc) <- PROPAGATING
+    ADD cpc to active_propagation_set                           # membership = {PROPAGATING, PENDING_ACCEPTANCE}
     IF was_empty AND round_state = HASHING: TRANSITION round_state -> SOLUTION_PROPAGATION
-    # C6/F1: (3) schedule per-recipient certificate-arrival events; every event carries CandidateID/PropagationID.
-    FOR EACH recipient r in current miners, r != finder:
+    # C6/F1/G7: schedule per-recipient certificate-arrival events in a STABLE SORTED order (by MinerID);
+    #           each event carries CandidateID/PropagationID (F1/G11).
+    FOR EACH recipient r in SORT({ m in current miners : m != finder } BY MinerID ascending):
       cert_delay(r) <- deterministic modeled propagation delay(finder -> r)   # reproducible
       ev <- SCHEDULE event CertificateArrival(RoundContext, r, cpc.certificate, cpc.snapshot,
                                               CandidateID = cpc.CandidateID, PropagationID = cpc.PropagationID)
                           AT now + cert_delay(r)
       ADD ev to certificate_arrival_events(cpc)
-    # (4) schedule the full-block acceptance event toward the modeled acceptance point (carries the ids).
+    # schedule the full-block acceptance event toward the modeled acceptance point (carries the ids).
     block_delay <- deterministic modeled propagation delay(finder -> acceptance_point)  # reproducible
     SET block_arrival_event(cpc) <- SCHEDULE event BlockAcceptancePoint(RoundContext, cpc.certificate,
                           cpc.snapshot, CandidateID = cpc.CandidateID, PropagationID = cpc.PropagationID,
                           outcome = outcome-at-arrival) AT now + block_delay
-    SET status(cpc) <- PENDING_ACCEPTANCE
-    # (5) the finder ceases hashing (PATH B, resumable) via the canonical disposition, recording THIS
-    #     candidate as its pause cause (F2); it does NOT pass through EXHAUSTED_PENDING.
+    # (5) the finder ceases hashing (PATH B), recording THIS candidate (BOTH ids) as its pause cause (F2/G11).
     CALL EnterLowPowerListen(RoundContext, finder, stop_reason = VALID_SOLUTION_VERIFIED,
                              pause_cause_candidate_id = cpc.CandidateID,
                              pause_cause_propagation_id = cpc.PropagationID)
   RETURNS: cpc.CandidateID
-  NOTE: The discrete-event queue orders arrivals; no global set of future solutions is consulted.
-        Do NOT call ValidBlockAccept here. Unpaused miners may keep hashing during
-        SOLUTION_PROPAGATION and may discover FURTHER candidates, each of which gets its OWN
-        CandidatePropagationContext added to active_propagation_set (E6/F1/F3).
+  NOTE: G6: status flows DISCOVERED -> SELF_VALIDATED -> PROPAGATING here; PENDING_ACCEPTANCE is set
+        when the block arrival REGISTERS at the acceptance point (BlockAcceptancePoint, G5). The set
+        holds ONLY PROPAGATING/PENDING_ACCEPTANCE contexts. Do NOT accept here. Further candidates each
+        get their OWN context (F1/F3).
 ```
 
 ## 16c. Certificate arrival at a recipient (C6)
@@ -1019,27 +1182,29 @@ PROCEDURE BlockAcceptancePoint
   INPUTS: RoundContext, certificate, snapshot, CandidateID, PropagationID, outcome
   PRECONDITIONS: this is the scheduled full-block arrival event at the MODELED ACCEPTANCE POINT
                  for CandidateID (F1); outcome in {ACCEPTED_CANDIDATE, REJECTED, BLOCK_UNAVAILABLE,
-                 PROPAGATION_TIMEOUT}
+                 PROPAGATION_TIMEOUT}; processed in microphase 3 (G5)
   EFFECTS:
+    # G5: REGISTER-ONLY. This handler MUST NOT directly accept, arbitrate, or close the round; it only
+    #     records its arrival and returns. Arbitration + closure happen once in AcceptanceBatchFinalize
+    #     (microphase 4), AFTER all same-timestamp block arrivals have been collected.
     # F2/F3: ignore an arrival whose candidate is no longer live (already ACCEPTED/FAILED/CANCELLED).
     IF status(context(CandidateID)) not in {PROPAGATING, PENDING_ACCEPTANCE}:
       RETURN ignored_stale_candidate
+    SET status(context(CandidateID)) <- PENDING_ACCEPTANCE       # G6: reachable status set on arrival
     SET acceptance_timestamp(context(CandidateID)) <- now
-    # C6: the modeled acceptance point is EITHER a designated coordinator/validator OR a clearly
-    #     identified canonical local view (RoundContext.acceptance_point_policy).
-    IF outcome = ACCEPTED_CANDIDATE:
-      # D6: batch EXACT-same-timestamp candidates BEFORE accepting; this candidate joins the batch
-      #     for the current acceptance timestamp (each batched candidate carries its own ids/cert/snapshot).
-      RETURN CALL AcceptanceTimestampBatch(RoundContext, acceptance_timestamp = now)
-    ELSE:
-      # E3/D5/F2: REJECTED / BLOCK_UNAVAILABLE / PROPAGATION_TIMEOUT -> the CANDIDATE-SCOPED
-      #           failure-recovery path (resumes ONLY miners paused by THIS candidate).
-      RETURN CALL HandlePropagationFailure(RoundContext, CandidateID, PropagationID, failure_reason = outcome)
-  RETURNS: accepted_block | resume_scheduled | ignored_stale_candidate
-  NOTE: A strictly-earlier full-block arrival wins by discrete-event queue order; EXACT-timestamp
-        ties are arbitrated by AcceptanceTimestampBatch. No event inspects unknown future timestamps.
-        Every non-acceptance outcome funnels through the candidate-scoped HandlePropagationFailure
-        (E3/F2), which resumes ONLY the miners paused by THIS candidate.
+    # register into the acceptance batch for (this timestamp, this acceptance point).
+    APPEND (certificate, snapshot, CandidateID, PropagationID, outcome)
+           to acceptance_batch_registry[(now, RoundContext.acceptance_point)]
+    ENSURE exactly one AcceptanceBatchFinalize(RoundContext, acceptance_timestamp = now,
+           acceptance_point = RoundContext.acceptance_point) is scheduled for microphase 4 of THIS
+           (timestamp, acceptance point)                         # G5: single finalize per (ts, point)
+    RETURN registered
+  RETURNS: registered | ignored_stale_candidate
+  NOTE: G5: a block arrival never accepts or fails a candidate directly. ALL same-timestamp arrivals
+        (ACCEPTED_CANDIDATE and non-accept alike) are collected in acceptance_batch_registry; the ONE
+        AcceptanceBatchFinalize for the timestamp validates the accepted candidates, selects a winner,
+        commits acceptance and closes the round atomically, and dispositions the non-accept arrivals
+        candidate-scoped. No event inspects unknown future timestamps.
 ```
 
 ## 16d-bis. Propagation-failure recovery (E3)
@@ -1053,6 +1218,7 @@ PROCEDURE HandlePropagationFailure
     SET cpc <- context(CandidateID)
     # E3/F2/F3: fail ONLY this candidate. This procedure NEVER touches another candidate's context,
     #           events, or paused miners, and NEVER accepts a block or closes the round.
+    ASSERT PropagationID = PropagationID(cpc)                       # G11: both envelope ids must match
     SET status(cpc)         <- FAILED
     SET failure_reason(cpc) <- failure_reason
     RECORD propagation_failure(RoundID, TemplateID, CandidateID, PropagationID, failure_reason)
@@ -1061,31 +1227,32 @@ PROCEDURE HandlePropagationFailure
     #     events and its block-arrival event. Another candidate's events are NEVER cancelled here.
     CANCEL every event in certificate_arrival_events(cpc)
     CANCEL block_arrival_event(cpc)
-    # (2) resume ONLY miners whose pause cause is THIS candidate (F2). A miner paused by another
-    #     live candidate, or with no matching pause cause, is left unchanged.
-    FOR EACH miner M with a PAUSED assignment AND
-             pause_cause_candidate_id(paused_assignment(M)) = CandidateID:
+    # (2) resume ONLY miners whose pause cause matches BOTH ids of THIS candidate (F2/G11). Iterate in a
+    #     STABLE sorted order by MinerID (G7). A miner paused by another candidate is left unchanged.
+    FOR EACH miner M in SORT({ m : m has a PAUSED assignment
+                               AND pause_cause_candidate_id(paused_assignment(m))   = CandidateID
+                               AND pause_cause_propagation_id(paused_assignment(m)) = PropagationID }
+                             BY MinerID ascending):
       SCHEDULE event ResumeFromPause(RoundContext, M, trigger = failure_reason,
-                                     pause_cause_candidate_id = CandidateID)   # candidate-scoped resume (F2)
-    # (3) round-state rule (F3): evaluate the security floor, then decide the round state.
-    breach <- CALL SecurityFloorEvaluate(RoundContext, latest (H_active, H_honest, q_adv), floor_state)
-    IF breach:
-      # F3 defined rule: a floor breach moves the round to SECURITY_RECOVERY and PRESERVES the
-      #     remaining live candidate contexts in active_propagation_set; on recovery the round
-      #     returns to SOLUTION_PROPAGATION if the set is still non-empty, else to HASHING.
-      ENSURE round_state = SECURITY_RECOVERY                        # SecurityFloorEvaluate performed the transition
-    ELSE IF round_state = SOLUTION_PROPAGATION AND propagation_quiescent(RoundContext):
-      # F3: return to HASHING ONLY when propagation is FULLY quiescent (no block accepted, set empty,
-      #     no same-timestamp acceptance batch pending, no live candidate-specific acceptance event).
+                                     pause_cause_candidate_id = CandidateID,
+                                     pause_cause_propagation_id = PropagationID)   # G11: both ids on the resume event
+    # (3) G10: SCHEDULE the security-floor evaluation (never inline); it carries the round epoch and is
+    #     rejected by the terminal/stale guard if the round has since closed.
+    SCHEDULE event SecurityFloorEvaluate(RoundContext, event_RoundID = RoundID, event_TemplateID = TemplateID,
+                   event_state_version = state_version, latest (H_active, H_honest, q_adv), floor_state)   # microphase 5
+    # (4) round-state rule (F3/G8): return to HASHING ONLY when propagation is FULLY quiescent AND the
+    #     round is still in SOLUTION_PROPAGATION. During SECURITY_RECOVERY the round stays in recovery
+    #     (live candidates are preserved, G8); a later floor-restored step returns it (round SM R13).
+    IF round_state = SOLUTION_PROPAGATION AND propagation_quiescent(RoundContext):
       TRANSITION round_state -> HASHING
-    # ELSE: the round STAYS SOLUTION_PROPAGATION because other candidates are still live (F3).
+    # ELSE: the round STAYS SOLUTION_PROPAGATION (other candidates live) or SECURITY_RECOVERY (G8).
     RETURN candidate_failed(CandidateID)
   RETURNS: candidate_failed
-  NOTE: Candidate-scoped (F2/F3). One candidate's failure NEVER cancels or resumes another
-        candidate's certificate-arrival, block-arrival, acceptance-batch, or timeout events, and
-        NEVER resumes a miner paused by a different live candidate. The round remains
-        SOLUTION_PROPAGATION while any live candidate exists (F3). `propagation_quiescent` is
-        defined in §0.6. No block is accepted and no round is closed here.
+  NOTE: Candidate-scoped (F2/F3/G11 on BOTH ids). One candidate's failure NEVER cancels or resumes
+        another candidate's events or paused miners. The round remains SOLUTION_PROPAGATION while any
+        live candidate exists (F3), and SECURITY_RECOVERY may coexist with live candidates (G8).
+        The floor evaluation is SCHEDULED, not inlined (G10). No block is accepted and no round is
+        closed here. `propagation_quiescent` is defined in §0.6.
 ```
 
 ## 16e. Same-timestamp acceptance arbitration (D6)
@@ -1110,43 +1277,49 @@ PROCEDURE ValidateCandidate
     IF NOT ok: RECORD invalid_certificate(certificate)
   RETURNS: ok
   NOTE: The SINGLE canonical validation predicate (E2), used identically by
-        SelfValidateFoundSolution (finder), EarlyStopVerify (recipients), and AcceptanceTimestampBatch.
-        It never requires the finder's assignment to remain CURRENT after discovery (E1).
+        SelfValidateFoundSolution (finder), EarlyStopVerify (recipients), and AcceptanceBatchFinalize
+        (acceptance). It resolves the snapshot's (AssignmentID, assignment_version) to that immutable
+        version (I18) and validates DISCOVERY-time eligibility (I2/G1); it never requires the finder's
+        assignment to remain CURRENT after discovery (E1).
 ```
 
 ```
-PROCEDURE AcceptanceTimestampBatch
-  INPUTS: RoundContext, acceptance_timestamp
-  PRECONDITIONS: at least one BlockAcceptancePoint(outcome = ACCEPTED_CANDIDATE) event fires at
-                 acceptance_timestamp for this acceptance point
+PROCEDURE AcceptanceBatchFinalize
+  INPUTS: RoundContext, acceptance_timestamp, acceptance_point
+  PRECONDITIONS: microphase 4 for (acceptance_timestamp, acceptance_point); runs EXACTLY ONCE for it,
+                 AFTER microphase 3 has collected ALL same-timestamp block arrivals (G5)
   EFFECTS:
-    # D6/F1: (1) gather ALL same-acceptance-point candidate events with EXACTLY this timestamp. Each
-    #     event carries its own CandidateID/PropagationID/certificate/snapshot (E1/E2/F1).
-    batch <- all ACCEPTED_CANDIDATE BlockAcceptancePoint events at this acceptance point with
-             timestamp = acceptance_timestamp   # each event c has c.CandidateID, c.certificate, c.snapshot
-    # (2)-(3) validate every candidate against ITS OWN discovery snapshot; discard invalid.
-    valid <- empty
-    FOR EACH candidate event c in batch:
-      IF CALL ValidateCandidate(RoundContext, c.certificate, c.snapshot): APPEND c to valid   # E1/E2
-    IF valid is empty:
-      # E3/F2: no valid candidate -> fail EACH batched candidate INDIVIDUALLY (candidate-scoped), so
-      #        each resumes ONLY its own paused miners. No cross-candidate cancellation occurs.
-      FOR EACH candidate event c in batch:
-        CALL HandlePropagationFailure(RoundContext, c.CandidateID, c.PropagationID,
-                                      failure_reason = NO_VALID_CANDIDATE)
-      RETURN no_valid_candidate
-    # (4) among valid candidates choose smallest candidate_hash, then smallest MinerID (F8 deterministic).
-    winner <- argmin over valid of (c.certificate.candidate_hash, then c.certificate.MinerID)
-    # (5) the losing same-timestamp valid candidates become COMPETING (their contexts are handled by
-    #     ValidBlockAccept, which cancels ALL non-winner live contexts and closes the round once, F3).
-    FOR EACH c in valid, c != winner: SET status(context(c.CandidateID)) <- COMPETING
-    # (6) ONLY AFTER arbitration finishes: accept + close (no round closure occurs before this).
-    RETURN CALL ValidBlockAccept(RoundContext, winner.CandidateID, winner.certificate, winner.snapshot)
-  RETURNS: accepted_block | not_selected | no_valid_candidate
-  NOTE: For DIFFERENT timestamps the earliest timestamp wins by discrete-event queue order; this
-        procedure arbitrates ONLY exact-timestamp ties (F8 tie-break: candidate_hash then MinerID).
-        An empty valid batch fails each batched candidate candidate-scoped (E3/F2), not as one
-        blanket failure. No round closure occurs before same-timestamp arbitration completes.
+    # G5: the SINGLE arbitration+closure point for this timestamp. Round-acceptance closure is the
+    #     ATOMIC RESULT of this procedure -- it is NOT an independent event that precedes arbitration.
+    SET batch <- acceptance_batch_registry[(acceptance_timestamp, acceptance_point)]
+    # split by outcome; iterate in STABLE order by CandidateID (G7).
+    SET accepted <- SORT([ a in batch : a.outcome = ACCEPTED_CANDIDATE ] BY a.CandidateID ascending)
+    SET failed   <- SORT([ a in batch : a.outcome != ACCEPTED_CANDIDATE ] BY a.CandidateID ascending)
+    # (1) validate every ACCEPTED candidate against ITS OWN discovery snapshot (E1/E2).
+    SET valid <- [ a in accepted : CALL ValidateCandidate(RoundContext, a.certificate, a.snapshot) ]
+    IF valid is non-empty AND NOT block_accepted:
+      # (2) select the winner deterministically: smallest candidate_hash, then smallest MinerID (D6/G7).
+      winner <- argmin over valid of (a.certificate.candidate_hash, then a.certificate.MinerID)
+      # (3) the losing same-timestamp valid candidates become COMPETING; ValidBlockAccept then cancels
+      #     ALL non-winner live contexts and closes the round EXACTLY ONCE (atomic; G5/F3).
+      FOR EACH a in valid, a != winner: SET status(context(a.CandidateID)) <- COMPETING
+      CALL ValidBlockAccept(RoundContext, winner.CandidateID, winner.certificate, winner.snapshot)
+    ELSE:
+      # (4) no valid winner at this timestamp -> fail EACH accepted-but-invalid candidate candidate-scoped
+      #     (each resumes ONLY its own paused miners; G5/F2). No cross-candidate cancellation.
+      FOR EACH a in accepted:
+        CALL HandlePropagationFailure(RoundContext, a.CandidateID, a.PropagationID, failure_reason = NO_VALID_CANDIDATE)
+    # (5) disposition the non-accept arrivals candidate-scoped -- a no-op if the round already closed (2)-(3).
+    FOR EACH a in failed:
+      IF round_state not in {ROUND_ACCEPTED, ROUND_ABORTED}:
+        CALL HandlePropagationFailure(RoundContext, a.CandidateID, a.PropagationID, failure_reason = a.outcome)
+    CLEAR acceptance_batch_registry[(acceptance_timestamp, acceptance_point)]
+  RETURNS: accepted_block | no_valid_candidate
+  NOTE: G5: exactly one finalize per (timestamp, acceptance point). All same-timestamp block arrivals
+        are collected (microphase 3) BEFORE this runs; arbitration selects a deterministic winner
+        (candidate_hash then MinerID); acceptance + closure are atomic here (causally downstream of
+        arbitration). Different timestamps: the earliest ACCEPTED timestamp's finalize sets
+        block_accepted, so a later finalize accepts nothing (its accepted candidates fail scoped).
 ```
 
 ## 17. Valid block acceptance
@@ -1154,36 +1327,42 @@ PROCEDURE AcceptanceTimestampBatch
 ```
 PROCEDURE ValidBlockAccept
   INPUTS: RoundContext, winner_CandidateID, winner_certificate, winner_snapshot
-  PRECONDITIONS: invoked ONLY from AcceptanceTimestampBatch after arbitration (D6);
+  PRECONDITIONS: invoked ONLY from AcceptanceBatchFinalize after arbitration (G5/D6);
                  winner_certificate already validated by ValidateCandidate against winner_snapshot
                  and chosen as the batch winner;
-                 # E6: the round entered SOLUTION_PROPAGATION at the FIRST valid found-solution.
-                 round_state = SOLUTION_PROPAGATION
+                 # G8: acceptance may close a round that is in SOLUTION_PROPAGATION OR SECURITY_RECOVERY,
+                 #     provided the winner's RoundID/TemplateID are still valid; a valid accepted
+                 #     candidate may close a recovery-state round.
+                 round_state in {SOLUTION_PROPAGATION, SECURITY_RECOVERY}
+                 AND winner_certificate.RoundID = RoundID_current
+                 AND winner_certificate.TemplateID = TemplateID_committed
   EFFECTS:
     # F3: close the round EXACTLY ONCE. A second entry (a later same-round acceptance) is a no-op.
-    IF a block has ALREADY been accepted this round:
+    IF block_accepted:
       SET status(context(winner_CandidateID)) <- COMPETING       # a strictly-earlier timestamp already won
       RETURN not_selected
     RECORD accepted_block(winner_certificate)
+    SET block_accepted <- true                                   # G8 flag; single closure
     SET status(context(winner_CandidateID)) <- ACCEPTED
-    # F3: mark EVERY OTHER live context stale/cancelled and cancel THEIR remaining events. The winner
-    #     is excluded. This is the ONE place cross-candidate cancellation is legitimate (acceptance).
-    FOR EACH other cpc in active_propagation_set, other.CandidateID != winner_CandidateID:
+    # F3: mark EVERY OTHER live context stale/cancelled and cancel THEIR remaining events (winner
+    #     excluded). Iterate in STABLE sorted order by CandidateID (G7). This is the ONE place
+    #     cross-candidate cancellation is legitimate (acceptance).
+    FOR EACH other cpc in SORT(active_propagation_set BY CandidateID ascending), other.CandidateID != winner_CandidateID:
       SET status(other) <- (other was a same-timestamp valid loser ? COMPETING : CANCELLED)
       CANCEL every event in certificate_arrival_events(other)
       CANCEL block_arrival_event(other)
     CLEAR active_propagation_set                                  # no live candidate remains after acceptance
-    # E6: a SINGLE transition; the round is already in SOLUTION_PROPAGATION (no double transition).
-    TRANSITION round_state -> ROUND_ACCEPTED
+    # E6/G8: a SINGLE transition to ROUND_ACCEPTED, from SOLUTION_PROPAGATION or SECURITY_RECOVERY.
+    TRANSITION round_state -> ROUND_ACCEPTED                      # bumps state_version (G10)
     # D7: centralised round closure (the SINGLE closure path); paused miners of cancelled candidates
     #     are closed by round closure (ROUND_ACCEPTED), NOT resumed.
     CALL CloseRoundAssignments(RoundContext, disposition = ROUND_ACCEPTED, stop_reason = ROUND_ACCEPTED)
   RETURNS: accepted_block | not_selected
-  NOTE: F3: acceptance of one candidate sets it ACCEPTED, marks all other live candidates
-        COMPETING/STALE/CANCELLED, cancels their remaining events, and closes the round EXACTLY
-        ONCE. Miners paused by a cancelled candidate are NOT resumed (the round ended); they close
-        with stop_reason = ROUND_ACCEPTED via CloseRoundAssignments. No chain-wide fork-choice proof
-        is claimed.
+  NOTE: G8: a valid accepted candidate closes the round from SOLUTION_PROPAGATION OR SECURITY_RECOVERY.
+        Acceptance sets the winner ACCEPTED, marks all other live candidates COMPETING/STALE/CANCELLED,
+        cancels their events, and closes the round EXACTLY ONCE (block_accepted guard). Miners paused by
+        a cancelled candidate are NOT resumed (the round ended); they close with stop_reason =
+        ROUND_ACCEPTED via CloseRoundAssignments. No chain-wide fork-choice proof is claimed.
 ```
 
 ## 17a. Centralised round closure (D7)
@@ -1241,8 +1420,12 @@ PROCEDURE CloseRoundAssignments
           # not participating: close the assignment record only.
           CLOSE X as round-ended
           # miner_state(h) unchanged (OFFLINE stays OFFLINE; DISQUALIFIED stays DISQUALIFIED)
-    # cancel pending events belonging to the closed round
-    CANCEL all pending wake / resume / certificate-arrival / BlockAcceptancePoint events for RoundID
+    # cancel pending events belonging to the closed round (G9: including HashWorkEvents; G5: clear the
+    # acceptance batch registry so no stale batch finalizes after closure).
+    CANCEL all pending wake / resume / certificate-arrival / BlockAcceptancePoint / HashWorkEvent /
+           AdversarialParticipationChangeEvent events for RoundID
+    CLEAR active_propagation_set                                # no live candidate survives closure
+    CLEAR acceptance_batch_registry                             # no pending batch survives closure
     RECORD round_closure(RoundID, TemplateID, disposition)
     finalise state durations and energy to the EXACT closure time  # I5, I6, I7
   RETURNS: closure_record
@@ -1330,10 +1513,21 @@ PROCEDURE CloseTemplateAssignments
         CASE REGISTERED OR RESERVE OR OFFLINE OR DISQUALIFIED:
           # holds no CURRENT assignment under old_TemplateID; nothing to close; state unchanged
           NO-OP
-    CANCEL all pending certificate-arrival / BlockAcceptancePoint / resume events bound to old_TemplateID
+    # G8/G9/TV50: discard old-template candidate contexts, their events, hash events, and batches
+    # WITHOUT modifying any historical record.
+    FOR EACH cpc in SORT(active_propagation_set BY CandidateID ascending) WHERE TemplateID(cpc) = old_TemplateID:
+      SET status(cpc) <- CANCELLED
+      CANCEL every event in certificate_arrival_events(cpc)
+      CANCEL block_arrival_event(cpc)
+      REMOVE cpc from active_propagation_set
+    CANCEL all pending certificate-arrival / BlockAcceptancePoint / resume / HashWorkEvent events bound
+           to old_TemplateID
+    CLEAR every acceptance_batch_registry entry whose acceptance_point candidates are bound to old_TemplateID
     RECORD template_closure(RoundID, old_TemplateID)
   RETURNS: template_closure_record
-  NOTE: Template refresh does NOT end the round; it discards the OLD search domain. Old coverage and
+  NOTE: G8/TV50: template refresh clears old-template candidate contexts, batch registries, hash
+        events, and propagation events, but modifies NO historical record. Template refresh does NOT
+        end the round; it discards the OLD search domain. Old coverage and
         provenance are retained as history (C5). Holders leave the old template ONLY via legal
         miner-state edges (T27 / T8 / T12); no completed old range is ever reassigned (C5/CR-B5).
 
@@ -1393,14 +1587,25 @@ PROCEDURE RoundAbort
   EFFECTS:
     RECORD round_abort(RoundID, TemplateID, reason)
     IF any breach_events exist: LEAVE them intact               # I16: never repaired
+    # G8: disposition EVERY live propagation context, cancel its events, and clear the registries. A
+    #     miner paused by a cancelled candidate is NOT resumed (the round is ending); it closes via
+    #     CloseRoundAssignments with stop_reason = ROUND_ABORTED.
+    FOR EACH cpc in SORT(active_propagation_set BY CandidateID ascending):
+      SET status(cpc) <- CANCELLED
+      CANCEL every event in certificate_arrival_events(cpc)
+      CANCEL block_arrival_event(cpc)
+    CLEAR active_propagation_set
+    CLEAR acceptance_batch_registry                             # cancel any pending acceptance batches
     # D7: centralised closure of ALL open assignments and miner paths (wires the ROUND_ABORTED
-    #     EnterLowPowerListen disposition; cancels pending wake/resume/certificate events).
+    #     EnterLowPowerListen disposition; cancels pending wake/resume/certificate/hash-work events).
     CALL CloseRoundAssignments(RoundContext, disposition = ROUND_ABORTED, stop_reason = ROUND_ABORTED)
     finalise energy_ledger; ASSERT per-miner sums (I6) and network sum (I7);
         ASSERT durations reconcile to horizon T (I5)
     RETAIN zero-block/partial outcome in dataset                # I14; NA metrics per I15
-    TRANSITION round_state -> ROUND_ABORTED
+    TRANSITION round_state -> ROUND_ABORTED                     # bumps state_version (G10); SecurityFloorEvaluate stale-noops after
   RETURNS: abort_record
+  NOTE: G8: RoundAbort dispositions all live candidates and clears active_propagation_set and
+        acceptance_batch_registry, so no stale candidate event or acceptance batch survives the abort (TV47).
 ```
 
 ---
@@ -1409,11 +1614,14 @@ PROCEDURE RoundAbort
 
 The ONLY `[SIMULATION SAMPLING]` steps in the entire specification are:
 
-1. **ActiveHashing** — whether a modeled execution meets the fixed target `D`.
-2. **ActiveHashRateUpdate** — WHICH adversarial miners continue in `ACTIVE_HASHING` at `t` (the
-   active-state census). `H_honest(t)`, `H_adversarial(t)`, and `H_active(t)` are then computed
-   **deterministically** from that census; `H_adversarial(t)` is **never** sampled independently
-   after `H_active(t)` (I17).
+1. **HashWorkEvent** — whether a modeled execution unit meets the fixed target `D` (G9; formerly the
+   `ActiveHashing` loop step).
+2. **AdversarialParticipationChangeEvent scheduling** — WHEN/WHICH adversarial miner enters or exits
+   `ACTIVE_HASHING` (the adversarial-participation model draw, G3). Each such event applies its state
+   change through `ApplyMinerStateTransition`; `H_honest(t)`, `H_adversarial(t)`, `H_active(t)` are
+   then computed **deterministically** from the census by the hook and by `ActiveHashRateUpdate`
+   (which is now COMPUTE-ONLY — it never samples or mutates the census). `H_adversarial(t)` is
+   **never** sampled independently after `H_active(t)` (I17).
 3. **StartWake** — the wake latency draw (F5). The draw now lives in `StartWake`; the scheduled
    `WakeCompleteEvent` consumes it deterministically at the completion timestamp. Every activation
    caller (`RangeAssign`, `ReserveActivate`, `RangeReassign`, `TemplateRefresh`, `ResumeFromPause`)
@@ -1424,13 +1632,16 @@ The ONLY `[SIMULATION SAMPLING]` steps in the entire specification are:
    abstraction of CR5; the comparison itself (`audit_result`, `claim_accepted_or_rejected`) is
    deterministic once the audit is selected.
 
-The Stage-1F procedures add **no** new sampling site. `ApplyMinerStateTransition` (F6),
-`WakeCompleteEvent` (F5), `CreatePendingAssignment` (F4), `CreatePropagationContext` (F1),
-`HandlePropagationFailure` (E3/F2/F3), `RenewAssignment` (F7), the acceptance cluster (E6/F3), and
-the whole event-priority contract (F8) are entirely deterministic protocol logic. The discrete-event
-queue order, the same-timestamp priority table, and the tie-breaks (`candidate_hash` then `MinerID`
-for acceptance; `(CandidateID, MinerID, AssignmentID, seq)` within an event type) contain **no**
-random draw and are independent of data-structure iteration order.
+The Stage-1F/1G procedures add **no** new sampling site beyond relocating the adversarial-participation
+draw (item 2) into `AdversarialParticipationChangeEvent` scheduling. `ApplyMinerStateTransition` (F6),
+`WakeCompleteEvent`/`StartHashing`/`HashWorkEvent` state logic (F5/G9), `CreatePendingAssignment` (F4/G2),
+`CreatePropagationContext` (F1/G6), `HandlePropagationFailure` (E3/F2/F3), `RenewAssignment` (F7),
+`AdversarialParticipationChangeEvent` (its STATE CHANGE, G3), the acceptance cluster
+(`BlockAcceptancePoint` register + `AcceptanceBatchFinalize`, G5/E6/F3), and the microphase / event
+ordering (G5/F8) are entirely deterministic. Identifiers are deterministic (`CandidateID =
+(RoundID, seq)`, G7); iteration is stably sorted; the tie-breaks (`candidate_hash` then `MinerID` for
+acceptance; `(CandidateID, MinerID, AssignmentID, seq)` within an event type) contain **no** random
+draw and are independent of data-structure iteration order.
 
 Every other step is deterministic protocol logic. This separation is deliberate: it keeps the
 protocol's decision logic reproducible and audit-checkable against `I1..I17`, while confining
@@ -1439,12 +1650,17 @@ a simulation and not a real deployment. None of the above is executable source.
 
 ---
 
-## 21. Global event-priority contract (F8)
+## 21. Global event-priority contract (F8, superseded by the G5 microphases)
 
 When two or more scheduled events carry the **exact same** `event_time`, they are processed in a
-**deterministic** order fixed by the global event-priority contract (F8). The complete priority
-table, the per-pair race resolutions, and the required-race walkthroughs are in
-`STAGE_01F_EVENT_PRIORITY_TABLE.md`; that document is normative and this section binds to it.
+**deterministic** order. **Stage 1G replaces the flat F8 priority sequence with the explicit
+microphase contract of §0.7** (full spec in `STAGE_01G_EVENT_MICROPHASE_SPEC.md`): terminal
+closure → template refresh → collect all block arrivals → `AcceptanceBatchFinalize` (one atomic
+arbitration+closure) → security-floor evaluation (terminal-guarded) → certificate/discovery/…
+events. Where this section's ordering differs from §0.7, **§0.7 (microphases) is authoritative**.
+The historical F8 table (`STAGE_01F_EVENT_PRIORITY_TABLE.md`) remains a frozen Stage-1F artifact and
+is not modified. The two-level structure below is retained for the intra-type tie-break, which the
+microphases reuse verbatim.
 
 The contract has two levels:
 
@@ -1454,12 +1670,12 @@ The contract has two levels:
 
        1  RoundAbort closure            (ROUND_ABORTED)
        2  Round-acceptance closure      (ValidBlockAccept -> ROUND_ACCEPTED)
-       3  Same-timestamp acceptance arbitration (AcceptanceTimestampBatch)
+       3-4  Collect all block arrivals (BlockAcceptancePoint register) then AcceptanceBatchFinalize (G5)
        4  Template invalidation / refresh (TemplateRefresh / CloseTemplateAssignments)
        5  Security-floor evaluation / breach (SecurityFloorEvaluate)
        6  Full-block arrival            (BlockAcceptancePoint)
        7  Certificate arrival           (CertificateArrival)
-       8  Solution discovery            (ActiveHashing hit -> ScheduleSolutionPropagation)
+       8  Solution discovery            (HashWorkEvent hit -> ScheduleSolutionPropagation)
        9  Range completion              (ActualRangeCompletion / ExhaustionAdjudicate)
       10  Reported exhaustion           (ReportedExhaustionClaim)
       11  Lease expiry                  (LeaseExpiry)

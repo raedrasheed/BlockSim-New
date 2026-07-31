@@ -114,15 +114,23 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
   coverage: this emits activation events that drive `RESERVE → WAKING` (and
   `LOW_POWER_LISTEN → WAKING`) at the miner level. Monitoring is specified; enforcement
   soundness is out of scope (scope §C).
-- **Entry condition.** From `HASHING` when the security-floor guard fails
-  (`H_honest(t)` below the modeled floor, or an invariant-risk condition detected).
-- **Exit condition(s).** Back to `HASHING` (via re-`ASSIGNMENT` of activated reserves) when
-  the floor is restored; to `ROUND_ABORTED` if the floor cannot be restored.
+- **Entry condition.** From `HASHING` **or `SOLUTION_PROPAGATION`** when the scheduled, terminal-guarded
+  `SecurityFloorEvaluate` reports a breach (`H_honest(t)` below the modeled floor, or an invariant-risk
+  condition). It is never entered from a terminal round (G10).
+- **Coexistence with live candidates (G8).** `SECURITY_RECOVERY` MAY coexist with a non-empty
+  `active_propagation_set`. Entering it does NOT cancel live candidate contexts; block arrivals and
+  `AcceptanceBatchFinalize` remain processable during recovery, and a valid accepted candidate MAY
+  close a recovery-state round (`SECURITY_RECOVERY → ROUND_ACCEPTED`, R6). The round-state and the
+  propagation set are not identified.
+- **Exit condition(s).** Back to `HASHING` (via re-`ASSIGNMENT` of activated reserves) when the floor
+  is restored **and `propagation_quiescent` holds**; back to `SOLUTION_PROPAGATION` when the floor is
+  restored while live candidates remain (G8); to `ROUND_ACCEPTED` if a valid candidate is accepted
+  during recovery (G8); to `ROUND_ABORTED` if the floor cannot be restored.
 
 ### 2.6 `SOLUTION_PROPAGATION`
 
 - **Meaning.** A candidate solution meeting target is propagated and validated: it is
-  checked to lie within the signer's valid current assignment (I2) and to match the current
+  checked to bind to the assignment version eligible at its discovery_time (I2, discovery-time per G1) and to match the current
   `RoundID`+`TemplateID` (I3), using target validation as the acceptance predicate
   (scope §A.5).
 - **Entry timing (E6).** The round enters `SOLUTION_PROPAGATION` at the **first valid
@@ -133,7 +141,8 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
      SOLUTION_PROPAGATION`);
   2. while the round is in `SOLUTION_PROPAGATION`, miners that have **not yet verified** a
      certificate **continue hashing** (they remain in `ACTIVE_HASHING` and in `H_active(t)`),
-     and `ActiveHashing` is permitted in `{HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY}`;
+     and event-scheduled hashing (`HashWorkEvent`, G9) is permitted in `{HASHING,
+     SOLUTION_PROPAGATION, SECURITY_RECOVERY}`;
   3. **further candidate solutions may still be found and scheduled** during
      `SOLUTION_PROPAGATION`; each gets its OWN `CandidatePropagationContext` and joins the
      `active_propagation_set` (F1/F3);
@@ -277,7 +286,9 @@ An assignment set is valid when every distributed range is (a) pairwise disjoint
 other valid active assignments (invariant **I1** — no two valid active assignments overlap),
 (b) bound to the current `RoundID` and committed `TemplateID` (invariant **I3**), and (c)
 granted as a lease with a defined `lease_start`/`lease_expiry` (scope §B.5). A solution is
-acceptable only if it lies within the signer's valid current assignment (invariant **I2**).
+acceptable only if it binds to the assignment version that was eligible at its discovery_time
+(invariant **I2**, corrected to discovery-time eligibility in G1; the version may later be PAUSED or
+SUPERSEDED).
 
 ### 3.4 What terminates a round
 
@@ -408,14 +419,14 @@ the notes and specified in `STAGE_01_MINER_STATE_MACHINE.md`.
 | R3 | `TEMPLATE_COMMITMENT` | TemplateCommitted | Immutable template finalised; difficulty fixed (I12) | Publish `TemplateID` | `ASSIGNMENT` | Template content frozen until `TEMPLATE_REFRESH` |
 | R4 | `ASSIGNMENT` | AssignmentSetValid | Ranges pairwise disjoint (I1), bound to `RoundID`+`TemplateID` (I3), leased with `lease_start`/`lease_expiry` | Distribute range leases; emit assignment offers | `HASHING` | Emits miner offers → `REGISTERED/RESERVE/… → WAKING → ACTIVE_HASHING`; hashing may begin (§3.2–3.3) |
 | R5 | `HASHING` | CandidateSolution | A submitted digest satisfies the fixed target | Begin propagation/validation | `SOLUTION_PROPAGATION` | Validation checks I2 (in signer's assignment) and I3 (current round/template) |
-| R6 | `SOLUTION_PROPAGATION` | SolutionValid | Target satisfied AND I2 ∧ I3 hold AND full block accepted at the **modeled acceptance point** after it arrives and validates (never at solution-discovery) | `ValidBlockAccept`: record block, credit solver; mark every OTHER live candidate COMPETING/STALE/CANCELLED and cancel their events; close round **exactly once** (F3) | `ROUND_ACCEPTED` | Solver is the `ACTIVE_HASHING` miner whose assignment contained the solution (I2); competing valid solutions resolved by earliest valid arrival (discrete-event queue), exactly-equal acceptance timestamps by `candidate_hash` then `MinerID` (§3.13, CR6, C6, F8); all remaining assignments — including PATH-B paused miners and cancelled-candidate finders in `LOW_POWER_LISTEN` — close because the **round ended** (`stop_reason = ROUND_ACCEPTED`), NOT because their ranges were exhausted and NOT resumed (CR-B1, CR-B9, F3) |
+| R6 | `SOLUTION_PROPAGATION` **or `SECURITY_RECOVERY`** (G8) | SolutionValid (via `AcceptanceBatchFinalize`, microphase 4) | Target satisfied AND I2 (discovery-time, G1) ∧ I3 hold AND the block is the winner of the atomic `AcceptanceBatchFinalize` after ALL same-timestamp arrivals were collected (never at solution-discovery); winner's `RoundID`/`TemplateID` still valid | `ValidBlockAccept`: record block, set `block_accepted`, credit solver; mark every OTHER live candidate COMPETING/STALE/CANCELLED and cancel their events; close round **exactly once** (F3/G5) | `ROUND_ACCEPTED` | A valid candidate may close a round that is in `SECURITY_RECOVERY` too (G8). Solver is the miner whose discovery-eligible assignment version contained the solution (I2/G1); competing valid solutions resolved by the deterministic winner rule (`candidate_hash` then `MinerID`, §3.13, C6, G5/G7); all remaining assignments close because the **round ended** (`stop_reason = ROUND_ACCEPTED`), NOT exhausted and NOT resumed (CR-B1, F3) |
 | R7 | `SOLUTION_PROPAGATION` | PropagationQuiescent | A candidate failed (invalid/withheld/rejected/timeout/empty-batch) AND, after candidate-scoped `HandlePropagationFailure`, `propagation_quiescent` holds — `active_propagation_set` empty, no acceptance batch pending, no live candidate acceptance event, no block accepted (F3); floor still satisfied | Return to searching; the PATH-B miners paused by the failed candidate(s) have already resumed candidate-scoped (T30 → T5) | `HASHING` | The round returns to `HASHING` ONLY when quiescent; a single candidate's failure while others remain live does NOT fire R7 (F3, §3.8) |
 | R8 | `SOLUTION_PROPAGATION` | InvalidWithFloorBreach | A candidate failed AND `H_honest(t)` below floor | Enter remediation; PRESERVE the remaining live candidate contexts in `active_propagation_set` (F3 defined rule) | `SECURITY_RECOVERY` | Coverage shortfall handled by reserve activation; on recovery the round returns to `SOLUTION_PROPAGATION` if the set is still non-empty, else to `HASHING` |
 | R9 | `HASHING` | AllActiveRangesExhausted | Every active range reached accepted exhaustion (I4/I8a; PATH A) and `EXHAUSTED_PENDING`; the I8a ledger shows the entire assigned domain as accepted searched coverage with no `active_unsearched`/`inactive_unsearched` remaining | Close current template's search | `ROUND_EXHAUSTED` | Only accepted exhaustion counts, reported coverage alone is insufficient (§3.5, §3.9, C9) |
 | R10 | `HASHING` | SecurityFloorViolation | Modeled `H_honest(t)` below the security floor, or invariant-risk detected | Trigger reserve activation | `SECURITY_RECOVERY` | Emits miner activation → `RESERVE → WAKING` (T4), `LOW_POWER_LISTEN → WAKING` (T10) |
 | R11 | `HASHING` | RefreshTrigger | A superseding immutable template is available | Prepare template replacement | `TEMPLATE_REFRESH` | Refresh is the only way mined content changes (§3.11) |
 | R12 | `HASHING` | FatalFault / RoundTimeout | Unrecoverable fault or round-level timeout | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.4) |
-| R13 | `SECURITY_RECOVERY` | FloorRestored | Activated reserves raise `H_honest(t)` to/above the floor | Re-partition and redistribute disjoint ranges (I1) | `ASSIGNMENT` | Re-`ASSIGNMENT` then returns to `HASHING` at R4 (§3.6) |
+| R13 | `SECURITY_RECOVERY` | FloorRestored | Activated reserves raise `H_honest(t)` to/above the floor | Re-partition/redistribute disjoint ranges (I1); if live candidates remain, resume propagation instead | `ASSIGNMENT` (→ `HASHING` at R4) **or `SOLUTION_PROPAGATION`** if `active_propagation_set` is non-empty (G8) | Re-`ASSIGNMENT` returns to `HASHING` at R4 when `propagation_quiescent`; when live candidates were preserved during recovery (G8), the round returns to `SOLUTION_PROPAGATION` and those candidates' acceptance events continue (§3.6) |
 | R14 | `SECURITY_RECOVERY` | FloorUnrecoverable | Floor cannot be restored (insufficient reserves) | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.10) |
 | R15 | `ROUND_EXHAUSTED` | RefreshAvailable | A new immutable template can be committed; difficulty fixed (I12) | Prepare new `TemplateID` | `TEMPLATE_REFRESH` | Retains `RoundID`; new template only (§3.5) |
 | R16 | `ROUND_EXHAUSTED` | NoRefreshPossible | No new template can be produced | Abort round | `ROUND_ABORTED` | Terminal-abort |
@@ -429,7 +440,7 @@ the notes and specified in `STAGE_01_MINER_STATE_MACHINE.md`.
 
 - **I1** (no two valid active assignments overlap) gates every (re-)assignment: R4, R13,
   R18.
-- **I2 / I3** (accepted solution in signer's assignment / matching current
+- **I2 / I3** (accepted solution binds to the discovery-time-eligible assignment version, G1 / matching current
   `RoundID`+`TemplateID`) gate acceptance: R6 (via the R5 validation).
 - **I4 (amended, CR-B2)** (no `LOW_POWER_LISTEN` before one of the recorded `stop_reason`
   triggers) is a miner-level invariant. At round level, `ROUND_EXHAUSTED` (R9) still requires

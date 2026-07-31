@@ -167,3 +167,29 @@ Catalogue" denotes the separate document defining I1..I17.
 - **A1 discipline.** `continuous full-participation control` equals the A1 value
   (8.420833333 kWh). `ΔE` is measured against this baseline and any reduction is
   attributable to reduced active power-time, never to nonce-domain partitioning.
+
+## Stage-1G terminology addendum (concurrency & causal-consistency)
+
+- **Discovery-time eligibility (I2, corrected in G1).** Acceptance binds a solution to the
+  IMMUTABLE assignment version that was VALID and `CURRENT` at the solution's `discovery_time` and
+  resolvable from its `SolutionEligibilitySnapshot`. The version need NOT be `CURRENT` at certificate
+  or block arrival (it may be `PAUSED` or `SUPERSEDED`). "`CURRENT` at acceptance" is NOT used.
+- **Assignment version / lineage / live head (I18a/I18b, G2).** An `Assignment` is an immutable
+  versioned object with a stable `lineage_id`. `I18a`: at most one `CURRENT` version per lineage (zero
+  is legal). `I18b`: each OPEN lineage has exactly one live head in `{PENDING, CURRENT, PAUSED}`; a
+  CLOSED lineage has none. Renewal (`RenewAssignment`) is the sole in-lineage continuation and is
+  atomic at `renewal_time`; `ORIGINAL`/`REASSIGNED` open FRESH lineages.
+- **Candidate propagation context / status.** `CandidatePropagationContext` (CPC) has a DETERMINISTIC
+  `CandidateID = (RoundID, candidate_discovery_seq)` and `PropagationID = (CandidateID,
+  propagation_attempt_seq)` (G7). Status: `DISCOVERED → SELF_VALIDATED → PROPAGATING →
+  PENDING_ACCEPTANCE → {ACCEPTED | FAILED}` plus `COMPETING`/`STALE`/`CANCELLED`. `active_propagation_set`
+  holds ONLY `{PROPAGATING, PENDING_ACCEPTANCE}` contexts (G6).
+- **Microphases (G5).** The per-timestamp ordering: terminal closure → template refresh → collect all
+  block arrivals → `AcceptanceBatchFinalize` (one atomic arbitration+closure) → security-floor
+  evaluation (terminal-guarded) → certificate/discovery/… events. `BlockAcceptancePoint` only
+  registers; round-acceptance closure is the atomic result of `AcceptanceBatchFinalize`.
+- **Central state hook / event-scheduled hashing / compute-only census.** `ApplyMinerStateTransition`
+  is the sole writer of `miner_state` (F6). Hashing is a chain of `HashWorkEvent`s (`StartHashing` /
+  `ScheduleNextHashWork`), non-blocking (G9). `ActiveHashRateUpdate` is compute-only;
+  `AdversarialParticipationChangeEvent` carries each modeled adversarial entry/exit through the hook
+  (G3). `SecurityFloorEvaluate` is always scheduled and terminal-guarded (G10).

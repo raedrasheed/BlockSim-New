@@ -127,12 +127,16 @@ The miner state machine executes under the discrete-event model of
   occurs when that event fires, at its own completion timestamp. Several miners entering `WAKING` at
   the same instant complete independently. `T5` is therefore effected at the miner's
   `WakeCompleteEvent`, never by a blocking call inside the caller.
-- **Immutable assignment versions (F7).** A `CURRENT` range assignment is an immutable versioned
-  object. A same-range lease renewal creates a NEW `CURRENT` version and marks the old one
-  `SUPERSEDED`; the range and holder do not change and no wake cycle occurs (the miner stays
-  `ACTIVE_HASHING`). Exactly one version per lineage is `CURRENT`. An early-stop certificate
-  discovered under an older version stays valid because its `SolutionEligibilitySnapshot` resolves
-  to that immutable version (which was `CURRENT` at discovery).
+- **Immutable assignment versions (F7, invariants corrected in G2).** A range assignment is an
+  immutable versioned object. A same-range lease renewal creates a NEW `CURRENT` version and marks
+  the old one `SUPERSEDED` atomically; the range and holder do not change and no wake cycle occurs
+  (the miner stays `ACTIVE_HASHING`). The lineage invariants are **I18a** (at most one `CURRENT`
+  version per lineage; zero is legal while the unique live head is `PENDING`/`PAUSED` or after
+  closure) and **I18b** (one live head in `{PENDING, CURRENT, PAUSED}` per open lineage). An
+  early-stop certificate discovered under an older version stays valid because its
+  `SolutionEligibilitySnapshot` resolves to that immutable version (which was `CURRENT` at
+  discovery) — acceptance uses **discovery-time** eligibility (I2, corrected in G1), never
+  CURRENT-at-acceptance.
 
 These conventions add no new miner state and no new transition; they specify **how** the existing
 T1–T30 (minus the retired T6) transitions are executed under concurrency.
@@ -145,8 +149,9 @@ Each subsection specifies, for one state: exact meaning; allowed computation; al
 network messages; residency power term; active-hash-rate contribution; whether it may hold
 or act on a new range; reward eligibility (NOT SPECIFIED AT STAGE 1 — incentive semantics are deferred to Stage 5;
 the only Stage-1 record is that a valid solution may be recorded as having a solver identity,
-which by invariant **I2** requires an accepted solution inside the signer's valid current
-assignment); permitted incoming and outgoing transitions;
+which by invariant **I2** (corrected in G1) requires the solution to bind to the assignment version
+that was eligible at its **discovery_time** — not one that is CURRENT at acceptance); permitted
+incoming and outgoing transitions;
 transition guards; transition side effects; timeout behaviour; and failure behaviour.
 
 Reward eligibility is NOT SPECIFIED AT STAGE 1 (deferred to Stage 5); no incentive,
@@ -245,7 +250,7 @@ solver identity for a valid solution.
   assignment and activates the new holder through `WAKING` — there is **no** `ACTIVE_HASHING →
   ACTIVE_HASHING` shortcut (the former T6 is removed, E5). A changed-range replacement is
   **NEVER** called a renewal (E5).
-- **Reward eligibility.** NOT SPECIFIED AT STAGE 1 (incentive semantics deferred to Stage 5). The only record kept at Stage 1 is that a valid solution this miner submits may be recorded as having a solver identity, which by I2/I3 requires an accepted solution inside the signer's valid current assignment matching the current RoundID and TemplateID.
+- **Reward eligibility.** NOT SPECIFIED AT STAGE 1 (incentive semantics deferred to Stage 5). The only record kept at Stage 1 is that a valid solution this miner submits may be recorded as having a solver identity, which by I2 (corrected in G1) and I3 requires the solution to bind to the assignment version that was eligible at its discovery_time (not necessarily CURRENT at acceptance) and to match the current RoundID and TemplateID.
 - **Permitted incoming transitions.** From `WAKING` on ramp completion (T5) — whether a
   first activation or a **resume** of a paused (PATH B) assignment from its retained
   `actual_frontier`. (The former `ACTIVE_HASHING → ACTIVE_HASHING` self-loop, T6, is
@@ -583,9 +588,11 @@ enforcement explicit:
 - **I1** (no two valid active assignments overlap) is checked at every range-binding guard:
   T3, T4, T9, T10, and the T5 validation (the former T6 self-loop is removed, E5; a same-range
   lease renewal binds no new range and needs no I1 re-check).
-- **I2** (accepted solution ∈ signer's valid current assignment) and **I3** (accepted
-  solution matches current `RoundID`+`TemplateID`) gate reward eligibility, which only
-  `ACTIVE_HASHING` can satisfy; their violation routes to `DISQUALIFIED` (T18).
+- **I2** (accepted solution binds to the assignment version eligible at DISCOVERY time — corrected
+  in G1, not CURRENT-at-acceptance) and **I3** (accepted solution matches current
+  `RoundID`+`TemplateID`) gate reward eligibility; a solution is submitted only from `ACTIVE_HASHING`,
+  though the assignment may later PAUSE/SUPERSEDE without invalidating the discovered solution. A
+  genuine violation (out-of-range or never-eligible submission) routes to `DISQUALIFIED` (T18).
 - **I4 (amended, CR-B2)** — a miner may enter `LOW_POWER_LISTEN` only after one of: accepted
   range-exhaustion accounting via `EXHAUSTED_PENDING` (T8, `RANGE_EXHAUSTED`); explicit
   assignment revocation (T27, `ASSIGNMENT_REVOKED`); a fully verified valid-solution
