@@ -406,8 +406,11 @@ preserved, branch A), directly to `HASHING` (branch B), or through `ASSIGNMENT �
 HASHING` (branch C, no new template); on `UNRECOVERABLE`, `RoundAbort(reason = floor_unrecoverable)` (branch
 D/R14), closing ONLY this round (N1). At most ONE outcome is applied per episode (`RecoveryEpisodeID`, O4).
 **Q3:** pending decisions are explicit identities with a `RECOVERY_DECISION_STATUS`
-({CREATED, SCHEDULED, SUPERSEDED, APPLYING, APPLIED, SCHEDULE_FAILED, APPLY_FAILED, HORIZON_DEFERRED, CANCELLED}); a superseded
-decision can NEVER become valid again, and a failed superseding schedule cannot revive an earlier decision. Every
+({CREATED, SCHEDULED, SUPERSEDED, APPLYING, APPLIED, SCHEDULE_FAILED, APPLY_FAILED, APPLY_FAILED_TERMINAL, HORIZON_DEFERRED, CANCELLED}); a superseded
+decision can NEVER become valid again, and a failed superseding schedule cannot revive an earlier decision.
+The Stage-1T status `APPLY_FAILED_TERMINAL` (T4) marks a branch-C decision whose IRREVERSIBLE post-transition
+install failed and closed the round via the declared recovery-finalising abort — distinct from the reversible,
+episode-preserving `APPLY_FAILED`. Every
 recovery-success branch reaches a floor-applicable state through `TransitionRoundState`/`CompleteAssignmentPhase`,
 so the applicability-entry census is captured (M2). This
 contract is NO LONGER "described but non-executable" — a concrete seated source and call path exists for both
@@ -417,11 +420,13 @@ actually preserved (scope §C).
 **R1 (no same-timestamp event after the ordinary drain).** The post-epilogue recovery application enqueues
 NOTHING at the already-drained application `event_time` `t`. In particular branch C (`SECURITY_RECOVERY →
 ASSIGNMENT`, reserve activation / reassignment, `CompleteAssignmentPhase → HASHING`) does NOT `StartWake`/seat a
-`WakeCompleteEvent` at `t`: it transitions to `ASSIGNMENT` and seats ONE `RecoveryAssignmentContinuationEvent` at
-`next_representable_simulation_time(t)` (a STRICTLY LATER `event_time`), whose ordinary handler performs the
-`ReserveActivate`/`RangeReassign`/`StartWake`. A zero modeled wake latency after the application is represented at
+`WakeCompleteEvent` at `t`: it seats ONE `RecoveryAssignmentContinuationDueEvent` at
+`next_representable_simulation_time(t)` (a STRICTLY LATER `event_time`) which merely RECORDS the continuation due
+fact + refreshes the census (T1); that later event_time's OWN post-epilogue hook
+`ApplyRecoveryAssignmentContinuationAfterEpilogue` performs the `ReserveActivate`/`RangeReassign`/`StartWake`
+transition-and-install. A zero modeled wake latency after the application is represented at
 `next_representable_simulation_time(t)`, never at `t`. `ProcessEventTime` ASSERTS that no ordinary event remains
-at `t` before finalising it.
+at `t`, and that no recovery-continuation application remains due at `t` (T7), before finalising it.
 
 **R2 (one epilogue, one post-application settlement).** `FinalizeEventTimeSecurityCensus(t)` runs EXACTLY ONCE
 per `event_time` and is the SOLE security-floor decision for `t`. When the recovery application re-dirties `t`
@@ -447,20 +452,22 @@ exactly `transition_envelope = dispatch_envelope`, and `TransitionEventID` is bu
 plus the transition-specific fields. No namespace field is omitted or propagated implicitly.
 
 **S2/S3 (deferred branch-C atomicity).** Branch C is a DEFERRED application. `CompleteSecurityRecovery` does NOT
-mutate `round_state` before seating: it computes `t_cont`, validates `t_cont <= T`, seats ONE
-`RecoveryAssignmentContinuationEvent` (strictly later than `t`), and only then returns `DEFERRED` — a failed seat /
-target-beyond-`T` leaves the round in `SECURITY_RECOVERY` and marks the decision `APPLY_FAILED`/`HORIZON_DEFERRED`,
-preserving the episode. Seating is NOT applying RESTORED (S3): the decision stays `APPLYING` and the episode stays
-active until `RecoveryAssignmentContinuationEvent` verifies the still-current APPLYING decision, transitions
+mutate `round_state` before seating: it computes `t_cont`, validates `t_cont <= T`, mints the continuation identity
+(T2), seats ONE `RecoveryAssignmentContinuationDueEvent` (strictly later than `t`), and only then returns
+`DEFERRED` — a failed seat / target-beyond-`T` leaves the round in `SECURITY_RECOVERY` and marks the decision
+`APPLY_FAILED`/`HORIZON_DEFERRED`, preserving the episode. Seating is NOT applying RESTORED (S3): the decision stays
+`APPLYING` and the episode stays active until the POST-epilogue hook `ApplyRecoveryAssignmentContinuationAfterEpilogue`
+(T1) verifies the still-current APPLYING decision and its continuation binding (T2), transitions
 `SECURITY_RECOVERY → ASSIGNMENT`, installs the disjoint assignment set, and reaches `HASHING` — only THEN is the
-decision `APPLIED` and the episode cleared. A failure before the transition stays `SECURITY_RECOVERY`; a failure
-after it takes a declared recovery-finalising `RoundAbort`, so the round never lingers in `ASSIGNMENT` with an
-active episode and no live continuation.
+decision `APPLIED` and the episode cleared. A failure BEFORE the transition stays `SECURITY_RECOVERY` (episode
+preserved); an IRREVERSIBLE install failure AFTER it takes a declared recovery-finalising `RoundAbort` (T4:
+`RECOVERY_INSTALL_FAILED_ABORTED` disposition + `APPLY_FAILED_TERMINAL` status, never a fabricated UNRECOVERABLE),
+so the round never lingers in `ASSIGNMENT` with an active episode and no live continuation.
 
 **S4 (terminal recovery cleanup).** When a round becomes `ROUND_ACCEPTED`/`ROUND_ABORTED` while an episode is
 still active (and the closure is NOT the recovery-finalising abort), `CloseRoundAssignments` calls
 `CancelActiveRecoveryEpisode`: it cancels every pending/scheduled/applying decision and its queued
-`RecoveryCompletionDueEvent`/`RecoveryAssignmentContinuationEvent`, records `recovery_episode_disposition =
+`RecoveryCompletionDueEvent`/`RecoveryAssignmentContinuationDueEvent`, records `recovery_episode_disposition =
 TERMINAL_CANCELLED`, and clears `current_recovery_episode` (without setting `recovery_outcome_finalised`). The
 invariant `current_recovery_episode != null IFF round_state = SECURITY_RECOVERY` holds — a branch-C deferred
 decision keeps the round in `SECURITY_RECOVERY` until its continuation begins.
@@ -475,6 +482,48 @@ procedure owns the dirty check and returns `no_census_change` when nothing is di
 continuation seat) carries a `PostEpilogueSchedulingContext`; `ScheduleEvent` requires `target_event_time >
 source_event_time` and derives `delta_cycle = 0`, so a post-epilogue caller can never enqueue at the source
 event_time (R1 made structural). The `event_creation_seq` is still minted solely by `ScheduleEvent`.
+
+**T1 (branch-C continuation is a two-step contract).** Like the completion application, the branch-C continuation
+is split into a queued `RecoveryAssignmentContinuationDueEvent` (records the continuation DUE fact + refreshes the
+census; NO transition / NO assignment / NO `APPLIED`) and a POST-epilogue hook
+`ApplyRecoveryAssignmentContinuationAfterEpilogue` (the ONLY place branch-C RESTORED is applied). `ProcessEventTime`
+runs both post-epilogue hooks after the event-time epilogue — the completion hook first, then the continuation hook
+— so no branch-C RESTORED is applied during the ordinary event drain, and (T1 mutual exclusion) at most one of the
+two hooks applies per `RecoveryEpisodeID` per `event_time`.
+
+**T2 (continuation version binding).** Each branch-C continuation carries a `RecoveryContinuationID =
+(RecoveryDecisionID, ContinuationGeneration)`. The immutable Due event carries only the `ContinuationGeneration`;
+the AUTHORITATIVE bound census version is the decision's `continuation_bound_census_version`, kept current by
+`ReconcilePendingRecoveryDecisions` (T2 rule B). The post-epilogue hook applies branch C only when that bound
+version equals `latest_recovery_census[episode].RecoveryCensusVersion` AND the final census still warrants RESTORED —
+a stale generation or a superseding census yields a no-op, never a wrong-version application.
+
+**T3 (installation-phase invariant).** The redistribution-only install is a SYNCHRONOUS sub-computation guarded by
+`recovery_install_in_progress` / `RecoveryInstallID` / `active_recovery_install_decision`; NO event boundary occurs
+within it, so no epilogue ever observes a transient `ASSIGNMENT`-with-active-episode state. Every install exit ends
+in exactly one of: `HASHING` + decision `APPLIED`; `SECURITY_RECOVERY` + `APPLY_FAILED` (rollback complete);
+`ROUND_ABORTED` + `RECOVERY_INSTALL_FAILED_ABORTED`.
+
+**T4 (no fabricated UNRECOVERABLE).** An IRREVERSIBLE post-transition install failure NEVER fabricates an
+`UNRECOVERABLE` outcome; it records `recovery_episode_disposition = RECOVERY_INSTALL_FAILED_ABORTED`, marks the
+decision `APPLY_FAILED_TERMINAL`, leaves `recovery_outcome_finalised` UNSET, and closes the round via the declared
+recovery-finalising `RoundAbort(reason = recovery_install_failed_aborted)`.
+
+**T5 (assignment-phase disposition).** `CompleteAssignmentPhase` returns an explicit disposition
+`assignment_phase_completed | assignment_phase_failed(reason)`; a malformed assignment set is caught BEFORE the
+irreversible `HASHING` transition and returns `assignment_phase_failed(malformed_assignment_set)` (round still
+`ASSIGNMENT`, reversible), which the continuation hook rolls back to `SECURITY_RECOVERY`.
+
+**T6 (redistribution-only vs reserve-dependent restoration).** The hook classifies the restoration: if the FINAL
+census satisfies the floor using ONLY currently `ACTIVE_HASHING` miners it is redistribution-only and installs
+synchronously (T3); otherwise it is reserve-dependent — the hook activates the required reserve(s) while the round
+STAYS `SECURITY_RECOVERY`, keeps the decision `APPLYING`, and RE-ARMS a strictly-later continuation Due event with a
+FRESH generation. Reserve-dependent RESTORED is applied ONLY once a later final census confirms the floor with the
+reserve `ACTIVE_HASHING` — a syntactically valid PENDING set is not restored hash rate.
+
+**T7 (post-epilogue causality).** The continuation application runs strictly after the event-time epilogue; every
+`StartWake` / re-arm it seats is placed STRICTLY LATER through `PostEpilogueSchedulingContext`. `ProcessEventTime`
+asserts that no recovery-continuation application remains due at `t` before finalising `t`.
 
 ### 3.11 What causes a template refresh
 
@@ -567,7 +616,7 @@ the notes and specified in `STAGE_01_MINER_STATE_MACHINE.md`.
 | R10 | `HASHING` | SecurityFloorViolation | Modeled `H_honest(t)` below the security floor, or invariant-risk detected | Trigger reserve activation | `SECURITY_RECOVERY` | Emits miner activation → `RESERVE → WAKING` (T4), `LOW_POWER_LISTEN → WAKING` (T10) |
 | R11 | `HASHING` | RefreshTrigger | A superseding immutable template is available | Prepare template replacement | `TEMPLATE_REFRESH` | Refresh is the only way mined content changes (§3.11) |
 | R12 | `HASHING` | FatalFault / RoundTimeout | Unrecoverable fault or round-level timeout | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.4) |
-| R13 | `SECURITY_RECOVERY` | FloorRestored | Activated reserves raise `H_honest(t)` to/above the floor | Re-partition/redistribute disjoint ranges (I1); if live candidates remain, resume propagation instead | `ASSIGNMENT` (→ `HASHING` at R4) **or `SOLUTION_PROPAGATION`** if `active_propagation_set` is non-empty (G8) **or directly `HASHING`** when no context and no redistribution | **EXECUTABLE via `CompleteSecurityRecovery` (pseudocode §10a/N2):** seated by the epilogue's floor-restored decision (I-02); branch A (live contexts) → `SOLUTION_PROPAGATION` preserving those candidates' events; branch B (no context, no assignment change) → `HASHING`; branch C (redistribution) is DEFERRED — `CompleteSecurityRecovery` seats a SINGLE `RecoveryAssignmentContinuationEvent` at `next_representable_simulation_time(t)` (R1/S2) WITHOUT mutating `round_state`, returning `DEFERRED`; that handler verifies the still-current `APPLYING` decision, transitions `SECURITY_RECOVERY → ASSIGNMENT`, installs the disjoint set, and reaches `HASHING`. Every recovery-success branch reaches a floor-applicable state through `TransitionRoundState`/`CompleteAssignmentPhase`, so the applicability-entry census is captured (M2). **R1:** the application enqueues NOTHING at the drained application `event_time` — branch C's wakes fire at a strictly-later time. **S3:** seating branch C is NOT applying RESTORED — the decision stays `APPLYING` and the episode stays active until the continuation reaches `HASHING`, and ONLY THEN is it `APPLIED` + the episode cleared; a failure before the transition stays `SECURITY_RECOVERY` (episode preserved), a failure after it takes a declared recovery-finalising `RoundAbort`. Branches A/B/D mark `APPLIED` on their immediate SUCCESS (`APPLYING → APPLIED`); any failure yields `APPLY_FAILED`/`HORIZON_DEFERRED` and preserves the episode. No new template is fabricated (§3.6) |
+| R13 | `SECURITY_RECOVERY` | FloorRestored | Activated reserves raise `H_honest(t)` to/above the floor | Re-partition/redistribute disjoint ranges (I1); if live candidates remain, resume propagation instead | `ASSIGNMENT` (→ `HASHING` at R4) **or `SOLUTION_PROPAGATION`** if `active_propagation_set` is non-empty (G8) **or directly `HASHING`** when no context and no redistribution | **EXECUTABLE via `CompleteSecurityRecovery` (pseudocode §10a/N2):** seated by the epilogue's floor-restored decision (I-02); branch A (live contexts) → `SOLUTION_PROPAGATION` preserving those candidates' events; branch B (no context, no assignment change) → `HASHING`; branch C (redistribution) is DEFERRED via a TWO-STEP continuation (T1) — `CompleteSecurityRecovery` mints the continuation identity (T2) and seats a SINGLE `RecoveryAssignmentContinuationDueEvent` at `next_representable_simulation_time(t)` (R1/S2) WITHOUT mutating `round_state`, returning `DEFERRED`; that Due event only RECORDS the continuation due + refreshes the census, and the POST-epilogue hook `ApplyRecoveryAssignmentContinuationAfterEpilogue` verifies the still-current `APPLYING` decision + its continuation binding (T2), transitions `SECURITY_RECOVERY → ASSIGNMENT`, installs the disjoint set under the T3 install-phase invariant, and reaches `HASHING`. Every recovery-success branch reaches a floor-applicable state through `TransitionRoundState`/`CompleteAssignmentPhase`, so the applicability-entry census is captured (M2). **R1/T7:** the application enqueues NOTHING at the drained application `event_time` — branch C's wakes fire at a strictly-later time. **S3/T1:** seating branch C is NOT applying RESTORED — the decision stays `APPLYING` and the episode stays active until the post-epilogue continuation hook reaches `HASHING`, and ONLY THEN is it `APPLIED` + the episode cleared; a failure BEFORE the transition stays `SECURITY_RECOVERY` (episode preserved), an IRREVERSIBLE install failure AFTER it takes a declared recovery-finalising `RoundAbort` (T4: `RECOVERY_INSTALL_FAILED_ABORTED` + `APPLY_FAILED_TERMINAL`, never a fabricated UNRECOVERABLE). **T6:** a reserve-dependent restoration is NOT installed synchronously — the hook activates the reserve while the round stays `SECURITY_RECOVERY` and re-arms a strictly-later continuation (fresh generation), applying RESTORED only once the reserve is `ACTIVE_HASHING`. Branches A/B/D mark `APPLIED` on their immediate SUCCESS (`APPLYING → APPLIED`); any failure yields `APPLY_FAILED`/`HORIZON_DEFERRED` and preserves the episode. No new template is fabricated (§3.6) |
 | R14 | `SECURITY_RECOVERY` | FloorUnrecoverable | The FINAL census of the completion `event_time` still breaches the floor after the deadline | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.10); **REACHABLE and EXECUTABLE (O3/P3/Q2):** the epilogue selects `UNRECOVERABLE` from the FINAL census (versioned, Q1) and seats a `RecoveryCompletionDueEvent`; `ApplyRecoveryCompletionAfterEpilogue` applies it — ONLY if still the latest census version and the final census still breaches — via `CompleteSecurityRecovery` **branch D (§10a) → `RoundAbort(reason = floor_unrecoverable)`**, closing ONLY this round (N1). At most one applied outcome per `RecoveryEpisodeID` (O4); a superseded decision never applies (Q1/Q3). **R4:** the decision passes `SCHEDULED → APPLYING → APPLIED` and is marked `APPLIED` ONLY after `RoundAbort` succeeds (`round_state = ROUND_ABORTED`); at the horizon the round is already terminal, so pending decisions are CANCELLED and `ApplyRecoveryCompletionAfterEpilogue` returns `terminal_recovery_noop` (no `APPLIED` after horizon closure) |
 | R15 | `ROUND_EXHAUSTED` | RefreshAvailable | A new immutable template can be committed; difficulty fixed (I12) | Prepare new `TemplateID` | `TEMPLATE_REFRESH` | Retains `RoundID`; new template only (§3.5) |
 | R16 | `ROUND_EXHAUSTED` | NoRefreshPossible | No new template can be produced | Abort round | `ROUND_ABORTED` | Terminal-abort |

@@ -687,3 +687,56 @@ Catalogue" denotes the separate document defining I1..I19.
   enqueue at the source event_time; `event_creation_seq` is still minted solely by `ScheduleEvent`.
 - **Historical freeze.** Stage-1A–1R lettered artifacts are unchanged; Stage-1S supersessions are recorded in
   `STAGE_01S_SUPERSESSION_REGISTER.md`.
+
+## Stage-1T terminology addendum (continuation-epilogue & outcome-integrity lock)
+
+- **`RecoveryAssignmentContinuationDueEvent` (T1 step 1).** The queued event (microphase
+  `RECOVERY_ASSIGNMENT_CONTINUATION_DUE`) that a DEFERRED branch C seats through the S7
+  `PostEpilogueSchedulingContext` at `next_representable_simulation_time(t)`. It RECORDS the continuation DUE fact
+  (`continuation_due_at_event_time`, `continuation_due_dispatch_envelope`) and refreshes the census (via
+  `CommitSecurityCensus`, `census_source = RECOVERY_COMPLETION_DUE`); it performs NO round-state transition, creates
+  NO assignment, and does NOT mark the decision APPLIED. It REPLACES the former single-step
+  `RecoveryAssignmentContinuationEvent` — the queued event no longer does the assignment rebuild.
+- **`ApplyRecoveryAssignmentContinuationAfterEpilogue` (T1 step 2 / post-epilogue hook).** The ONLY place branch-C
+  RESTORED is APPLIED. `ProcessEventTime` invokes it AFTER `FinalizeEventTimeSecurityCensus(t)` and
+  `ApplyRecoveryCompletionAfterEpilogue(t)`; it applies at most one continuation whose
+  `continuation_due_at_event_time = t`, so no branch-C RESTORED result is recorded during the ordinary-event drain.
+  **T1 mutual exclusion:** at most one of the completion hook and this hook applies per `RecoveryEpisodeID` per
+  `event_time` (a completion applied at `t` clears the episode, so this hook then finds nothing due).
+- **`RecoveryContinuationID` / `ContinuationGeneration` (T2).** `RecoveryContinuationID = (RecoveryDecisionID,
+  continuation_generation)`. The immutable Due event carries only the `ContinuationGeneration`; the AUTHORITATIVE
+  bound census version is the decision's `continuation_bound_census_version`, kept current by
+  `ReconcilePendingRecoveryDecisions` (T2 rule B: a re-affirmed DEFERRED decision's continuation bound version is
+  advanced to the latest `RecoveryCensusVersion`). The post-epilogue hook applies branch C only when the ACTIVE
+  generation matches (`ContinuationGeneration = D.continuation_generation`) AND
+  `continuation_bound_census_version = latest_recovery_census[episode].RecoveryCensusVersion` AND the final census
+  still warrants RESTORED — else a stale-noop. A reserve-dependent re-arm mints a FRESH generation
+  (`continuation_generation + 1`).
+- **`recovery_install_in_progress` / `RecoveryInstallID` / `active_recovery_install_decision` (T3).** The
+  installation-phase registries covering the redistribution-only install (a SYNCHRONOUS sub-computation with NO
+  event boundary within it). `recovery_install_in_progress` is `true` only between the `SECURITY_RECOVERY →
+  ASSIGNMENT` transition and the install's terminal exit; `RecoveryInstallID = (episode, recovery_install_seq)`
+  identifies the install; `active_recovery_install_decision` names the decision being installed. **T3 exit
+  invariant:** every install ends in exactly one of `HASHING` + decision `APPLIED`; `SECURITY_RECOVERY` +
+  `APPLY_FAILED` (rolled back); `ROUND_ABORTED` + `RECOVERY_INSTALL_FAILED_ABORTED`.
+- **`RECOVERY_INSTALL_FAILED_ABORTED` / `APPLY_FAILED_TERMINAL` (T4).** The episode disposition and decision status
+  for an IRREVERSIBLE branch-C install failure AFTER the transition: the round is closed via the declared
+  recovery-finalising `RoundAbort(reason = recovery_install_failed_aborted)`, `recovery_outcome_finalised` is left
+  UNSET, and NO `UNRECOVERABLE` outcome is fabricated (UNRECOVERABLE is reserved for a FINAL census that still
+  breaches the floor, O3/R14).
+- **`assignment_phase_completed` / `assignment_phase_failed(reason)` (T5).** The explicit disposition
+  `CompleteAssignmentPhase` returns. A malformed assignment set is caught BEFORE the irreversible `HASHING`
+  transition and returns `assignment_phase_failed(malformed_assignment_set)` (round still `ASSIGNMENT` — reversible),
+  which the continuation hook rolls back to `SECURITY_RECOVERY`; `assignment_phase_completed` means the round reached
+  `HASHING`.
+- **Redistribution-only vs reserve-dependent restoration (T6).** A restoration is *redistribution-only* when the
+  FINAL census satisfies the floor using ONLY currently `ACTIVE_HASHING` miners (installed synchronously, T3);
+  otherwise it is *reserve-dependent* — the hook activates the reserve while the round STAYS `SECURITY_RECOVERY`,
+  keeps the decision `APPLYING`, and RE-ARMS a strictly-later continuation (fresh generation). Reserve-dependent
+  RESTORED is applied only once a later final census confirms the floor with the reserve `ACTIVE_HASHING`.
+- **Post-epilogue continuation causality (T7).** The continuation application runs strictly after the event-time
+  epilogue; every `StartWake`/re-arm it seats is placed at a STRICTLY LATER `event_time` through
+  `PostEpilogueSchedulingContext`. `ProcessEventTime` asserts `no recovery-continuation application remains due at t`
+  before finalising `t`.
+- **Historical freeze.** Stage-1A–1S lettered artifacts are unchanged; Stage-1T supersessions are recorded in
+  `STAGE_01T_SUPERSESSION_REGISTER.md`.

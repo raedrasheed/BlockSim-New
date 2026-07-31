@@ -289,11 +289,27 @@ point, planned test stage, and consequence of violation.
 - **Scope.** Security-floor evaluation; reporting.
 - **Required inputs.** Floor/threshold evaluations; breach events; recovery logs.
 - **Enforcement point.** Security-floor-evaluation step plus the results-recording step
-  (pairs with the `SECURITY_RECOVERY` responses in the failure table).
+  (pairs with the `SECURITY_RECOVERY` responses in the failure table). **T4 (no fabricated
+  UNRECOVERABLE):** an IRREVERSIBLE branch-C install failure that occurs AFTER the
+  `SECURITY_RECOVERY → ASSIGNMENT` transition is recorded as its own disposition
+  `recovery_episode_disposition = RECOVERY_INSTALL_FAILED_ABORTED` with decision status
+  `APPLY_FAILED_TERMINAL` and closes the round via the declared recovery-finalising `RoundAbort`; it is
+  NEVER relabelled as an `UNRECOVERABLE` floor outcome (which is reserved for a FINAL census that still
+  breaches the floor after the deadline, O3/R14) and NEVER sets `recovery_outcome_finalised`. **T6:** a
+  RESTORED outcome that depends on PENDING/WAKING reserves is NOT applied while those reserves are
+  inactive — a syntactically valid PENDING assignment set is not treated as restored hash rate, so the
+  reduced-participation regime is never reported as recovered before the reserve is `ACTIVE_HASHING`.
+  **T3 (install-phase integrity):** the redistribution-only install is a synchronous sub-computation with
+  no event boundary within it, so no epilogue ever observes — or records a floor decision from — a
+  transient `ASSIGNMENT`-with-active-episode state; every install exit ends in exactly one of `HASHING`
+  + `APPLIED`, `SECURITY_RECOVERY` + `APPLY_FAILED` (rolled back), or `ROUND_ABORTED` +
+  `RECOVERY_INSTALL_FAILED_ABORTED`.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest
-  reporting of the reduced-participation regime.
+  reporting of the reduced-participation regime; a branch-C install failure silently reported as a
+  genuine `UNRECOVERABLE` floor breach, or a reserve-dependent restoration reported as recovered before
+  the reserve is actually active.
 
 ### I17 — Active hash rate decomposes exactly into honest and adversarial contributions.
 
@@ -335,6 +351,12 @@ point, planned test stage, and consequence of violation.
   settlement kinds (`PRIMARY_EPILOGUE` from the epilogue, `POST_RECOVERY_APPLICATION` from the settlement), removing
   the earlier contradiction in which the epilogue was named the sole clearer while the settlement also cleared it;
   `CommitSecurityCensus` remains the sole setter of `dirty = true` and the sole writer of the latest census.
+  **T1/T7:** the branch-C continuation application (`ApplyRecoveryAssignmentContinuationAfterEpilogue`) runs
+  STRICTLY AFTER the single event-time epilogue and the completion application, so it never re-decides the floor;
+  it reads and re-verifies the FINAL versioned census (T2: its `continuation_bound_census_version` must equal
+  `latest_recovery_census[episode].RecoveryCensusVersion`) before applying, and every `StartWake`/re-arm it seats
+  is placed at a STRICTLY LATER `event_time` through `PostEpilogueSchedulingContext` — so no census the continuation
+  produces lands at the already-settled `event_time`.
 - **Planned test stage.** Stage 3 (time-varying hash rate, security floor, reserve activation).
 - **Consequence of violation.** Inconsistent hash-rate decomposition; `q_adv(t)` derived from an
   independently sampled adversarial term; a zero-active-rate regime silently reported as safe
