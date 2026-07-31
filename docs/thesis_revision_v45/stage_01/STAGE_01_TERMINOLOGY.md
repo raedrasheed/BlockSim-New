@@ -332,10 +332,11 @@ Catalogue" denotes the separate document defining I1..I19.
 - **`CompleteAssignmentPhase` (K2).** The named procedure that performs the executable `ASSIGNMENT →
   HASHING` transition (R4) after the intended assignment set is built; a `HashWorkEvent` is a no-op while
   the round is still `ASSIGNMENT`.
-- **Cross-round residency rebase (`FinalizeRoundResidency`/`BeginRoundResidency`, K3).** A state that
-  persists across a round boundary is closed for the old round and reopened at the IDENTICAL
+- **Cross-round residency rebase (`FinalizeRoundResidency`/`BeginRoundResidency`, K3; SUPERSEDED by L5).**
+  A state that persists across a round boundary is closed for the old round and reopened at the IDENTICAL
   `boundary_time` for the new round with NO transition energy; the idle interval is counted exactly once
-  (I19 amended).
+  (I19 amended). **L5 supersedes the two-procedure form with the single idempotent owner
+  `RebaseResidencyAtRoundBoundary` (see the Stage-1L addendum).**
 - **`DriverEventEnvelope` (K4).** The explicit `(event_time, delta_cycle, event_seq)` a sim-driver
   transition carries so it is never ambient; sourced from `ScheduleEvent` or stamped from the
   `EventQueueContext`.
@@ -349,7 +350,44 @@ Catalogue" denotes the separate document defining I1..I19.
   census; invoked on entry to `HASHING` (by `CompleteAssignmentPhase`) and `SOLUTION_PROPAGATION`, it
   writes a coherent dirty+latest even when no miner boundary occurred (e.g. `H_active = 0`), so the
   epilogue evaluates the floor. It never runs while the round is `ASSIGNMENT`.
-- **`EventQueueContext` (K8).** The single explicit dispatch/scheduling state (`event_queue`,
-  `current_event_time`, `current_delta_cycle`, `current_microphase`, `event_creation_seq`,
-  `finalised_event_times`). `ScheduleEvent` DERIVES the target `delta_cycle` from it; a caller supplies
-  only `event_time` + `microphase` and cannot override `delta_cycle`.
+- **`EventQueueContext` (K8; extended L1).** The single explicit dispatch/scheduling state (`event_queue`,
+  `current_event_time`, `current_delta_cycle`, `current_microphase`, `current_event_seq` (L1),
+  `event_creation_seq`, `finalised_event_times`, `rebased_boundaries` (L5)). `ScheduleEvent` DERIVES the
+  target `delta_cycle` from it; a caller supplies only `event_time` + `microphase` and cannot override
+  `delta_cycle`.
+
+## Stage-1L terminology addendum (final contract reconciliation)
+
+- **`dispatch_envelope` (L1).** The ONE `(event_time, delta_cycle, event_seq)` of the event currently being
+  handled, materialised by `ProcessEventTime` from the dispatched event's own enqueued envelope and exposed
+  identically as the `EventQueueContext` current-dispatch fields (`current_event_time`,
+  `current_delta_cycle`, `current_event_seq`). Every synchronous miner transition and every `StartWake` done
+  while handling the event BINDS its envelope from `dispatch_envelope`; queued handlers thread their own,
+  and sim-driver entry points (`MinerRegister`, `PrepareParticipantsForNewRound`, `ReserveActivate`, …) are
+  themselves seated on the queue through `ScheduleEvent` and receive it on dispatch. A driver entry point
+  NEVER manually stamps `next EQ.event_creation_seq` (the K4 manual-stamp alternative is withdrawn); the seq
+  is owned solely by `ScheduleEvent`. No `ApplyMinerStateTransition` call omits any of the three fields.
+- **Single `ASSIGNMENT → HASHING` owner (L2).** `CompleteAssignmentPhase` is the SOLE executable
+  `ASSIGNMENT → HASHING` (R4) step: both `PrepareParticipantsForNewRound` and `TemplateRefresh` route
+  through it (the former in-line `TRANSITION round_state -> HASHING` in `TemplateRefresh` is removed). The
+  `SOLUTION_PROPAGATION → HASHING` re-entry is a DISTINCT round-SM edge, not an assignment-phase completion.
+- **Canonical discovery-before-lease-expiry order (L3).** When a solution discovery and a lease expiry share
+  an `event_time`, discovery (priority item 7) is processed BEFORE lease expiry (item 10) — the one
+  canonical order, agreeing across `§0.7`, the priority table, and `STAGE_01G_EVENT_MICROPHASE_SPEC.md §4`.
+  A boundary discovery captures its immutable snapshot against the still-`CURRENT` head before that head's
+  lease can expire; the reverse order is forbidden. No corpus statement places lease expiry first.
+- **Status-aware lease expiry (L4).** `LeaseExpiry` branches on the canonical status of the exact expiring
+  version: `SUPERSEDED`/`CLOSED` → stale no-op; `CURRENT` → renew (F7) or canonical CLOSE (K6) then reassign;
+  `PAUSED` → CLOSE the paused head without a wake then reassign; `PENDING` → CLOSE the un-activated head then
+  reassign. Every reassignment path CLOSES the source FIRST, so `RangeReassign` asserts
+  `status(source) = CLOSED`. `SUPERSEDED` remains renewal-only.
+- **`RebaseResidencyAtRoundBoundary` (L5).** The SINGLE idempotent owner of the cross-round residency rebase
+  (superseding `FinalizeRoundResidency`/`BeginRoundResidency`). It closes the old-round interval and reopens
+  the same state at the identical `boundary_time = round_terminal_time` with NO transition energy, and is
+  idempotent via `boundary_id = (prior_RoundID, new_RoundID)` (a repeat is a no-op). `CloseRoundAssignments`
+  records `round_terminal_time` ONLY; the idle interval is counted exactly once (I19).
+- **`ScheduleEvent` sole delta-cycle authority (L6).** `ScheduleEvent` is the ONLY authority over
+  `delta_cycle`: no `SCHEDULE` expression, `ScheduleEvent` argument, or handler supplies or overrides one;
+  every `delta_cycle` shown is the value `ScheduleEvent` derived (or the `dispatch_envelope.delta_cycle` read
+  back at dispatch). `StartWake` schedules `WakeCompleteEvent` with ONLY `(target_event_time,
+  target_microphase)`: positive latency → `now + wake_latency`; zero latency → `now` at `WAKE_COMPLETE`.

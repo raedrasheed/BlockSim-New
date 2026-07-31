@@ -360,7 +360,7 @@ replaced by two consistent invariants** (the old form was impossible while a lin
 
 ---
 
-### I19 — State-residency time has a single owner and is never double-counted (H7; cross-round continuity K3).
+### I19 — State-residency time has a single owner and is never double-counted (H7; cross-round continuity K3; single idempotent boundary owner L5).
 
 - **Formal statement.** For every miner and every occupancy of a state, the residency duration
   `t_<state>` (including `t_ACTIVE_HASHING = t_hash`) is produced **exactly once**, by the single
@@ -371,12 +371,16 @@ replaced by two consistent invariants** (the old form was impossible while a lin
   once (at the boundary) and never a second time per hash unit. For each `(miner, state occupancy)`
   the sum of all recorded residency contributions equals the single boundary-to-boundary interval,
   and these intervals partition the miner's timeline with the state-energy accounting of I5/I6.
-  **Cross-round continuity (K3, amended):** a state that PERSISTS across a round boundary is NOT reset
-  silently; the round boundary is a bookkeeping REBASE — `FinalizeRoundResidency(boundary_time)` closes
-  the open interval (attributing its energy to the OLD round) and `BeginRoundResidency(boundary_time)`
-  reopens the SAME state at the IDENTICAL `boundary_time` for the new round, charging NO transition
-  energy (the miner state did not change). The idle interval between a round's closure and the next
-  round's `StartWake` is therefore counted **exactly once**, across the boundary.
+  **Cross-round continuity (K3, amended; single idempotent owner L5):** a state that PERSISTS across a
+  round boundary is NOT reset silently; the round boundary is a bookkeeping REBASE performed by ONE
+  procedure, `RebaseResidencyAtRoundBoundary` (L5, which SUPERSEDES the former `FinalizeRoundResidency` /
+  `BeginRoundResidency`): it closes the open interval (attributing its energy to the OLD round) AND reopens
+  the SAME state at the IDENTICAL `boundary_time = round_terminal_time` for the new round, charging NO
+  transition energy (the miner state did not change). It is **idempotent** via a deterministic
+  `boundary_id = (prior_RoundID, new_RoundID)`: a replayed or retried `RoundInitialise` re-invoking it is a
+  no-op, so the boundary is never applied twice. `CloseRoundAssignments` records `round_terminal_time`
+  ONLY and never rebases. The idle interval between a round's closure and the next round's `StartWake` is
+  therefore counted **exactly once**, across the boundary.
 - **Scope.** Per-miner residency-time accounting; the `ACTIVE_HASHING`/`t_hash` boundary in
   particular; the interaction between event-scheduled hashing (G9) and residency accrual. A
   structural accounting invariant; it introduces no new consensus feature and does not change the
@@ -386,9 +390,11 @@ replaced by two consistent invariants** (the old form was impossible while a lin
   the per-state power levels `P_<state>`; the ordered `ApplyMinerStateTransition` boundaries.
 - **Enforcement point.** `ApplyMinerStateTransition` (SOLE residency owner — opens/closes every
   interval, H7); `HashWorkEvent` (records metadata only, increments no `t_<state>` — H7/G9);
-  `FinalizeRoundResidency`/`BeginRoundResidency` (the ONLY cross-round rebase — no-state-change
-  close+reopen at the identical boundary_time, K3); `residency_ledger` (single writer). I5/I6 reconcile
-  the resulting durations and energies.
+  `RebaseResidencyAtRoundBoundary` (L5 — the ONLY cross-round rebase: a SINGLE idempotent owner that
+  closes+reopens at the identical `boundary_time` keyed by `boundary_id`, superseding
+  `FinalizeRoundResidency`/`BeginRoundResidency`); `CloseRoundAssignments` (records `round_terminal_time`
+  only, performs no rebase); `residency_ledger` (single writer). I5/I6 reconcile the resulting durations
+  and energies.
 - **Planned test stage.** Stage 3 (state-residency and energy accounting).
 - **Consequence of violation.** The same `ACTIVE_HASHING` interval charged twice (once at the
   boundary and again per hash unit), inflating `t_hash`/`E_hash`; a residency time written by two

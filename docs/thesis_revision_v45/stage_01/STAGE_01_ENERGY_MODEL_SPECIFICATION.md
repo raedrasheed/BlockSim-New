@@ -168,6 +168,22 @@ without an "other" catch-all. No duration may be negative, and the durations for
 not sum to more than the horizon (no double-counted time) nor be silently truncated below it
 (no vanished time).
 
+**Cross-round boundary rebase (I19; single idempotent owner, L5).** When a miner's state
+persists across a round boundary, the horizon partition must not be disturbed by the
+bookkeeping split of the timeline into per-round ledgers. The single procedure
+`RebaseResidencyAtRoundBoundary` (Stage-1L; superseding the former
+`FinalizeRoundResidency`/`BeginRoundResidency`) closes the open interval at the exact
+`boundary_time = round_terminal_time` (attributing its energy to the OLD round) and reopens the
+**same** state at the **identical** `boundary_time` for the new round, charging **no** transition
+energy — the miner's state did not change, so the boundary instant is neither duplicated nor
+dropped. The rebase is **idempotent** via a deterministic `boundary_id = (prior_RoundID,
+new_RoundID)`: a replayed or retried `RoundInitialise` re-invoking it is a no-op, so no boundary
+is ever applied twice. Consequently the idle interval between a round's closure and the next
+round's `StartWake` is counted **exactly once**, the per-miner durations still partition `[0, T]`
+(I5), and the A1 accounting baseline (`8.420833333 kWh`) is unchanged — any energy difference
+remains attributable ONLY to reduced active power-time, never to how the timeline is split across
+rounds.
+
 ---
 
 ## 4. Network total and the saving (I7)
