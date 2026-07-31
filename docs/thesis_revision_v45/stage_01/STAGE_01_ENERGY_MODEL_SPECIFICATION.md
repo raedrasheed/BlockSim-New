@@ -168,21 +168,24 @@ without an "other" catch-all. No duration may be negative, and the durations for
 not sum to more than the horizon (no double-counted time) nor be silently truncated below it
 (no vanished time).
 
-**Cross-round boundary rebase (I19; single idempotent owner, L5).** When a miner's state
-persists across a round boundary, the horizon partition must not be disturbed by the
-bookkeeping split of the timeline into per-round ledgers. The single procedure
-`RebaseResidencyAtRoundBoundary` (Stage-1L; superseding the former
-`FinalizeRoundResidency`/`BeginRoundResidency`) closes the open interval at the exact
+**Boundary residency settle (I19; single idempotent owner, L5; unified with run-end, M4).** When a
+miner's state persists across a boundary, the horizon partition must not be disturbed by the
+bookkeeping split of the timeline into per-round ledgers. ONE procedure `SettleResidencyBoundary`
+(Stage-1M; superseding the former `FinalizeRoundResidency`/`BeginRoundResidency`) owns every boundary
+residency close/reopen. With `mode = REBASE_TO_NEXT_ROUND` it closes the open interval at the exact
 `boundary_time = round_terminal_time` (attributing its energy to the OLD round) and reopens the
 **same** state at the **identical** `boundary_time` for the new round, charging **no** transition
-energy — the miner's state did not change, so the boundary instant is neither duplicated nor
-dropped. The rebase is **idempotent** via a deterministic `boundary_id = (prior_RoundID,
-new_RoundID)`: a replayed or retried `RoundInitialise` re-invoking it is a no-op, so no boundary
-is ever applied twice. Consequently the idle interval between a round's closure and the next
-round's `StartWake` is counted **exactly once**, the per-miner durations still partition `[0, T]`
-(I5), and the A1 accounting baseline (`8.420833333 kWh`) is unchanged — any energy difference
-remains attributable ONLY to reduced active power-time, never to how the timeline is split across
-rounds.
+energy — the boundary instant is neither duplicated nor dropped. With `mode = FINAL_RUN_END` it closes
+every open interval at the run horizon `T` with **no** reopen. It is **idempotent** via a deterministic
+`boundary_id` (`(prior_RoundID, new_RoundID)` or `(RoundID, RUN_END)`): a replayed or retried
+`RoundInitialise` / `RoundAbort` re-invoking it is a no-op, so no boundary is ever applied twice.
+**M4:** `CloseRoundAssignments` performs **no** residency/energy finalisation — the earlier in-line
+`finalise state durations and energy to the exact closure time` is removed; it records
+`round_terminal_time` only, so there is no competing owner. Consequently the idle interval between a
+round's closure and the next round's `StartWake` (or the run horizon) is counted **exactly once**, the
+per-miner durations still partition `[0, T]` (I5), and the A1 accounting baseline (`8.420833333 kWh`)
+is unchanged — any energy difference remains attributable ONLY to reduced active power-time, never to
+how the timeline is split across rounds.
 
 ---
 

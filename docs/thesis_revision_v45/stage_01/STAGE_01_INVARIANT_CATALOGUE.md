@@ -371,16 +371,19 @@ replaced by two consistent invariants** (the old form was impossible while a lin
   once (at the boundary) and never a second time per hash unit. For each `(miner, state occupancy)`
   the sum of all recorded residency contributions equals the single boundary-to-boundary interval,
   and these intervals partition the miner's timeline with the state-energy accounting of I5/I6.
-  **Cross-round continuity (K3, amended; single idempotent owner L5):** a state that PERSISTS across a
-  round boundary is NOT reset silently; the round boundary is a bookkeeping REBASE performed by ONE
-  procedure, `RebaseResidencyAtRoundBoundary` (L5, which SUPERSEDES the former `FinalizeRoundResidency` /
-  `BeginRoundResidency`): it closes the open interval (attributing its energy to the OLD round) AND reopens
-  the SAME state at the IDENTICAL `boundary_time = round_terminal_time` for the new round, charging NO
-  transition energy (the miner state did not change). It is **idempotent** via a deterministic
-  `boundary_id = (prior_RoundID, new_RoundID)`: a replayed or retried `RoundInitialise` re-invoking it is a
-  no-op, so the boundary is never applied twice. `CloseRoundAssignments` records `round_terminal_time`
-  ONLY and never rebases. The idle interval between a round's closure and the next round's `StartWake` is
-  therefore counted **exactly once**, across the boundary.
+  **Cross-round continuity (K3, amended; single idempotent owner L5; unified with run-end M4):** a state
+  that PERSISTS across a boundary is NOT reset silently; the boundary is a bookkeeping settle performed by
+  ONE procedure, `SettleResidencyBoundary` (M4/L5, which SUPERSEDES the former `FinalizeRoundResidency` /
+  `BeginRoundResidency`). With `mode = REBASE_TO_NEXT_ROUND` it closes the open interval (attributing its
+  energy to the OLD round) AND reopens the SAME state at the IDENTICAL `boundary_time = round_terminal_time`
+  for the new round, charging NO transition energy; with `mode = FINAL_RUN_END` it closes every open
+  interval at the run horizon with NO reopen. It is **idempotent** via a deterministic `boundary_id`
+  (`(prior_RoundID, new_RoundID)` or `(RoundID, RUN_END)`): a replayed or retried `RoundInitialise` /
+  `RoundAbort` re-invoking it is a no-op, so a boundary is never applied twice. **M4:**
+  `CloseRoundAssignments` performs NO residency/energy finalisation — it records `round_terminal_time`
+  ONLY; the earlier in-line `finalise state durations and energy to the exact closure time` is removed, so
+  there is no competing owner. The idle interval between a round's closure and the next round's `StartWake`
+  (or the run horizon) is therefore counted **exactly once**, across the boundary.
 - **Scope.** Per-miner residency-time accounting; the `ACTIVE_HASHING`/`t_hash` boundary in
   particular; the interaction between event-scheduled hashing (G9) and residency accrual. A
   structural accounting invariant; it introduces no new consensus feature and does not change the
@@ -390,11 +393,11 @@ replaced by two consistent invariants** (the old form was impossible while a lin
   the per-state power levels `P_<state>`; the ordered `ApplyMinerStateTransition` boundaries.
 - **Enforcement point.** `ApplyMinerStateTransition` (SOLE residency owner — opens/closes every
   interval, H7); `HashWorkEvent` (records metadata only, increments no `t_<state>` — H7/G9);
-  `RebaseResidencyAtRoundBoundary` (L5 — the ONLY cross-round rebase: a SINGLE idempotent owner that
-  closes+reopens at the identical `boundary_time` keyed by `boundary_id`, superseding
+  `SettleResidencyBoundary` (M4/L5 — the ONLY boundary residency close/reopen: a SINGLE idempotent owner
+  keyed by `boundary_id`, with `REBASE_TO_NEXT_ROUND` and `FINAL_RUN_END` modes, superseding
   `FinalizeRoundResidency`/`BeginRoundResidency`); `CloseRoundAssignments` (records `round_terminal_time`
-  only, performs no rebase); `residency_ledger` (single writer). I5/I6 reconcile the resulting durations
-  and energies.
+  ONLY, performs NO residency finalisation — M4); `residency_ledger` (single writer). I5/I6 reconcile the
+  resulting durations and energies.
 - **Planned test stage.** Stage 3 (state-residency and energy accounting).
 - **Consequence of violation.** The same `ACTIVE_HASHING` interval charged twice (once at the
   boundary and again per hash unit), inflating `t_hash`/`E_hash`; a residency time written by two

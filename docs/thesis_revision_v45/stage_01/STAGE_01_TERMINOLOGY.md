@@ -381,13 +381,46 @@ Catalogue" denotes the separate document defining I1..I19.
   `PAUSED` → CLOSE the paused head without a wake then reassign; `PENDING` → CLOSE the un-activated head then
   reassign. Every reassignment path CLOSES the source FIRST, so `RangeReassign` asserts
   `status(source) = CLOSED`. `SUPERSEDED` remains renewal-only.
-- **`RebaseResidencyAtRoundBoundary` (L5).** The SINGLE idempotent owner of the cross-round residency rebase
-  (superseding `FinalizeRoundResidency`/`BeginRoundResidency`). It closes the old-round interval and reopens
-  the same state at the identical `boundary_time = round_terminal_time` with NO transition energy, and is
-  idempotent via `boundary_id = (prior_RoundID, new_RoundID)` (a repeat is a no-op). `CloseRoundAssignments`
-  records `round_terminal_time` ONLY; the idle interval is counted exactly once (I19).
+- **`RebaseResidencyAtRoundBoundary` (L5; RENAMED/GENERALISED to `SettleResidencyBoundary` in M4).** The
+  SINGLE idempotent owner of the cross-round residency rebase (superseding `FinalizeRoundResidency`/
+  `BeginRoundResidency`). It closes the old-round interval and reopens the same state at the identical
+  `boundary_time = round_terminal_time` with NO transition energy, idempotent via `boundary_id` (a repeat is
+  a no-op). **M4 renames it `SettleResidencyBoundary` and adds a `FINAL_RUN_END` mode (see the Stage-1M
+  addendum).** `CloseRoundAssignments` records `round_terminal_time` ONLY; the idle interval is counted once (I19).
 - **`ScheduleEvent` sole delta-cycle authority (L6).** `ScheduleEvent` is the ONLY authority over
   `delta_cycle`: no `SCHEDULE` expression, `ScheduleEvent` argument, or handler supplies or overrides one;
   every `delta_cycle` shown is the value `ScheduleEvent` derived (or the `dispatch_envelope.delta_cycle` read
   back at dispatch). `StartWake` schedules `WakeCompleteEvent` with ONLY `(target_event_time,
   target_microphase)`: positive latency → `now + wake_latency`; zero latency → `now` at `WAKE_COMPLETE`.
+
+## Stage-1M terminology addendum (minimal executable closure)
+
+- **Explicit `dispatch_envelope` threading; no shorthand (M1).** The Stage-1L positional shorthand is
+  REMOVED: no `ApplyMinerStateTransition(..., now, reason=...)` form and no implicit read of
+  `EQ.current_event_time/current_delta_cycle/current_event_seq`. EVERY procedure that directly or indirectly
+  calls the hook carries an explicit `dispatch_envelope` input and threads it; every hook call spells out
+  `event_time = dispatch_envelope.event_time`, `delta_cycle = dispatch_envelope.delta_cycle`,
+  `event_seq = dispatch_envelope.event_seq`. A queued handler obtains its envelope from its own dispatched
+  event; a synchronous nested procedure receives the same envelope as an explicit input.
+- **`TransitionRoundState` — automatic applicability-entry census (M2).** The single round-state transition
+  helper for every dispatched (non-epilogue) transition: it bumps `state_version` and, whenever the new
+  state is floor-applicable (`HASHING`, `SOLUTION_PROPAGATION`, `SECURITY_RECOVERY`), calls
+  `CaptureSecurityCensusOnApplicabilityEntry(at = dispatch_envelope.event_time)`. It makes EVERY entry into
+  HASHING capture a census — including `HandlePropagationFailure`'s `SOLUTION_PROPAGATION → HASHING` re-entry,
+  even with no paused miner, positive-latency resumes, or an unchanged `H_active`. The ONE exception is the
+  `SecurityFloorEvaluate` epilogue's `→ SECURITY_RECOVERY` (re-dirtying a mid-epilogue event_time is forbidden).
+- **Executable PENDING lease expiry + `WakeCompleteEvent` stale guard (M3).** `LeaseExpiry` `CASE PENDING`
+  cancels the exact pending `WakeCompleteEvent`, moves a `WAKING` holder `WAKING → OFFLINE`
+  (`reason = lease_expired_while_waking`, explicit envelope), CLOSES the head, and only then reassigns;
+  `CASE PAUSED` also cancels candidate-specific resume/wake events. `WakeCompleteEvent` BEGINS with an explicit
+  stale-target guard (`status ∈ {PENDING, PAUSED}`, current round/template epoch, the miner's own live head)
+  returning `stale_wake_noop` — it does NOT rely on the `HashWorkEvent` G9 guard.
+- **`SettleResidencyBoundary` (M4).** The SINGLE idempotent owner of BOTH the round-boundary rebase
+  (`REBASE_TO_NEXT_ROUND`) and the run-end close (`FINAL_RUN_END`), keyed by `boundary_id`.
+  `CloseRoundAssignments` performs NO residency/energy finalisation (the in-line finalise line is removed);
+  it records `round_terminal_time` only. `RoundAbort` settles via `FINAL_RUN_END` before its I5/I6/I7 checks.
+- **Canonical event-type → microphase mapping (M5).** Every operational enqueue is a `ScheduleEvent` call
+  (or its `SCHEDULE` shorthand) supplying an EXPLICIT `target_microphase` from the §0.7g mapping
+  (`FULL_BLOCK_ARRIVAL`, `CERTIFICATE_ARRIVAL`, `HASH_WORK`, `LEASE_EXPIRY`, `WAKE_COMPLETE`, `RESUME`,
+  `PARTICIPATION_CHANGE`, `MONITORING`). No enqueue omits a microphase; every event-producing loop is stably
+  sorted (`MinerID`, then `CandidateID`/`AssignmentID`) before the seq is assigned.
