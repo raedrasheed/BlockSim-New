@@ -310,7 +310,15 @@ point, planned test stage, and consequence of violation.
   `ApplyRecoveryWorkAfterEpilogue`), NEVER a `RecoveryOutcome` and NEVER marked `APPLIED` as `RESTORED`;
   the round stays `SECURITY_RECOVERY` and a LATER no-breach final census mints `RESTORED`. So a
   still-breached census is never reported as a repaired/RESTORED floor, and the impossible reserve-dependent
-  `RESTORED` continuation is removed.
+  `RESTORED` continuation is removed. **V6 (security-floor recovery work must change the census):** only an
+  action that can ACTUALLY change the `ACTIVE_HASHING` census — `H_active`/`H_honest`/`q_adv` (reserve
+  activation, or a declared honest/adversarial participation replacement) — is `SECURITY_FLOOR_RECOVERY_WORK`
+  and controls the breach-before-deadline logic. A range redistribution AMONG THE SAME `ACTIVE_HASHING`
+  miners cannot change those census sums, so it can never repair a security-floor breach; it is
+  `COVERAGE_REPAIR_WORK` (`ClassifyRecoveryWork` no longer returns `RANGE_REDISTRIBUTION_REQUIRED`), and a
+  redistribution after a no-breach census remains the branch-C redistribution-only continuation. **V7:** each
+  `RecoveryWorkID` has exactly one live or terminal disposition and at most one per episode is
+  {ARMED, DUE, APPLYING}; terminal closure cancels EVERY nonterminal work record, so no orphan survives.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest

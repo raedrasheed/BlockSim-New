@@ -575,6 +575,61 @@ declared setup/refresh failure path — no caller returns success with the round
 `RECOVERY_WORK_DUE`, so "completion is due", "continuation is due", "recovery work is due", and "deadline reached" are
 distinguishable census provenances.
 
+**V1 (reconcile recovery work before seating new work).** `SecurityFloorEvaluate` calls `CommitRecoveryCensus`,
+`ReconcilePendingRecoveryDecisions`, and `ReconcilePendingRecoveryWork` — in that order — BEFORE it considers
+`SeatRecoveryWork`. A DUE work record whose census version moved (`v1 → v2`) is REBOUND to `v2` (same `RecoveryWorkID`,
+no replacement) so `ApplyRecoveryWorkAfterEpilogue` can consume it; a no-longer-warranted record is SUPERSEDED; an
+ARMED future record is re-affirmed or superseded. `SeatRecoveryWork` NEVER replaces a DUE work record at the current
+`event_time`. This removes the invalid due-time sequence where an orphaned DUE record fails the `ProcessEventTime`
+finalisation assertion.
+
+**V2 (one explicit SchedulingSourceContext at every call site).** The Stage-1U bare-`dispatch_envelope`
+ORDINARY_DISPATCH alias is WITHDRAWN. Every `StartWake` / `ReserveActivate` / `RangeAssign` / `RangeReassign` /
+`CommitRecoveryAssignmentPlan` call passes an EXPLICIT `scheduling_context` — `ORDINARY_DISPATCH(dispatch_envelope)`
+or `POST_EPILOGUE(pctx)`; no signature depends on an implicit conversion.
+
+**V3 (StartWake is a transaction with explicit outputs).** `StartWake` returns
+`wake_seated(AssignmentID, WakeEventRef, wake_target_time, resulting_state = WAKING)` |
+`wake_schedule_failed_before_transition(reason)` | `wake_transition_failed_after_seat(reason, WakeEventRef)`. It seats
+the `WakeCompleteEvent` FIRST, then applies the WAKING transition; a transition failure after the seat CANCELS the
+seated event, so no failure leaves a miner WAKING without a live `WakeCompleteEvent`. A zero-latency POST_EPILOGUE wake
+targets `next_representable_simulation_time(source)`.
+
+**V4 (ReserveActivate returns actual references).** `ReserveActivate` / `ReserveActivateFromPlan` return
+`reserve_activation_committed(MinerID, AssignmentID, assignment_version, WakeEventRef)` |
+`reserve_activation_failed_before_mutation(reason)` |
+`reserve_activation_failed_after_assignment(reason, AssignmentID, rollback_record)`. If wake seating fails after the
+PENDING assignment is created, the assignment is closed legally, the ledgers restored, and the reserve miner left in
+`RESERVE`.
+
+**V5 (commit exactly the prepared plan).** `PrepareRecoveryAssignmentPlan` selects the reserve miners / ranges /
+origin / source / creation order / wake operations; `CommitRecoveryAssignmentPlan` uses those EXACT values via the
+plan-bound `ReserveActivateFromPlan` (no independent SELECT), revalidating the exact specs immediately before
+mutation, and builds `rollback_metadata` from the ACTUAL references the transactions return.
+
+**V6 (separate hash-rate recovery from coverage repair).** `SECURITY_FLOOR_RECOVERY_WORK` is only an action that can
+CHANGE the `ACTIVE_HASHING` census (reserve activation / declared participation replacement); a same-active-miner
+range redistribution cannot change `H_active`/`H_honest`/`q_adv`, so it is `COVERAGE_REPAIR_WORK` and does NOT control
+the breach-before-deadline outcome logic. `RANGE_REDISTRIBUTION_REQUIRED` is removed from `ClassifyRecoveryWork`; a
+redistribution after a no-breach census remains the branch-C redistribution-only continuation.
+
+**V7 (complete recovery-work lifecycle).** `RECOVERY_WORK_STATUS` in {CREATED, ARMED, DUE, APPLYING, CONSUMED,
+SUPERSEDED, SCHEDULE_FAILED, HORIZON_DEFERRED, CANCELLED}; every `RecoveryWorkID` has exactly one live or terminal
+disposition; at most one work record per episode is in {ARMED, DUE, APPLYING}. Before a new work identity is
+published, the prior one is atomically SUPERSEDED/CANCELLED and its due fact consumed. `CancelActiveRecoveryEpisode`
+iterates EVERY nonterminal work record of the episode, so no orphan ARMED/DUE/APPLYING record survives terminal
+closure.
+
+**V8 (executable ordinary assignment-setup rollback).** `RollbackParticipantSetup` and `RollbackTemplateRefreshSetup`
+cancel the captured `WakeEventRef`s, close every created head legally, restore the ledgers, and verify no participant
+remains WAKING for a rolled-back head. `PrepareParticipantsForNewRound` and `TemplateRefresh` capture each structured
+`StartWake` result and, on `assignment_phase_failed`, roll back and take an explicit liveness path (a strictly-later
+`SetupRetryEvent` or a declared `RoundAbort`) — never leaving `round_state = ASSIGNMENT` with no controller.
+
+**V9 (no ambiguous boolean/AND returns).** Constructs like `RETURN ScheduleEvent(...) AND wake_started` are removed;
+every procedure inspects the scheduler disposition explicitly and returns one declared structured result whose
+signature, RETURNS block, and call sites agree.
+
 ### 3.11 What causes a template refresh
 
 A template refresh (`TEMPLATE_REFRESH`) is caused by (a) exhaustion of the committed

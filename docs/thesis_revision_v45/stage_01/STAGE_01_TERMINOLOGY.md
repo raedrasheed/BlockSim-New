@@ -784,3 +784,42 @@ Catalogue" denotes the separate document defining I1..I19.
   `RecoveryAssignmentContinuationDueEvent` uses `RECOVERY_CONTINUATION_DUE` (not `RECOVERY_COMPLETION_DUE`).
 - **Historical freeze.** Stage-1A–1T lettered artifacts are unchanged; Stage-1U supersessions are recorded in
   `STAGE_01U_SUPERSESSION_REGISTER.md`.
+
+## Stage-1V terminology addendum (recovery-work transaction & liveness lock)
+
+- **`ReconcilePendingRecoveryWork` (V1).** The procedure `SecurityFloorEvaluate` calls — after `CommitRecoveryCensus`
+  and `ReconcilePendingRecoveryDecisions`, before it considers `SeatRecoveryWork` — to reconcile the in-flight
+  recovery-work record against the newest final census: a still-warranted DUE record is REBOUND to the latest version
+  (same `RecoveryWorkID`, no replacement) so `ApplyRecoveryWorkAfterEpilogue` can consume it; a no-longer-warranted
+  record is SUPERSEDED; an ARMED future record is re-affirmed or superseded. `SeatRecoveryWork` never replaces a DUE
+  record at the current `event_time`.
+- **`SchedulingSourceContext` is explicit at every call site (V2).** The Stage-1U bare-`dispatch_envelope`
+  ORDINARY_DISPATCH alias is WITHDRAWN. Every `StartWake` / `ReserveActivate` / `RangeAssign` / `RangeReassign` /
+  `CommitRecoveryAssignmentPlan` call passes `scheduling_context = ORDINARY_DISPATCH(dispatch_envelope)` or
+  `POST_EPILOGUE(pctx)` explicitly.
+- **`StartWake` transaction (V3).** `wake_seated(AssignmentID, WakeEventRef, wake_target_time, resulting_state =
+  WAKING)` | `wake_schedule_failed_before_transition(reason)` | `wake_transition_failed_after_seat(reason,
+  WakeEventRef)`. It seats the `WakeCompleteEvent` FIRST, then applies the WAKING transition; a post-seat transition
+  failure cancels the seated event, so a miner is never left WAKING without a live `WakeCompleteEvent`.
+- **`reserve_activation_committed` / `ReserveActivateFromPlan` (V4/V5).** `ReserveActivate` /
+  `ReserveActivateFromPlan` return `reserve_activation_committed(MinerID, AssignmentID, assignment_version,
+  WakeEventRef)` | `reserve_activation_failed_before_mutation(reason)` |
+  `reserve_activation_failed_after_assignment(reason, AssignmentID, rollback_record)`. `ReserveActivateFromPlan` uses
+  the plan's EXACT selected values (V5); a wake-seat failure after the PENDING assignment closes it legally and leaves
+  the reserve miner in `RESERVE`.
+- **`SECURITY_FLOOR_RECOVERY_WORK` vs `COVERAGE_REPAIR_WORK` (V6).** `RECOVERY_WORK_CLASS`: only census-changing
+  actions (reserve activation / declared participation replacement) are `SECURITY_FLOOR_RECOVERY_WORK` and control the
+  breach-before-deadline logic; a same-active-miner redistribution is `COVERAGE_REPAIR_WORK` (cannot change
+  `H_active`/`H_honest`/`q_adv`) and `ClassifyRecoveryWork` no longer returns `RANGE_REDISTRIBUTION_REQUIRED`.
+- **`RECOVERY_WORK_STATUS` complete lifecycle (V7).** {CREATED, ARMED, DUE, APPLYING, CONSUMED, SUPERSEDED,
+  SCHEDULE_FAILED, HORIZON_DEFERRED, CANCELLED}. Exactly one live/terminal disposition per `RecoveryWorkID`; at most
+  one per episode in {ARMED, DUE, APPLYING}; `CancelActiveRecoveryEpisode` cancels EVERY nonterminal work record.
+- **`RollbackParticipantSetup` / `RollbackTemplateRefreshSetup` / `SetupRetryEvent` (V8).** The named executable
+  rollbacks (cancel captured `WakeEventRef`s, close created heads legally, restore ledgers, verify no participant
+  stays WAKING) and the deterministic strictly-later retry event; `PrepareParticipantsForNewRound` / `TemplateRefresh`
+  capture each structured `StartWake` result and, on failure, roll back and take an explicit liveness path (retry or
+  `RoundAbort`).
+- **No boolean/AND returns (V9).** Every procedure inspects the scheduler disposition explicitly and returns one
+  declared structured result; `RETURN ScheduleEvent(...) AND wake_started`-style constructs are removed.
+- **Historical freeze.** Stage-1A–1U lettered artifacts are unchanged; Stage-1V supersessions are recorded in
+  `STAGE_01V_SUPERSESSION_REGISTER.md`.
