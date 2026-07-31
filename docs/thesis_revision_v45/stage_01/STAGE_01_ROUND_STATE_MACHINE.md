@@ -131,22 +131,32 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
   certificate-validation steps (`STAGE_01_EARLY_STOP_CERTIFICATE.md`, Section 3), with
   verification energy recorded separately as `E_verification`. No `VERIFYING` miner state exists,
   and a failed certificate produces no hashing-state transition.
-- **Network-arrival and early-stop ordering (CR-B9).** Early stop within
-  `SOLUTION_PROPAGATION` follows this seven-step ordering:
-  1. A candidate solution is found.
-  2. Its certificate propagates with modeled per-recipient arrival times.
-  3. Each recipient continues hashing while validating.
+- **Network-arrival and early-stop ordering (CR-B9, C6).** Early stop and block acceptance
+  within `SOLUTION_PROPAGATION` are **event-scheduled** on the discrete-event queue; block
+  acceptance NEVER occurs at solution-discovery time. The ordering is:
+  1. A candidate solution is found; `ROUND_ACCEPTED` is **NOT** set at this point.
+  2. An early-stop certificate is constructed, and its per-recipient certificate-arrival events
+     are scheduled with modeled propagation delays; full-block propagation/arrival events are
+     likewise scheduled with modeled per-recipient delays.
+  3. Each recipient continues hashing (remains in `ACTIVE_HASHING`) until its certificate-arrival
+     event fully validates.
   4. After successful validation, that recipient enters `LOW_POWER_LISTEN` with
      `stop_reason = VALID_SOLUTION_VERIFIED`, its assignment **PAUSED** (retained
      `actual_frontier`) — miner-level PATH B (`STAGE_01_MINER_STATE_MACHINE.md`, T26),
      **directly** and never via `EXHAUSTED_PENDING`.
-  5. Full block propagation/validation continues.
-  6. If the full block is accepted, the round closes (`SOLUTION_PROPAGATION → ROUND_ACCEPTED`);
-     remaining assignments close because the **round ended** (`stop_reason = ROUND_ACCEPTED`),
-     not because their ranges were exhausted.
+  5. Full-block propagation/validation continues on the event queue; block acceptance occurs
+     **only at the modeled acceptance point** — a designated coordinator/validator, or a clearly
+     identified canonical local view — after the full block arrives and validates.
+  6. If the full block is accepted at that acceptance point, the round closes
+     (`SOLUTION_PROPAGATION → ROUND_ACCEPTED`); remaining assignments close because the **round
+     ended** (`stop_reason = ROUND_ACCEPTED`), not because their ranges were exhausted.
   7. If the full block is rejected or times out, stopped miners wake and resume their paused
      assignments (`LOW_POWER_LISTEN → WAKING → ACTIVE_HASHING`, T30 → T5) from the retained
      `actual_frontier`, with wake and transition energy accounted.
+
+  The **discrete-event queue itself establishes earliest arrival**; only exactly-equal
+  acceptance timestamps break deterministically by `candidate_hash` then `MinerID`, and
+  competing proposals become stale/competing records.
 
   **No recipient is labeled `EXHAUSTED` merely because a valid solution was received** — a
   received solution PAUSES the assignment (PATH B); it never marks the range searched or
@@ -154,7 +164,8 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
 - **Entry condition.** From `HASHING` when a miner submits a candidate digest satisfying the
   target.
 - **Exit condition(s).** To `ROUND_ACCEPTED` when the solution validates (I2 ∧ I3 hold and
-  target is satisfied) and the full block is accepted; back to `HASHING` if the candidate is
+  target is satisfied) and the full block is accepted at the **modeled acceptance point**; back
+  to `HASHING` if the candidate is
   invalid or withheld, or the full block is rejected or times out — in which case stopped
   (PATH-B paused) miners wake and resume from their retained `actual_frontier` (T30 → T5) and
   searching continues; to `SECURITY_RECOVERY` if invalidation coincides with a
@@ -176,7 +187,9 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
   miner reached `EXHAUSTED_PENDING` via PATH A range-exhaustion accounting (governed by I4/I8a and the actual-vs-reported progress model, not I11)) with no valid
   solution found for the committed template.
 - **Entry condition.** From `HASHING` when the "all active ranges exhausted" predicate holds
-  over the current assignment set.
+  over the current assignment set — that is, the I8a ledger shows the **entire assigned domain
+  as accepted searched coverage** (reported coverage alone is insufficient) and no
+  `active_unsearched` or `inactive_unsearched` coverage remains (C9).
 - **Exit condition(s).** To `TEMPLATE_REFRESH` to mine a new immutable template; or to
   `ROUND_ABORTED` if no refresh is possible.
 
@@ -236,8 +249,12 @@ ending it.
 
 ### 3.5 What happens when every active range is exhausted
 
-When the "all active ranges exhausted" predicate holds (each active miner reached verified
-exhaustion, I11, and `EXHAUSTED_PENDING`), the round moves `HASHING → ROUND_EXHAUSTED`. From
+When the "all active ranges exhausted" predicate holds (each active miner reached **accepted**
+exhaustion via PATH A range-exhaustion accounting governed by I4/I8a and the actual-vs-reported
+progress model — **not** I11 — and `EXHAUSTED_PENDING`), the round moves `HASHING →
+ROUND_EXHAUSTED` **only when the I8a ledger shows the entire assigned domain as accepted searched
+coverage** (reported coverage alone is insufficient) with no `active_unsearched` or
+`inactive_unsearched` coverage remaining (C9). From
 `ROUND_EXHAUSTED` the round proceeds to `TEMPLATE_REFRESH` to obtain a new immutable
 template (new `TemplateID`, difficulty fixed per I12) and re-`ASSIGNMENT`, or to
 `ROUND_ABORTED` if no refresh is possible. Exhausted miners, at the miner level, may drop to
@@ -324,14 +341,16 @@ Two or more distinct valid solutions may arrive for the same round. Competing va
 are resolved by **network-arrival semantics** (CR6), consistent with
 `STAGE_01_EARLY_STOP_CERTIFICATE.md` (Section 4.5):
 
-1. Each valid solution receives a reproducible propagation/arrival time.
-2. Local acceptance (`SOLUTION_PROPAGATION → ROUND_ACCEPTED`) uses the **earliest valid arrival**.
+1. Each valid solution's propagation is event-scheduled with modeled per-recipient delays, so
+   the **discrete-event queue** establishes a reproducible arrival order.
+2. Local acceptance at the **modeled acceptance point** (`SOLUTION_PROPAGATION → ROUND_ACCEPTED`)
+   uses the **earliest valid arrival** established by the discrete-event queue.
 3. Other valid solutions are recorded as competing/stale proposals.
-4. Only exact arrival-time ties use a deterministic secondary rule: smallest `candidate_hash`,
-   then smallest `MinerID`.
+4. Only exactly-equal acceptance timestamps use a deterministic secondary rule: smallest
+   `candidate_hash`, then smallest `MinerID`.
 
-No global-oracle "smallest `(TemplateID, nonce, MinerID)`" primary rule is used, and **no
-chain-wide fork-choice proof** is claimed.
+No global-oracle "smallest `(TemplateID, nonce, MinerID)`" primary rule is used, no global set
+of future solutions is consulted, and **no chain-wide fork-choice proof** is claimed.
 
 ---
 
@@ -349,10 +368,10 @@ the notes and specified in `STAGE_01_MINER_STATE_MACHINE.md`.
 | R3 | `TEMPLATE_COMMITMENT` | TemplateCommitted | Immutable template finalised; difficulty fixed (I12) | Publish `TemplateID` | `ASSIGNMENT` | Template content frozen until `TEMPLATE_REFRESH` |
 | R4 | `ASSIGNMENT` | AssignmentSetValid | Ranges pairwise disjoint (I1), bound to `RoundID`+`TemplateID` (I3), leased with `lease_start`/`lease_expiry` | Distribute range leases; emit assignment offers | `HASHING` | Emits miner offers → `REGISTERED/RESERVE/… → WAKING → ACTIVE_HASHING`; hashing may begin (§3.2–3.3) |
 | R5 | `HASHING` | CandidateSolution | A submitted digest satisfies the fixed target | Begin propagation/validation | `SOLUTION_PROPAGATION` | Validation checks I2 (in signer's assignment) and I3 (current round/template) |
-| R6 | `SOLUTION_PROPAGATION` | SolutionValid | Target satisfied AND I2 ∧ I3 hold AND full block accepted | Accepted-block handling: record block, credit solver, close round | `ROUND_ACCEPTED` | Solver is the `ACTIVE_HASHING` miner whose assignment contained the solution (I2); competing valid solutions resolved by earliest valid arrival, ties by `candidate_hash` then `MinerID` (§3.13, CR6); all remaining assignments — including PATH-B paused miners in `LOW_POWER_LISTEN` — close because the **round ended** (`stop_reason = ROUND_ACCEPTED`), NOT because their ranges were exhausted (CR-B1, CR-B9) |
+| R6 | `SOLUTION_PROPAGATION` | SolutionValid | Target satisfied AND I2 ∧ I3 hold AND full block accepted at the **modeled acceptance point** after it arrives and validates (never at solution-discovery) | Accepted-block handling: record block, credit solver, close round | `ROUND_ACCEPTED` | Solver is the `ACTIVE_HASHING` miner whose assignment contained the solution (I2); competing valid solutions resolved by earliest valid arrival established by the discrete-event queue, exactly-equal acceptance timestamps by `candidate_hash` then `MinerID` (§3.13, CR6, C6); all remaining assignments — including PATH-B paused miners in `LOW_POWER_LISTEN` — close because the **round ended** (`stop_reason = ROUND_ACCEPTED`), NOT because their ranges were exhausted (CR-B1, CR-B9) |
 | R7 | `SOLUTION_PROPAGATION` | SolutionInvalidOrWithheld | Candidate fails validation or was not propagated; floor still satisfied | Discard candidate; resume searching | `HASHING` | Withheld/invalid solution does not advance the round (§3.8) |
 | R8 | `SOLUTION_PROPAGATION` | InvalidWithFloorBreach | Candidate invalid AND `H_honest(t)` below floor | Enter remediation | `SECURITY_RECOVERY` | Coverage shortfall handled by reserve activation |
-| R9 | `HASHING` | AllActiveRangesExhausted | Every active range reached accepted exhaustion (I4/I8a; PATH A) and `EXHAUSTED_PENDING` | Close current template's search | `ROUND_EXHAUSTED` | Only accepted exhaustion counts (§3.5, §3.9) |
+| R9 | `HASHING` | AllActiveRangesExhausted | Every active range reached accepted exhaustion (I4/I8a; PATH A) and `EXHAUSTED_PENDING`; the I8a ledger shows the entire assigned domain as accepted searched coverage with no `active_unsearched`/`inactive_unsearched` remaining | Close current template's search | `ROUND_EXHAUSTED` | Only accepted exhaustion counts, reported coverage alone is insufficient (§3.5, §3.9, C9) |
 | R10 | `HASHING` | SecurityFloorViolation | Modeled `H_honest(t)` below the security floor, or invariant-risk detected | Trigger reserve activation | `SECURITY_RECOVERY` | Emits miner activation → `RESERVE → WAKING` (T4), `LOW_POWER_LISTEN → WAKING` (T10) |
 | R11 | `HASHING` | RefreshTrigger | A superseding immutable template is available | Prepare template replacement | `TEMPLATE_REFRESH` | Refresh is the only way mined content changes (§3.11) |
 | R12 | `HASHING` | FatalFault / RoundTimeout | Unrecoverable fault or round-level timeout | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.4) |

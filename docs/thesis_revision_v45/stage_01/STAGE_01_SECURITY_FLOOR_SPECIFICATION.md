@@ -60,9 +60,12 @@ doing so would break the identity. This is invariant **I17** (Section 6).
 
 **Zero-active-hash-rate case.** `q_adv(t)` is defined whenever the denominator
 `H_active(t) = H_honest(t) + H_adversarial(t)` is strictly positive. When `H_active(t) = 0`,
-`q_adv(t)` is **undefined / NA** (not zero) and a security-floor breach on `H_active` /
-`H_honest` is recorded (Section 4); the degenerate zero-denominator case is itself a floor
-breach and is recorded as such.
+`q_adv(t)` is **undefined / NA** (not zero). Computing the hash-rate quantities does not
+itself record any breach: the compute step (`ActiveHashRateUpdate`, Section 5.0) merely
+reports `q_adv = NA` for this degenerate case. The corresponding **active-floor and
+honest-floor breaches are recorded, and `SECURITY_RECOVERY` is triggered, solely by
+`SecurityFloorEvaluate`** (Sections 4–5). `NA` is **never numerically compared** against
+`maximum_adversarial_share`.
 
 ### 1.2 Which miner states contribute
 
@@ -177,6 +180,33 @@ fires.
 Evaluations fire per `security_check_trigger`. Outcomes are classified as follows and are
 **recorded, never silently repaired** (invariant **I16**).
 
+### 5.0 Separation of computation and evaluation (binding)
+
+Computing the security quantities and evaluating them against the floor are owned by two
+distinct procedures, and the split is binding:
+
+- **`ActiveHashRateUpdate` (compute-only).** At each sampling or event-update time (Section
+  2.1) it computes ONLY the hash-rate quantities `H_honest(t)`, `H_adversarial(t)`,
+  `H_active(t)`, and the adversarial share `q_adv(t)` — or `q_adv = NA` when
+  `H_active(t) = 0`. It does **NOT** record any breach and does **NOT** trigger
+  `SECURITY_RECOVERY`. It never compares `NA` against any threshold.
+- **`SecurityFloorEvaluate` (records and triggers).** It **ALONE** records security-floor
+  breaches and triggers `SECURITY_RECOVERY`. Given the quantities produced by
+  `ActiveHashRateUpdate`:
+  - **If `H_active(t) == 0`:** `q_adv = NA`; record an **active-floor** breach **AND** a
+    **honest-floor** breach; do **NOT** compare `NA` with `maximum_adversarial_share` (`NA`
+    is never numerically compared); trigger `SECURITY_RECOVERY`.
+  - **Otherwise:** evaluate the active-hash-rate threshold (`minimum_active_hashrate` against
+    `H_active(t)`), the honest-hash-rate threshold (`minimum_honest_hashrate` against
+    `H_honest(t)`), and the adversarial-share threshold (`maximum_adversarial_share` against
+    `q_adv(t)`).
+- **Duplicate suppression.** Duplicate breach records for the same `(event, threshold, time)`
+  are suppressed: a given breach is recorded once, consistent with the recording discipline
+  (I16, Section 5.7).
+
+This division matches the executable pseudocode: `ActiveHashRateUpdate` is compute-only and
+`SecurityFloorEvaluate` is the single owner of breach recording and recovery triggering.
+
 ### 5.1 Warning (limit approached, not yet violated)
 
 A quantity is within a modeled margin of its limit (e.g. `H_honest(t)` nearing
@@ -250,6 +280,8 @@ prompted them.
 Invariant references: **I16** (breaches recorded, not silently repaired — Section 5);
 **I17** (`H_active(t) = H_honest(t) + H_adversarial(t)` exactly, all three computed
 deterministically from the active-state census after states are determined; `q_adv(t)` is
-NA — not zero — with a recorded floor breach when `H_active(t) = 0` — Section 1.1); **I10**
+NA — not zero — and never numerically compared, with recorded active-floor and honest-floor
+breaches (by `SecurityFloorEvaluate`, Section 5.0) when `H_active(t) = 0` — Section 1.1);
+**I10**
 (reserve activation creates no overlapping active ranges — Section 5.5). All symbols and
 terms are defined in `STAGE_01_TERMINOLOGY.md`.

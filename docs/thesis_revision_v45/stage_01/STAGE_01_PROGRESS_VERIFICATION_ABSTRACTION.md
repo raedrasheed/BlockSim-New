@@ -57,8 +57,9 @@ require and which Stage 1 does NOT provide.
 
 1. Emission of progress commitments at the **commitment interval**, indexed by **checkpoint
    index**.
-2. A **reported frontier** per checkpoint, used to derive searched prefix / unsearched suffix and
-   to feed the I8 reconciliation.
+2. A **reported frontier** per checkpoint (the `reported_*` layer), used to derive the reported
+   searched prefix / unsearched suffix. Only **adjudicated** (accepted) coverage feeds the
+   normative I8a `accepted_searched` measure; a reported frontier does not, by itself.
 3. A stochastic **audit** of reported frontiers governed by **audit probability** `p_audit`.
 4. A modeled adversary that overstates its frontier with **false-claim probability** `p_false`.
 5. A **detection** outcome governed by **detection probability** `p_detect`, deriving from
@@ -93,15 +94,35 @@ The mapping is one-directional: the simulator *consumes* the outcomes (detection
 invocation, accounting effects) that a real implementation would have to *produce*. Stage 1 does
 not close list (b).
 
-### 3.1 Simulator ground truth vs protocol-level claim (CR5, two layers)
+### 3.1 Three coverage layers: ground truth, protocol claim, adjudicated (CR5)
 
-The abstraction is represented at two distinct layers, which MUST NOT be conflated:
+The abstraction is represented at **three distinct coverage layers**, which MUST NOT be
+conflated:
 
-- **Simulator ground truth:** `actual_frontier`, `actual_positions_evaluated`,
-  `actual_solution_positions`, `actual_exhaustion`. The simulator **may** know actual exhaustion
-  exactly.
-- **Protocol-level claim:** `reported_frontier`, `reported_exhaustion`, `audit_selected`,
-  `audit_result`, `claim_accepted_or_rejected`.
+- **Simulator ground truth:** `actual_frontier` / `actual_searched` (with
+  `actual_positions_evaluated`, `actual_solution_positions`, `actual_exhaustion`). This is the
+  true search progress; the simulator **may** know actual exhaustion exactly.
+- **Protocol-level claim:** `reported_frontier` / `reported_searched` (with `reported_exhaustion`,
+  `audit_selected`, `audit_result`, `claim_accepted_or_rejected`). This is what a miner *claims*;
+  it is a claim, not accepted coverage.
+- **Adjudicated coverage:** `accepted_frontier` / `accepted_searched`. This is the only coverage
+  promoted into the **normative I8a measure**
+  (`accepted_searched + active_unsearched + inactive_unsearched = assigned_domain`). Reported
+  coverage is promoted to accepted coverage only by adjudication (a `RangeExhaust`
+  honest-completion or a passed audit).
+
+A `ProgressCommit` updates the **`reported_*`** layer **ONLY** and **MUST NOT** update the
+normative I8a `accepted_searched` measure. Promotion of reported coverage into accepted coverage
+occurs only through the modeled adjudication rule:
+
+- **Honest simulation mode:** the model **MAY** set `accepted_searched = actual_searched`
+  (accepted = ground truth) by explicit model rule.
+- **Adversarial simulation mode:** `reported_searched` is promoted to `accepted_searched` **only
+  after** the modeled adjudication rule (audit/detection) accepts the claim; an unaudited or
+  rejected claim is not accepted coverage.
+
+All three layers, and every promotion between them, are **modeled, not cryptographically
+proven**.
 
 The modeled progress-verification abstraction does **not** prove actual exhaustion, and **no**
 progress commitment — and no target check — verifies that no valid solution exists in the
@@ -123,11 +144,14 @@ All findings are **modeled, not cryptographically proven**.
 
 ## 4. Relationship to assignment accounting and to the early-stop path
 
-- The reported frontier is the sole input this interface contributes to the searched-prefix /
-  unsearched-suffix split used by I8 reconciliation
-  (`STAGE_01_RANGE_LEASE_AND_REASSIGNMENT.md`, Section 8). A frontier that fails audit is treated
-  as unreliable: its positions are NOT counted as searched and MAY be re-searched (lease document,
-  Section 7, rule 2).
+- The reported frontier is the input this interface contributes to the **reported**
+  searched-prefix / unsearched-suffix split. It updates the `reported_*` layer ONLY; it does
+  **not** update the normative I8a `accepted_searched` measure. Reported coverage is promoted to
+  accepted coverage — and only then feeds the I8a reconciliation
+  (`STAGE_01_RANGE_LEASE_AND_REASSIGNMENT.md`, Section 8) — solely by the modeled adjudication
+  rule (a `RangeExhaust` honest-completion or a passed audit). A frontier that fails audit is
+  treated as unreliable: its positions are NOT accepted as searched and MAY be re-searched (lease
+  document, Section 7, rule 2).
 - This abstraction concerns **progress** (how much of a range was searched). It does NOT decide
   round termination on its own. A progress commitment only claims a searched frontier: it is
   **NOT** an early-stop trigger, and it **never** means "found a solution" (CR1). Halting active

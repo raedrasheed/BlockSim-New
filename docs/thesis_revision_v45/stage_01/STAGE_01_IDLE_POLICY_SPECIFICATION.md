@@ -185,8 +185,10 @@ found). The ordered chain is
   yet in `LOW_POWER_LISTEN` and is NOT yet credited as exhausted.
 - **`LOW_POWER_LISTEN`** — the miner monitors round progress at reduced power. Its energy
   accrues to `P_listen,i * t_listen,i`, NOT to the active hash rate. This is the state in
-  which the idle policy realises reduced active power-time. On PATH A the range is **closed**:
-  `coverage_state = searched`, `custody_status = completed`.
+  which the idle policy realises reduced active power-time. On PATH A the range is **closed**
+  only once (and only if) the pending exhaustion assertion has been **adjudicated as ACCEPTED**
+  (Section 5): `coverage_state = searched`, `custody_status = completed`. Coverage is marked
+  `searched` solely on an ACCEPTED adjudication — never from a reported claim alone (C2/C3).
 
 **`EXHAUSTED_PENDING` is reachable ONLY on PATH A** (via `RANGE_EXHAUSTED`).
 
@@ -289,8 +291,9 @@ opens — so that "the miner said so" alone can never open it.
 ### 5.2 Adjudication and recording
 
 - If the modeled progress-verification abstraction supports `p = N` for the asserted
-  assignment/`TemplateID`, the assertion is adjudicated as true range exhaustion and the I4
-  gate permits `EXHAUSTED_PENDING → LOW_POWER_LISTEN`.
+  assignment/`TemplateID`, the assertion is adjudicated as true range exhaustion (ACCEPTED)
+  and the I4 gate permits `EXHAUSTED_PENDING → LOW_POWER_LISTEN`. Only on this ACCEPTED
+  outcome is coverage promoted to `accepted_searched` / `coverage_state = searched` (C2/C3).
 - If it does not, the assertion is classified as class 5 (or, where the shortfall is
   benign and self-declared, class 2/3/4 as appropriate), the range's unsearched tail is
   treated as a coverage gap, and the outcome is **recorded, not silently repaired**
@@ -311,6 +314,24 @@ completion — the simulator's ground-truth `actual_exhaustion` / `actual_fronti
 ground truth through the modeled audit/detection abstraction. Either way the outcome is
 **modeled, not cryptographically proven**: the modeled abstraction does not prove actual
 exhaustion, and no progress commitment verifies that no valid solution exists in the whole range.
+
+### 5.5 Coverage layers and the normative I8a measure (C3)
+
+Progress is tracked across **three separate coverage layers**:
+`actual_frontier`/`actual_searched` (simulator ground truth),
+`reported_frontier`/`reported_searched` (protocol-level claim), and
+`accepted_frontier`/`accepted_searched` (adjudicated coverage). A **progress commitment**
+(`ProgressCommit`) updates the `reported_*` layer **only**; it MUST NOT update the normative
+I8a searched measure. **The normative I8a coverage measure uses ACCEPTED coverage only:**
+
+    accepted_searched + active_unsearched + inactive_unsearched = assigned_domain.
+
+A reported claim — including a final reported `ProgressCommit` — is a claim, not automatically
+accepted coverage; only an ACCEPTED adjudication (Sections 5.2, 5.4) promotes coverage to
+`accepted_searched` and thereby to `coverage_state = searched`. Honest-mode runs may set
+accepted = ground truth by explicit model rule; adversarial-mode runs promote reported →
+accepted only after the modeled audit/detection adjudication. Reported progress alone never
+drives the I8a measure or the low-power transition.
 
 ---
 
@@ -381,6 +402,12 @@ the conditions that make a saving *eligible*; it asserts no saving.
   runs (Section 6.1, item 4; full statement in `STAGE_01_ENERGY_MODEL_SPECIFICATION.md`).
 - **I16** — security-floor breaches and unsubstantiated claims are recorded, not silently
   repaired (Sections 3.5, 5.2).
+
+**Reward eligibility (C10).** No "idle credit" or other reward is assigned for entering
+`LOW_POWER_LISTEN` or for idling: **reward eligibility is NOT SPECIFIED AT STAGE 1** and is
+**deferred to Stage 5** (see `STAGE_01_REWARD_PENALTY_INTERFACE.md`). Every use of "credit"
+or "credited" in this document refers to **energy or coverage accounting** (the idle *energy*
+saving credited in `LOW_POWER_LISTEN`, or coverage progress), never to reward eligibility.
 
 All symbols and terms are defined in `STAGE_01_TERMINOLOGY.md`. This document specifies
 structure only and makes no implementation, validation, security, fairness, or incentive

@@ -111,13 +111,15 @@ of scope (scope §C).
 
 Each subsection specifies, for one state: exact meaning; allowed computation; allowed
 network messages; residency power term; active-hash-rate contribution; whether it may hold
-or act on a new range; reward eligibility (defined as eligibility to be recorded as the
-solver of an accepted block, which by invariant **I2** requires an accepted solution inside
-the signer's valid current assignment); permitted incoming and outgoing transitions;
+or act on a new range; reward eligibility (NOT SPECIFIED AT STAGE 1 — incentive semantics are deferred to Stage 5;
+the only Stage-1 record is that a valid solution may be recorded as having a solver identity,
+which by invariant **I2** requires an accepted solution inside the signer's valid current
+assignment); permitted incoming and outgoing transitions;
 transition guards; transition side effects; timeout behaviour; and failure behaviour.
 
-Reward eligibility is stated strictly as an eligibility-to-be-credited property of the
-accounting model. No incentive-compatibility or fairness property is asserted (scope §C.3).
+Reward eligibility is NOT SPECIFIED AT STAGE 1 (deferred to Stage 5); no incentive,
+fairness, or reward-crediting property is asserted (scope §C.3). The only Stage-1 record is
+solver identity for a valid solution.
 
 ### 2.1 `REGISTERED`
 
@@ -136,7 +138,7 @@ accounting model. No incentive-compatibility or fairness property is asserted (s
 - **May hold/act on a new range.** No. An assignment offer directed at a `REGISTERED` miner
   does not grant an active range in place; it triggers the transition to `WAKING`, where the
   pending assignment is bound and validated before hashing.
-- **Reward eligibility.** No (holds no valid current assignment; cannot satisfy I2).
+- **Reward eligibility.** NOT SPECIFIED AT STAGE 1 (incentive semantics deferred to Stage 5).
 - **Permitted incoming transitions.** From external registration (T1); from `OFFLINE` on
   rejoin (T17); from `RESERVE` on administrative release (T25).
 - **Permitted outgoing transitions.** To `RESERVE` (T2); to `WAKING` on assignment offer
@@ -167,7 +169,7 @@ accounting model. No incentive-compatibility or fairness property is asserted (s
   until promotion completes through `WAKING` into `ACTIVE_HASHING`.
 - **May hold/act on a new range.** No while in `RESERVE`; activation binds a pending range
   and routes through `WAKING`.
-- **Reward eligibility.** No.
+- **Reward eligibility.** NOT SPECIFIED AT STAGE 1 (incentive semantics deferred to Stage 5).
 - **Permitted incoming transitions.** From `REGISTERED` (T2).
 - **Permitted outgoing transitions.** To `WAKING` on reserve activation (T4); to
   `REGISTERED` on administrative release (T25); to `OFFLINE` (T15); to `DISQUALIFIED` (T22).
@@ -207,10 +209,7 @@ accounting model. No incentive-compatibility or fairness property is asserted (s
   reassignment (self-transition T6) that replaces it with another disjoint range consistent
   with I1 (for example on lease expiry/renewal or a template refresh that preserves the
   miner's active status).
-- **Reward eligibility.** Yes — the only reward-eligible state. A solution it submits can
-  satisfy I2 (inside the signer's valid current assignment) and I3 (matches current
-  `RoundID`+`TemplateID`) and thus be recorded as the accepted-block solver under
-  accepted-block handling. No incentive property is claimed by this eligibility.
+- **Reward eligibility.** NOT SPECIFIED AT STAGE 1 (incentive semantics deferred to Stage 5). The only record kept at Stage 1 is that a valid solution this miner submits may be recorded as having a solver identity, which by I2/I3 requires an accepted solution inside the signer's valid current assignment matching the current RoundID and TemplateID.
 - **Permitted incoming transitions.** From `WAKING` on ramp completion (T5) — whether a
   first activation or a **resume** of a paused (PATH B) assignment from its retained
   `actual_frontier`; self-loop from `ACTIVE_HASHING` on range reassignment (T6).
@@ -243,7 +242,8 @@ accounting model. No incentive-compatibility or fairness property is asserted (s
   (CR2). Reassignment (T6) requires the new range be disjoint from all other valid active
   assignments (I1) and bound to the current or refreshed `TemplateID`.
 - **Transition side effects.** On range exhaustion (T7, PATH A), freeze the final progress
-  commitment and release the range lease for reclamation. On the verified valid-solution stop
+  commitment; on ACCEPTED exhaustion the range is closed (`coverage_state = searched`,
+  `custody_status = completed`) and is NOT released or reassigned. On the verified valid-solution stop
   (T26, PATH B), **pause** the assignment: retain its `actual_frontier`, credit no unsearched
   position as searched, and record `stop_reason = VALID_SOLUTION_VERIFIED`; the paused
   assignment may later resume (T30 → T5) if the full block is rejected, unavailable, or times
@@ -279,8 +279,7 @@ accounting model. No incentive-compatibility or fairness property is asserted (s
 - **Active-hash-rate contribution.** None (search on the range has ceased).
 - **May hold/act on a new range.** Yes as an offer — a reassignment offer here binds a
   pending range and routes through `WAKING` (T9); it does not resume hashing in place.
-- **Reward eligibility.** No — by construction it found no solution on its range, so it holds
-  no accepted-solution candidate satisfying I2.
+- **Reward eligibility.** NOT SPECIFIED AT STAGE 1 (incentive semantics deferred to Stage 5).
 - **Permitted incoming transitions.** From `ACTIVE_HASHING` on range exhaustion (T7,
   `stop_reason = RANGE_EXHAUSTED`) — the ONLY entry.
 - **Permitted outgoing transitions.** To `LOW_POWER_LISTEN` on confirmed exhaustion (T8,
@@ -290,8 +289,8 @@ accounting model. No incentive-compatibility or fairness property is asserted (s
   range (I4); absent that confirmation the drop to `LOW_POWER_LISTEN` is forbidden. On this
   path the range is closed: `coverage_state = searched`, `custody_status = completed`. T9
   requires a disjoint candidate range consistent with I1.
-- **Transition side effects.** On T8, release the range and record the confirmed exhaustion
-  in the audit log; on T9, bind the pending reassignment carried into `WAKING`.
+- **Transition side effects.** On T8, confirm/finalise the accepted exhaustion and record it in the audit log (the completed
+  range is NOT released or reassigned); on T9, bind the pending reassignment carried into `WAKING`.
 - **Timeout behaviour.** A confirmation deadline bounds residency; on expiry without
   confirmation the miner is reassigned (T9) if a range is offered, otherwise it routes to
   `OFFLINE` (T13). It NEVER auto-drops to `LOW_POWER_LISTEN` on timeout — that would violate
@@ -322,7 +321,7 @@ accounting model. No incentive-compatibility or fairness property is asserted (s
 - **Active-hash-rate contribution.** None.
 - **May hold/act on a new range.** No in place; a wake request binds a pending range and
   routes through `WAKING`.
-- **Reward eligibility.** No.
+- **Reward eligibility.** NOT SPECIFIED AT STAGE 1 (incentive semantics deferred to Stage 5).
 - **Permitted incoming transitions.** From `EXHAUSTED_PENDING` on confirmed exhaustion (T8,
   `stop_reason = RANGE_EXHAUSTED`) — the exhaustion path (PATH A); and **directly** from
   `ACTIVE_HASHING` on a verified valid-solution stop (T26, `stop_reason =
@@ -366,8 +365,7 @@ accounting model. No incentive-compatibility or fairness property is asserted (s
   `actual_frontier`; it acts on it only upon entry to `ACTIVE_HASHING`, and a resumed
   assignment continues from the retained frontier (no unsearched position is credited as
   searched).
-- **Reward eligibility.** No (no valid current active assignment being searched yet; cannot
-  satisfy I2 until `ACTIVE_HASHING`).
+- **Reward eligibility.** NOT SPECIFIED AT STAGE 1 (incentive semantics deferred to Stage 5).
 - **Permitted incoming transitions.** From `REGISTERED` (T3); from `RESERVE` (T4); from
   `EXHAUSTED_PENDING` (T9); from `LOW_POWER_LISTEN` on a new-assignment wake (T10); from
   `LOW_POWER_LISTEN` on **resume of a paused (PATH B) assignment** (T30), carrying the
@@ -399,7 +397,7 @@ accounting model. No incentive-compatibility or fairness property is asserted (s
 - **Residency power term.** `P_offline,i` (accrues `t_offline,i`).
 - **Active-hash-rate contribution.** None.
 - **May hold/act on a new range.** No.
-- **Reward eligibility.** No.
+- **Reward eligibility.** NOT SPECIFIED AT STAGE 1 (incentive semantics deferred to Stage 5).
 - **Permitted incoming transitions.** From any active/standby state — `ACTIVE_HASHING`
   (T11), `WAKING` (T12), `EXHAUSTED_PENDING` (T13), `LOW_POWER_LISTEN` (T14), `RESERVE`
   (T15), `REGISTERED` (T16).
@@ -428,8 +426,7 @@ accounting model. No incentive-compatibility or fairness property is asserted (s
   disqualification is a one-shot `E_coordination,i`.
 - **Active-hash-rate contribution.** None; any prior contribution ceases at entry.
 - **May hold/act on a new range.** No.
-- **Reward eligibility.** No — explicitly ineligible; any pending accepted-solution credit
-  attributable to the miner is voided at entry.
+- **Reward eligibility.** NOT SPECIFIED AT STAGE 1 (incentive semantics deferred to Stage 5).
 - **Permitted incoming transitions.** From every non-terminal state on protocol violation —
   `ACTIVE_HASHING` (T18), `EXHAUSTED_PENDING` (T19), `LOW_POWER_LISTEN` (T20), `WAKING`
   (T21), `RESERVE` (T22), `REGISTERED` (T23), `OFFLINE` (T24).
@@ -470,8 +467,8 @@ verified valid-solution stop, assignment PAUSED) and the revocation/closure reas
 | T4 | `RESERVE` | ReserveActivation | Round activation event (typically from `SECURITY_RECOVERY`); offered range disjoint per I1 | Bind pending assignment; begin spin-up | `WAKING` | Switch residency `P_reserve → P_wake`; entry `E_transition` | No census change yet; activation is toward raising `H_active(t)` | Invalid range (I1) or no activation event: guard fails, miner remains `RESERVE` |
 | T5 | `WAKING` | RampComplete | Ramp complete AND bound assignment validated disjoint per I1 and bound to current `TemplateID` | Activate range lease; start `t_hash` accrual (a **resumed** paused PATH-B assignment continues from its retained `actual_frontier`) | `ACTIVE_HASHING` | End `P_wake`; exit `E_transition`; begin `P_hash` residency | Census +rate: add miner rate to `H_active(t)` (and `H_honest(t)`/`H_adversarial(t)` by attribution) | Validation failure → wake abort to `OFFLINE` (T12); range released |
 | T6 | `ACTIVE_HASHING` | RangeReassignment | New range disjoint from all valid active assignments (I1); bound to current or refreshed `TemplateID` (I3); difficulty unchanged (I12) | Atomically release old lease; bind new lease | `ACTIVE_HASHING` | Continue `P_hash`; one-shot `E_coordination` for reassignment; no wake term | Census unchanged in magnitude; audit log records lease change | Overlap (I1) or stale template (I3): reassignment rejected; miner keeps current range |
-| T7 | `ACTIVE_HASHING` | RangeExhausted (PATH A) | Entire assigned range searched with no valid solution encountered in the actual evaluated sequence (honest: `actual_frontier = range_end`, `actual_positions_evaluated = range_size`, `actual_exhaustion = true`; adversarial: accepted reported exhaustion under the modeled audit abstraction); governed by I4/I8a and the actual-vs-reported progress model, not I11 | Freeze final progress commitment; release range for reclamation; `stop_reason = RANGE_EXHAUSTED` | `EXHAUSTED_PENDING` | Continue `P_hash` residency (short `EXHAUSTED_PENDING` transient; no idle saving credited); entry `E_transition` | Census −rate: remove miner rate from `H_active(t)` | Fabricated/false exhaustion detected by the modeled audit (adversarial path) → exhaustion NOT recorded, range not closed; attributable violation → `DISQUALIFIED` (T18) |
-| T8 | `EXHAUSTED_PENDING` | ExhaustionConfirmed (PATH A) | Valid exhaustion confirmation for the range (I4) | Release range; close it (`coverage_state = searched`, `custody_status = completed`); record confirmed exhaustion and `stop_reason = RANGE_EXHAUSTED` in audit log | `LOW_POWER_LISTEN` | End `P_hash` transient; begin `P_listen` residency; one-shot `E_coordination` | No census change (already removed at T7) | No confirmation before deadline → reassign (T9) or `OFFLINE` (T13); NEVER auto-drop here (I4) |
+| T7 | `ACTIVE_HASHING` | RangeExhausted (PATH A) | Entire assigned range searched with no valid solution encountered in the actual evaluated sequence (honest: `actual_frontier = range_end`, `actual_positions_evaluated = range_size`, `actual_exhaustion = true`; adversarial: accepted reported exhaustion under the modeled audit abstraction); governed by I4/I8a and the actual-vs-reported progress model, not I11 | Freeze final progress commitment; on ACCEPTED exhaustion mark `coverage_state = searched`, `custody_status = completed`; `stop_reason = RANGE_EXHAUSTED`; do NOT release or reassign the completed range | `EXHAUSTED_PENDING` | Continue `P_hash` residency (short `EXHAUSTED_PENDING` transient; no idle saving credited); entry `E_transition` | Census −rate: remove miner rate from `H_active(t)` | Fabricated/false exhaustion detected by the modeled audit (adversarial path) → exhaustion NOT recorded, range not closed; attributable violation → `DISQUALIFIED` (T18) |
+| T8 | `EXHAUSTED_PENDING` | ExhaustionConfirmed (PATH A) | Valid exhaustion confirmation for the range (I4) | Confirm/finalise the accepted exhaustion (coverage_state/custody already set at T7); record confirmed exhaustion and `stop_reason = RANGE_EXHAUSTED` in audit log; do NOT release or reassign the completed range | `LOW_POWER_LISTEN` | End `P_hash` transient; begin `P_listen` residency; one-shot `E_coordination` | No census change (already removed at T7) | No confirmation before deadline → reassign (T9) or `OFFLINE` (T13); NEVER auto-drop here (I4) |
 | T9 | `EXHAUSTED_PENDING` | RedeployOffer | An **unsearched suffix** became available for a permitted reassignment reason ({lease_expiry, abandonment, revocation, departure, conflict, security_recovery}) and is offered to this available miner, disjoint per I1, on the committed `TemplateID`; the miner's own completed range stays `custody_status = completed` and is NOT reassigned (exhaustion is never a reassignment reason) | Bind the offered unsearched suffix as a new assignment; begin spin-up | `WAKING` | Switch residency `P_hash → P_wake`; entry `E_transition` | No census change yet (toward re-raising `H_active(t)`) | Invalid range (I1): offer rejected; miner remains `EXHAUSTED_PENDING` |
 | T10 | `LOW_POWER_LISTEN` | WakeRequest | Wake trigger (new-round assignment, template refresh, or `SECURITY_RECOVERY`); offered range disjoint per I1 | Bind pending assignment; begin spin-up | `WAKING` | Switch residency `P_listen → P_wake`; entry `E_transition` | No census change yet; wake is toward raising `H_active(t)` | Invalid range (I1) or absent trigger: guard fails; miner remains `LOW_POWER_LISTEN` |
 | T11 | `ACTIVE_HASHING` | Departure / HeartbeatLoss / lease-timeout unresponsive | Liveness lost past heartbeat/`lease_expiry` bound, or voluntary shutdown | Release range lease for reclamation; stop `t_hash` accrual | `OFFLINE` | End `P_hash`; begin `P_offline` residency | Census −rate: remove miner rate from `H_active(t)` | If departure is attributable to a violation instead, route to `DISQUALIFIED` (T18) |
@@ -482,7 +479,7 @@ verified valid-solution stop, assignment PAUSED) and the revocation/closure reas
 | T16 | `REGISTERED` | Departure / RegistrationTTLExpiry | Idle TTL expired without admission/offer, or liveness lost | Stop accrual | `OFFLINE` | End `P_registered` (= `P_listen`); begin `P_offline` residency | No census change | Attributable violation instead → `DISQUALIFIED` (T23) |
 | T17 | `OFFLINE` | Rejoin | Valid re-registration within rejoin window; `MinerID` not `DISQUALIFIED` | Re-establish `MinerID` record | `REGISTERED` | End `P_offline` absence; begin `P_registered` (= `P_listen`) residency; `E_coordination` | No census change | Rejoin window expired or `MinerID` disqualified: guard fails; miner remains `OFFLINE` |
 | T18 | `ACTIVE_HASHING` | ProtocolViolation | Recorded violation attributable to `MinerID` (e.g. solution outside assignment I2, stale round/template I3, unverified early-stop I11) | Release lease; void pending credit; append to audit log; remove from scheduling | `DISQUALIFIED` | End `P_hash`; `E_coordination` to record; begin `P_offline` (terminal) | Census −rate: remove miner rate from `H_active(t)`; violation logged against `q_adv(t)` accounting | Terminal — no recovery |
-| T19 | `EXHAUSTED_PENDING` | ProtocolViolation | Recorded attributable violation (e.g. fabricated exhaustion, I11) | Release range; void credit; append to audit log; remove from scheduling | `DISQUALIFIED` | End `P_hash` transient; `E_coordination`; begin `P_offline` (terminal) | No census change (already removed at T7); violation logged | Terminal — no recovery |
+| T19 | `EXHAUSTED_PENDING` | ProtocolViolation | Recorded attributable violation (e.g. fabricated exhaustion detected by the modeled audit — a progress/audit-model finding, not I11) | Release range; void credit; append to audit log; remove from scheduling | `DISQUALIFIED` | End `P_hash` transient; `E_coordination`; begin `P_offline` (terminal) | No census change (already removed at T7); violation logged | Terminal — no recovery |
 | T20 | `LOW_POWER_LISTEN` | ProtocolViolation | Recorded attributable violation (e.g. hashing-only message while listening) | Void credit; append to audit log; remove from scheduling | `DISQUALIFIED` | End `P_listen`; `E_coordination`; begin `P_offline` (terminal) | No census change; violation logged | Terminal — no recovery |
 | T21 | `WAKING` | ProtocolViolation | Recorded attributable violation | Release bound range; void credit; append to audit log | `DISQUALIFIED` | End `P_wake`; `E_coordination`; begin `P_offline` (terminal) | No census change; violation logged | Terminal — no recovery |
 | T22 | `RESERVE` | ProtocolViolation | Recorded attributable violation | Remove from reserve pool; append to audit log | `DISQUALIFIED` | End `P_reserve` (= `P_listen`); `E_coordination`; begin `P_offline` (terminal) | No census change; violation logged | Terminal — no recovery |

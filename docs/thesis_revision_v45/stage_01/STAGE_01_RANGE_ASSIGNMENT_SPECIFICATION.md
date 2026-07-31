@@ -294,8 +294,9 @@ accounted for (I8a):
   allocated a range until promoted to `ACTIVE_HASHING`.
 - A range whose owner ceases active search **before completing it** (miner departs, goes
   `OFFLINE`, enters `LOW_POWER_LISTEN` on a paused valid-solution stop, or is `DISQUALIFIED`)
-  becomes eligible for cancellation (Section 14) and/or reassignment of its **unsearched
-  suffix** (Section 15). Until reassigned, the unsearched region it covered is recorded in the
+  becomes eligible for cancellation (Section 14) and/or reassignment of its **accepted unsearched
+  suffix** `[accepted_frontier + 1, range_end]` (Section 15). Until reassigned, the unsearched
+  region it covered is recorded in the
   coverage accounting as **inactive_unsearched** (unsearched-and-unassigned) rather than
   silently dropped.
 - A range that its owner **fully exhausts** (PATH A: own assigned range searched to
@@ -304,7 +305,7 @@ accounted for (I8a):
   `completed` (Section 15). A completed range is **not** returned for reassignment, is **not**
   recorded as `inactive_unsearched`, and is **not** reassignable under the same `TemplateID`.
 - Inactive regions MUST appear in the I8a coverage accounting (Section 15) so that
-  searched + active_unsearched + inactive_unsearched reconciles to the full domain. An inactive
+  accepted_searched + active_unsearched + inactive_unsearched reconciles to the full domain. An inactive
   miner's former range is never both "assigned to it" and "available for reassignment"
   simultaneously; the assignment lineage (Section 15) records the transition.
 - Nothing here claims that inactive-miner handling preserves the security floor or any
@@ -335,11 +336,14 @@ expiry) — e.g. on miner departure, disqualification, lease reclamation, or `TE
 
 ## 15. Reassignment provenance (previous_assignment_reference; I8a/I8b)
 
-When an **unsearched suffix** of a range is granted to a new miner after cancellation, lease
+When the **accepted unsearched suffix** of a range — the positions
+`[accepted_frontier + 1, range_end]` — is granted to a new miner after cancellation, lease
 expiry, or departure, the successor assignment records its origin via
-`previous_assignment_reference`. Exhaustion is **not** a reassignment trigger: a fully
-exhausted range is complete (`coverage_state = searched`, `custody_status = completed`) and is
-not reassigned under the same `TemplateID` (Section 13).
+`previous_assignment_reference`. Reassignment applies ONLY to the accepted unsearched suffix:
+never to a searched prefix and never to a completed range; `RangeReassign` receives the exact
+unsearched suffix, not the original full range. Exhaustion is **not** a reassignment trigger: a
+fully exhausted range is complete (`coverage_state = searched`, `custody_status = completed`) and
+is not reassigned under the same `TemplateID` (Section 13).
 
 - `previous_assignment_reference` holds the `AssignmentID` of the assignment being superseded;
   it is null only for an original grant.
@@ -347,14 +351,19 @@ not reassigned under the same `TemplateID` (Section 13).
   from stale ones. Only the latest version in a lineage can be a valid current assignment
   (Section 2); this prevents a superseded grant and its successor from both appearing active
   and violating I1 (Section 12).
-- **Invariant I8a: coverage states partition the domain.** For each committed template, every
-  nonce of the domain MUST be classifiable into exactly one **coverage state**:
-  - **searched** — covered by (portions of) assignments whose owners searched them;
-  - **active_unsearched** — covered by a valid current (live) assignment but not yet searched;
-  - **inactive_unsearched** — not searched and not covered by any valid current assignment
-    (Section 13).
+- **Invariant I8a: accepted coverage states partition the domain.** For each committed template,
+  every nonce of the domain MUST be classifiable into exactly one **coverage state**, using
+  **accepted** coverage only:
+  - **accepted_searched** — positions promoted to accepted searched coverage by adjudication (a
+    `RangeExhaust` honest-completion or a passed audit). A reported `ProgressCommit` is a claim,
+    not accepted coverage, and never updates this measure;
+  - **active_unsearched** — covered by a valid current (live) assignment but not yet accepted as
+    searched;
+  - **inactive_unsearched** — not accepted as searched and not covered by any valid current
+    assignment (Section 13).
   The three coverage states MUST be disjoint and exhaustive, summing exactly to `N` (exact
-  integer arithmetic, Section 6).
+  integer arithmetic, Section 6): `accepted_searched + active_unsearched + inactive_unsearched =
+  assigned_domain`.
 - **Invariant I8b: custody/provenance, orthogonal to coverage.** Independently of its coverage
   state, each assignment carries a custody status in
   `{original, renewed, reassigned, revoked, expired, abandoned, completed}`. These are
@@ -399,9 +408,11 @@ assignment membership, not merely on satisfying the target.
 
 Progress toward exhausting an assigned range is handled only via the **modeled
 progress-verification abstraction**; it is NOT a cryptographic proof of range exhaustion, and
-nothing in this section claims otherwise. Exhaustion has two distinct, non-cryptographic
-meanings and MUST NOT be described as "target-verified exhaustion" or as a proof that no valid
-solution exists in the range:
+nothing in this section claims otherwise. A final reported `ProgressCommit` is a claim, not
+accepted coverage: reported coverage is promoted to `accepted_searched` (the normative I8a
+measure) only by adjudication (a `RangeExhaust` honest-completion or a passed audit). Exhaustion
+has two distinct, non-cryptographic meanings and MUST NOT be described as "target-verified
+exhaustion" or as a proof that no valid solution exists in the range:
 
 - **Honest simulation path:** a range is exhausted by **actual cursor completion** —
   `actual_frontier = range_end`, `actual_positions_evaluated = range_size`,
@@ -450,8 +461,8 @@ under the idle policy, specified elsewhere and not claimed here.
   `TEMPLATE_REFRESH`, `ROUND_ABORTED`.
 - **Invariants referenced:** I1 (no two valid active assignments overlap; Section 12); I2 (an
   accepted solution lies in the signer's valid current assignment; Section 16); I3 (an accepted
-  solution matches the current RoundID and TemplateID; Section 16); I8a (coverage states
-  partition the assigned domain: searched + active_unsearched + inactive_unsearched =
+  solution matches the current RoundID and TemplateID; Section 16); I8a (accepted coverage states
+  partition the assigned domain: accepted_searched + active_unsearched + inactive_unsearched =
   assigned_domain; Section 15); I8b (custody/provenance model
   `{original, renewed, reassigned, revoked, expired, abandoned, completed}`, orthogonal to
   coverage — `reassigned` is custody, not a coverage class; a `completed` (fully exhausted)

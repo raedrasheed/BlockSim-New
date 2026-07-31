@@ -127,8 +127,12 @@ PROCEDURE ActiveHashing
                                cursor AS nonce, candidate_hash, D AS target)
         # CR1: an early-stop certificate is generated ONLY here, from a found valid solution --
         #      NEVER from aggregated progress commitments, searched coverage, or claimed exhaustion.
-        CALL EarlyStopGenerate(RoundContext, candidate_solution)
-        RETURN CALL ValidBlockAccept(RoundContext, candidate_solution)
+        certificate <- CALL EarlyStopGenerate(RoundContext, candidate_solution)
+        # C6: do NOT accept the block here. Acceptance occurs later, ONLY at the modeled
+        #     acceptance point (see ScheduleSolutionPropagation / BlockAcceptancePoint).
+        #     ROUND_ACCEPTED is NEVER set at solution-discovery time.
+        RETURN CALL ScheduleSolutionPropagation(RoundContext, candidate_solution, certificate,
+                                                finder = MinerID)
       ADVANCE cursor
       DECREMENT step_budget
       PERIODICALLY CALL ProgressCommit(assignment, cursor)     # emits progress evidence
@@ -144,58 +148,98 @@ PROCEDURE RangeExhaust
   INPUTS: RoundContext, assignment
   PRECONDITIONS: cursor has traversed all of range(assignment)
   EFFECTS:
-    emit final ProgressCommit covering range(assignment)       # modeled progress abstraction
-    # CR-B5: local range exhaustion (PATH A) closes the range.
-    SET coverage_state(range(assignment)) <- searched          # supports I8a
-    # CR5: separate simulator GROUND TRUTH from the PROTOCOL-LEVEL exhaustion claim.
-    SET reported_exhaustion <- miner's claim that range(assignment) is fully searched
-    # ---- honest path ----
-    # EXHAUSTED_PENDING eligibility uses ACTUAL cursor completion (simulator ground truth).
-    IF actual_exhaustion(assignment) is TRUE:                  # actual cursor completed the range
-      SET custody_status(range(assignment)) <- completed        # CR-B5: completed => NOT reassignable under same TemplateID
-      TRANSITION miner_state(MinerID) -> EXHAUSTED_PENDING
-    # ---- adversarial path ----
-    ELSE:
-      # reported_exhaustion is compared with ground truth through a modeled audit/detection
-      # abstraction -- NOT a cryptographic proof.
+    # C2: adjudicate BEFORE marking searched/completed. A final reported ProgressCommit is a
+    #     CLAIM, not automatically accepted coverage.
+    emit final ProgressCommit covering range(assignment)       # updates reported_* only (C3)
+    # (1) preserve simulator GROUND TRUTH (known to the simulator, not asserted by the protocol)
+    actual_frontier            <- true cursor position reached in range(assignment)
+    actual_positions_evaluated <- true count of positions evaluated
+    actual_exhaustion          <- (actual_frontier = range_end AND no valid solution encountered)
+    actual_solution_positions  <- true solution-bearing positions in range (if any)
+    # (2) record the PROTOCOL-LEVEL claim
+    reported_frontier   <- coverage the miner claims to have searched
+    reported_exhaustion <- miner's claim that range(assignment) is fully searched
+    # (3) adjudicate the claim
+    IF simulation = honest AND actual_exhaustion is TRUE:
+      claim_accepted_or_rejected <- ACCEPTED                   # honest path: exact ground-truth completion
+    ELSE:                                                       # adversarial path
       # ---- [SIMULATION SAMPLING] ----
       audit_selected <- [SIMULATION SAMPLING] audit_selection_model(assignment)
       # ---- deterministic protocol logic ----
       IF audit_selected:
-        audit_result <- compare(reported_exhaustion, actual_exhaustion(assignment))
+        audit_result <- compare(reported_exhaustion, actual_exhaustion)   # modeled audit, NOT a proof
         claim_accepted_or_rejected <- (audit_result = consistent)
       ELSE:
-        claim_accepted_or_rejected <- reported_exhaustion       # unaudited claim taken as reported
-      IF claim_accepted_or_rejected:
-        SET custody_status(range(assignment)) <- completed       # CR-B5: accepted exhaustion completes the range
-        TRANSITION miner_state(MinerID) -> EXHAUSTED_PENDING
-      ELSE:
-        RECORD false_exhaustion_detected(MinerID, assignment)   # NO transition; range NOT marked completed
-  RETURNS: exhaustion_record(MinerID, range, RoundID, TemplateID)
-  NOTE: EXHAUSTED_PENDING is exclusive to this range-exhaustion path (PATH A) and is the ONLY
-        route to LOW_POWER_LISTEN that closes a range (coverage_state = searched,
-        custody_status = completed, stop_reason = RANGE_EXHAUSTED). It is NOT the only legal
-        trigger for entering LOW_POWER_LISTEN: I4 also permits explicit revocation, a fully
-        verified valid-solution certificate (PATH B, assignment PAUSED -- see EarlyStopVerify),
-        and round closure -- none of which pass through EXHAUSTED_PENDING. A progress commitment
-        NEVER proves that no valid solution exists in the whole range; exhaustion findings are
-        modeled, not proven.
+        # an unaudited claim is accepted ONLY where the modeled policy explicitly defines that
+        # result; recorded as MODELED acceptance, never actual proof.
+        claim_accepted_or_rejected <- modeled_unaudited_acceptance_policy(assignment)
+    # (4) ACCEPTED: promote reported -> accepted coverage and close the range on PATH A
+    IF claim_accepted_or_rejected = ACCEPTED:
+      SET accepted_frontier(range(assignment)) <- range_end
+      SET accepted_exhaustion(assignment)      <- TRUE
+      SET coverage_state(range(assignment))    <- searched      # I8a uses ACCEPTED coverage only (C3)
+      SET custody_status(range(assignment))    <- completed     # CR-B5: NOT reassignable under same TemplateID
+      SET stop_reason(MinerID)                 <- RANGE_EXHAUSTED
+      TRANSITION miner_state(MinerID) -> EXHAUSTED_PENDING      # PATH A only
+    # (5) REJECTED: do NOT mark searched/completed; do NOT enter EXHAUSTED_PENDING
+    ELSE:
+      RECORD false_exhaustion_detected(MinerID, assignment)     # progress/audit model, NOT I11
+      PRESERVE actual coverage (accepted_frontier unchanged; range NOT searched/completed)
+      APPLY adversarial/failure response (e.g. RangeReassign of the accepted unsearched suffix,
+            or RoundAbort per policy); miner remains ACTIVE_HASHING (no PATH-A transition)
+  RETURNS: exhaustion_record(MinerID, range, RoundID, TemplateID, claim_accepted_or_rejected)
+  NOTE: EXHAUSTED_PENDING is exclusive to this range-exhaustion path (PATH A) and is entered
+        ONLY on ACCEPTED exhaustion. coverage_state = searched is set ONLY from ACCEPTED coverage
+        (C2/C3); a reported ProgressCommit never sets it. False exhaustion is handled by the
+        modeled progress/audit abstraction, NOT by I11 (which governs solution certificates).
+        Other legal LOW_POWER_LISTEN triggers (explicit revocation, a verified valid-solution
+        certificate PATH B, and round closure) do NOT pass through EXHAUSTED_PENDING. A progress
+        commitment NEVER proves that no valid solution exists in the whole range; exhaustion
+        findings are modeled, not proven.
 ```
 
 ## 7. Transition to low-power listening
 
 ```
 PROCEDURE EnterLowPowerListen
-  INPUTS: RoundContext, MinerID, trigger
-  PRECONDITIONS:
-    (miner_state(MinerID) = EXHAUSTED_PENDING AND exhaustion accounting accepted)
-     OR trigger = EXPLICIT_REVOCATION                          # guard enforces I4
+  INPUTS: RoundContext, MinerID, stop_reason
+  PRECONDITIONS: stop_reason in {RANGE_EXHAUSTED, ASSIGNMENT_REVOKED, VALID_SOLUTION_VERIFIED,
+                 ROUND_ACCEPTED, ROUND_ABORTED}                # I4: every entry records a reason
   EFFECTS:
-    ASSERT precondition holds                                  # I4: no early idling
-    RELEASE any held range back to pool (mark inactive/reassignable)   # supports I8
+    # C1: reason-specific disposition. There is NO generic "release held range to pool" step.
+    SWITCH stop_reason:
+
+      CASE RANGE_EXHAUSTED:                                    # PATH A
+        ASSERT miner_state(MinerID) = EXHAUSTED_PENDING
+        ASSERT accepted_exhaustion(assignment) = TRUE          # accepted exhaustion accounting exists
+        ASSERT coverage_state(range) = searched AND custody_status(range) = completed
+        CLOSE the assignment
+        # do NOT release or reassign any part of the completed range
+
+      CASE ASSIGNMENT_REVOKED:
+        ASSERT miner_state(MinerID) = ACTIVE_HASHING
+        PRESERVE accepted searched prefix [range_start, accepted_frontier]
+        SET suffix <- accepted unsearched suffix [accepted_frontier + 1, range_end]
+        MARK suffix as inactive_unsearched / reassignable      # only the accepted unsearched suffix (C4)
+        CLOSE/SUPERSEDE the assignment
+
+      CASE VALID_SOLUTION_VERIFIED:                            # PATH B
+        ASSERT miner_state(MinerID) = ACTIVE_HASHING
+        ASSERT the honoured early-stop certificate passed I11
+        PAUSE the assignment; retain actual_frontier AND accepted_frontier
+        # do NOT change coverage to searched; do NOT release the assignment
+
+      CASE ROUND_ACCEPTED OR ROUND_ABORTED:
+        CLOSE the assignment because the round ended
+        # do NOT mark the range exhausted; do NOT reassign it under the closed TemplateID
+
+    RECORD stop_reason(MinerID) <- stop_reason                 # I4
     TRANSITION miner_state(MinerID) -> LOW_POWER_LISTEN
     BEGIN accumulating t_listen at P_listen                    # supports I6; not active rate
-  RETURNS: listen_record(MinerID)
+  RETURNS: listen_record(MinerID, stop_reason)
+  NOTE: EXHAUSTED_PENDING is the source ONLY for RANGE_EXHAUSTED; the other four reasons enter
+        LOW_POWER_LISTEN directly from ACTIVE_HASHING (or on round closure) and never pass
+        through EXHAUSTED_PENDING (CR-B1/CR-B2, I4).
 ```
 
 ## 8. Active-hash-rate update
@@ -219,10 +263,11 @@ PROCEDURE ActiveHashRateUpdate
     SET H_active(t)      <- H_honest(t) + H_adversarial(t)      # exact census decomposition (I17)
     IF H_active(t) = 0:
       SET q_adv(t) <- NA                                        # I17: undefined at zero active hash rate
-      RECORD breach_event(security_floor, t)                    # I16/I17: recorded, NEVER treated as zero
+      # C7: ActiveHashRateUpdate does NOT record breaches or trigger recovery -- it only computes.
+      #     SecurityFloorEvaluate alone records the active/honest-floor breaches when H_active = 0.
     ELSE:
       SET q_adv(t) <- H_adversarial(t) / H_active(t)
-    RECORD (H_active(t), H_honest(t), H_adversarial(t), q_adv(t))
+    RECORD (H_active(t), H_honest(t), H_adversarial(t), q_adv(t))   # values only; no breach/recovery here
   RETURNS: (H_active(t), H_honest(t), H_adversarial(t), q_adv(t))
   NOTE: Only ACTIVE_HASHING contributes to active hash rate; LOW_POWER_LISTEN, WAKING,
         RESERVE, OFFLINE contribute nothing to it. The simulation draws only WHICH adversarial
@@ -238,19 +283,31 @@ PROCEDURE SecurityFloorEvaluate
   PRECONDITIONS: none
   EFFECTS:
     breach <- FALSE
-    IF H_active(t) < floor_state.active_floor:
-      RECORD breach_event(active_floor, t)                     # I16: recorded, not repaired
+    # C7: this procedure ALONE records breaches and triggers recovery. RECORD_ONCE suppresses
+    #     duplicate breach records for the same (event, threshold, t).
+    IF H_active(t) == 0:
+      # zero active hash rate: q_adv(t) = NA. Record active- AND honest-floor breaches; do NOT
+      # compare NA with maximum_adversarial_share (NA is never numerically compared).
+      RECORD_ONCE breach_event(active_floor, t)                # I16
+      RECORD_ONCE breach_event(honest_floor, t)                # I16
       breach <- TRUE
-    IF H_honest(t) < floor_state.honest_floor:
-      RECORD breach_event(honest_floor, t)                     # I16
-      breach <- TRUE
-    IF q_adv(t) > floor_state.q_adv_threshold:
-      RECORD breach_event(adversarial_share, t)                # I16
-      breach <- TRUE
+    ELSE:
+      IF H_active(t) < floor_state.active_floor:
+        RECORD_ONCE breach_event(active_floor, t)              # I16
+        breach <- TRUE
+      IF H_honest(t) < floor_state.honest_floor:
+        RECORD_ONCE breach_event(honest_floor, t)             # I16
+        breach <- TRUE
+      IF q_adv(t) != NA AND q_adv(t) > floor_state.q_adv_threshold:
+        RECORD_ONCE breach_event(adversarial_share, t)        # I16
+        breach <- TRUE
     IF breach:
       TRANSITION round_state -> SECURITY_RECOVERY
   RETURNS: breach
-  NOTE: Recovery actions are logged separately and never overwrite breach_event records (I16).
+  NOTE: I17 (`H_active = H_honest + H_adversarial`) holds exactly at every event-update time.
+        ActiveHashRateUpdate computes the quantities only; this procedure is the SOLE owner of
+        breach recording and recovery. `q_adv = NA` is never numerically compared. Recovery
+        actions are logged separately and never overwrite breach_event records (I16).
 ```
 
 ## 10. Reserve activation
@@ -297,44 +354,55 @@ PROCEDURE LeaseExpiry
   INPUTS: RoundContext, assignment, time t
   PRECONDITIONS: t >= lease_expiry(assignment) AND assignment not renewed
   EFFECTS:
-    MARK range(assignment) as reassignable in assignment_ledger    # supports I8
     INVALIDATE assignment (holder's assignment no longer CURRENT)   # stale mining -> I2 reject
     IF holder wishes to continue AND policy allows renewal:
       RENEW lease_expiry <- t + lease_duration
+      RETURN renewed
+    # C4: reassign ONLY the accepted unsearched suffix, never the searched prefix.
+    IF accepted_frontier(range(assignment)) = range_end:
+      RETURN released_nothing_to_reassign                          # range complete; nothing unsearched
+    IF no accepted positions exist for range(assignment):
+      SET reassignable_suffix <- whole range(assignment)          # [range_start, range_end]
     ELSE:
-      RETURN CALL RangeReassign(RoundContext, range(assignment),
-                                reason=lease_expiry, from_miner=holder)
-  RETURNS: lease_disposition (renewed | released)
+      SET reassignable_suffix <- [accepted_frontier(range(assignment)) + 1, range_end]
+    MARK reassignable_suffix as inactive_unsearched / reassignable  # supports I8a (unsearched only)
+    RETURN CALL RangeReassign(RoundContext, reassignable_suffix,
+                              reason=lease_expiry, from_miner=holder)
+  RETURNS: lease_disposition (renewed | released | released_nothing_to_reassign)
 ```
 
 ## 13. Range reassignment
 
 ```
 PROCEDURE RangeReassign
-  INPUTS: RoundContext, range, reason, from_miner
-  PRECONDITIONS: range is reassignable;
+  INPUTS: RoundContext, unsearched_suffix, reason, from_miner
+  PRECONDITIONS: # C4: the caller passes the EXACT accepted unsearched suffix, not a full range:
+                 unsearched_suffix = [accepted_frontier(source) + 1, range_end(source)]
+                   OR (no accepted positions exist AND unsearched_suffix = whole source range);
                  # CR-B5: exhaustion is NOT a reassignment reason; permitted reasons are exactly:
                  reason in {lease_expiry, abandonment, revocation, departure, conflict, security_recovery};
-                 custody_status(range) != completed;            # a completed range is NOT reassignable
-                 coverage_state(range) != searched              # only an UNSEARCHED suffix may be reassigned
+                 custody_status(unsearched_suffix) != completed;   # a completed range is NOT reassignable
+                 coverage_state(unsearched_suffix) != searched     # no searched prefix is included
   EFFECTS:
-    # CR-B5: never reassign a completed range under the same TemplateID; only the unsearched suffix.
-    ASSERT custody_status(range) != completed                   # completed range: coverage_state = searched
-    ASSERT coverage_state(range) != searched                    # reassign only the unsearched suffix
+    # CR-B5 + C4: only the accepted unsearched suffix is reassigned; a searched prefix or a
+    # completed range is NEVER reassignable.
+    ASSERT custody_status(unsearched_suffix) != completed
+    ASSERT coverage_state(unsearched_suffix) != searched
+    ASSERT unsearched_suffix contains no accepted searched position   # C4: suffix only
     SELECT to_miner from {RESERVE, REGISTERED} miners (or via ReserveActivate)
     FOR EACH active_assignment A in assignment_ledger:
-      ASSERT range INTERSECT range(A) = EMPTY                   # I1 preserved
-    prior_pc <- last accepted ProgressCommit covering range     # de-dup key material (I13)
-    CREATE assignment(to_miner, range, TemplateID, RoundID, new lease window)
+      ASSERT unsearched_suffix INTERSECT range(A) = EMPTY             # I1 preserved
+    prior_pc <- last accepted ProgressCommit covering the source range   # de-dup key material (I13)
+    CREATE assignment(to_miner, unsearched_suffix, TemplateID, RoundID, new lease window)
     APPEND reassignment record
-        (range, from_miner, to_miner, reason, timestamp, prior_pc)   # I9 complete provenance
-    # CR4: coverage uses I8a; custody/provenance is tracked SEPARATELY as I8b.
+        (unsearched_suffix, from_miner, to_miner, reason, timestamp, prior_pc)   # I9 complete provenance
+    # CR4/C3: coverage uses I8a with ACCEPTED coverage; custody/provenance is tracked SEPARATELY as I8b.
     UPDATE assignment_ledger so the coverage partition still holds (I8a):
-        searched + active_unsearched + inactive_unsearched = assigned_domain
+        accepted_searched + active_unsearched + inactive_unsearched = assigned_domain
     # I8b custody/lineage status is orthogonal and is NEVER an additive coverage term.
-    SET custody_status(range) <- reassigned   # in {original, renewed, reassigned, revoked, expired, abandoned, completed}
-    # The reassigned range retains an INDEPENDENT coverage state
-    # (searched / active_unsearched / inactive_unsearched).
+    SET custody_status(unsearched_suffix) <- reassigned   # in {original, renewed, reassigned, revoked, expired, abandoned, completed}
+    # The reassigned suffix retains an INDEPENDENT coverage state
+    # (accepted_searched / active_unsearched / inactive_unsearched).
   RETURNS: reassignment_record
 ```
 
@@ -354,12 +422,17 @@ PROCEDURE ProgressCommit
     reported_frontier <- coverage the miner claims, from lower bound up to cursor
     CREATE progress_commitment(MinerID, range(assignment), reported_frontier, RoundID, TemplateID, t)
     RECORD progress_commitment                                  # modeled progress-verification abstraction
-    UPDATE searched measure in assignment_ledger for this range # supports I8a
+    UPDATE reported_searched(range(assignment)) <- reported_frontier   # C3: REPORTED layer ONLY
+    # C3: ProgressCommit MUST NOT update the normative I8a accepted_searched measure. I8a uses
+    #     ACCEPTED coverage only; reported coverage is promoted to accepted ONLY by adjudication
+    #     (RangeExhaust honest-completion / audit), never directly by a progress commitment.
   RETURNS: progress_commitment
   NOTE: This is a MODELED PROGRESS-VERIFICATION ABSTRACTION, NOT a cryptographic proof of
         range exhaustion. A progress commitment states "I claim to have searched up to this
-        frontier"; it NEVER proves that no valid solution exists in the whole range. It cannot
-        by itself justify stopping without target verification (I11).
+        frontier"; it NEVER proves that no valid solution exists in the whole range, and it can
+        never by itself close a range as searched or stop hashing. Closing a range as searched
+        requires adjudicated (accepted) exhaustion (C2); stopping early requires a verified
+        solution certificate (I11). These are distinct mechanisms.
 ```
 
 ## 15. Early-stop certificate generation
@@ -467,45 +540,109 @@ PROCEDURE ResumeFromPause
         assignment closes on round closure -- NOT by exhaustion.
 ```
 
+## 16b. Event-ordered solution propagation (C6)
+
+```
+PROCEDURE ScheduleSolutionPropagation
+  INPUTS: RoundContext, candidate_solution, certificate, finder
+  PRECONDITIONS: round_state in {HASHING, SECURITY_RECOVERY};
+                 certificate was produced by EarlyStopGenerate from a found valid solution
+  EFFECTS:
+    # C6: event-ordered propagation. NO block acceptance occurs here; ROUND_ACCEPTED is not set.
+    # (3) schedule per-recipient certificate-arrival events using modeled propagation delays.
+    FOR EACH recipient r in current miners, r != finder:
+      cert_delay(r) <- deterministic modeled propagation delay(finder -> r)   # reproducible
+      SCHEDULE event CertificateArrival(RoundContext, r, certificate) AT now + cert_delay(r)
+    # (4) schedule the full-block propagation/arrival event toward the modeled acceptance point.
+    block_delay <- deterministic modeled propagation delay(finder -> acceptance_point)  # reproducible
+    SCHEDULE event BlockAcceptancePoint(RoundContext, candidate_solution) AT now + block_delay
+    # (5) the finder ceases hashing under the solution-found rule; its assignment is PAUSED
+    #     (PATH B, resumable), and block-propagation energy is accounted (P_hash residency ends;
+    #     E_coordination for propagation). The finder does NOT pass through EXHAUSTED_PENDING.
+    CALL EnterLowPowerListen(RoundContext, finder, stop_reason = VALID_SOLUTION_VERIFIED)
+  RETURNS: scheduled_marker
+  NOTE: The discrete-event queue orders arrivals; no global set of future solutions is consulted.
+        Do NOT call ValidBlockAccept here.
+```
+
+## 16c. Certificate arrival at a recipient (C6)
+
+```
+PROCEDURE CertificateArrival
+  INPUTS: RoundContext, recipient r, certificate
+  PRECONDITIONS: this is the scheduled certificate-arrival event for r
+  EFFECTS:
+    # (6) the recipient stays ACTIVE_HASHING until its certificate-arrival event fully validates.
+    IF miner_state(r) = ACTIVE_HASHING:
+      result <- CALL EarlyStopVerify(RoundContext, certificate, verifying_MinerID = r)
+      # (7) on VERIFIED, EarlyStopVerify pauses r into LOW_POWER_LISTEN
+      #     (stop_reason = VALID_SOLUTION_VERIFIED, assignment PAUSED). On REJECTED, r stays
+      #     ACTIVE_HASHING and keeps hashing (I11); no transition.
+    ELSE:
+      IGNORE                                                     # r not currently hashing
+  RETURNS: verify_result
+```
+
+## 16d. Block acceptance point (C6)
+
+```
+PROCEDURE BlockAcceptancePoint
+  INPUTS: RoundContext, candidate_solution
+  PRECONDITIONS: this is the scheduled full-block arrival event at the MODELED ACCEPTANCE POINT
+  EFFECTS:
+    # C6: the modeled acceptance point is EITHER a designated coordinator/validator OR a clearly
+    #     identified canonical local view, selected by RoundContext.acceptance_point_policy.
+    # (8) block acceptance occurs ONLY here, after the full block arrives and validates.
+    RETURN CALL ValidBlockAccept(RoundContext, candidate_solution)
+  NOTE: Because acceptance is a scheduled event, the discrete-event queue itself establishes the
+        earliest arrival (C6 step 9); ValidBlockAccept does not scan a global future set.
+```
+
 ## 17. Valid block acceptance
 
 ```
 PROCEDURE ValidBlockAccept
   INPUTS: RoundContext, candidate_solution = (RoundID, TemplateID, AssignmentID, MinerID,
           nonce, candidate_hash, target)
-  PRECONDITIONS: round_state in {HASHING, SECURITY_RECOVERY}
+  PRECONDITIONS: invoked ONLY from BlockAcceptancePoint at the modeled acceptance point (C6);
+                 round_state in {HASHING, SECURITY_RECOVERY, SOLUTION_PROPAGATION}
   EFFECTS:
     A <- assignment(candidate_solution.AssignmentID) of candidate_solution.MinerID
     ASSERT A is VALID and CURRENT
     ASSERT candidate_solution.nonce in range(A)                 # I2
     ASSERT candidate_solution.RoundID = RoundID_current         # I3
     ASSERT candidate_solution.TemplateID = TemplateID_committed # I3
-    target_ok <- target verification of nonce under TemplateID and fixed D, yielding
-                 candidate_hash that satisfies target
-                 (modeled progress-verification abstraction)    # I11-consistent
+    target_ok <- target verification of nonce under TemplateID and fixed D yielding a
+                 candidate_hash that satisfies target (modeled)   # I11-consistent
     IF NOT target_ok:
+      RECORD invalid_block(candidate_solution)
       RETURN rejected
-    # CR6: competing valid solutions use NETWORK-ARRIVAL semantics.
-    # The global-oracle rule "smallest (TemplateID, nonce, MinerID)" is REMOVED as the primary
-    # accepted-solution rule.
-    SET arrival_time <- reproducible propagation/arrival time of candidate_solution
-                        (deterministic modeled propagation; reproducible)
-    RECORD candidate_solution WITH arrival_time in the round's valid-solution set
-    accepted <- the valid solution with the EARLIEST arrival_time
-    IF two or more valid solutions share the EXACT SAME earliest arrival_time:
-      # deterministic secondary rule used ONLY for exact arrival-time ties
-      accepted <- among the tied solutions, the one with smallest candidate_hash,
-                  then smallest MinerID
-    FOR EACH other valid solution s in the round's valid-solution set, s != accepted:
-      RECORD competing_valid(s)                                 # competing/stale proposals
-    IF candidate_solution != accepted:
+    # C6: earliest arrival is established by the discrete-event QUEUE ORDER -- this is the
+    # BlockAcceptancePoint event firing at its scheduled full-block arrival time. NO global set of
+    # future solutions is consulted; the global-oracle "smallest (TemplateID, nonce, MinerID)"
+    # rule is NOT the primary rule.
+    IF a block has ALREADY been accepted this round:
+      RECORD competing_valid(candidate_solution)                # later arrival -> competing/stale
       RETURN not_selected
-    RECORD accepted_block(accepted)
+    IF another BlockAcceptancePoint event fires at the EXACT SAME acceptance timestamp:
+      # deterministic secondary tie-break ONLY for exactly-equal acceptance timestamps
+      keep the one with smallest candidate_hash, then smallest MinerID
+      RECORD competing_valid(the other tied solution)
+      IF candidate_solution is not the kept one: RETURN not_selected
+    RECORD accepted_block(candidate_solution)
     TRANSITION round_state -> SOLUTION_PROPAGATION
     TRANSITION round_state -> ROUND_ACCEPTED
+    # (13) round closure closes remaining/paused assignments WITHOUT labeling them exhausted.
+    FOR EACH assignment X still open at closure:
+      IF miner_state(holder(X)) = ACTIVE_HASHING:
+        CALL EnterLowPowerListen(RoundContext, holder(X), stop_reason = ROUND_ACCEPTED)
+      ELSE IF holder(X) is paused in LOW_POWER_LISTEN (stop_reason = VALID_SOLUTION_VERIFIED):
+        SET stop_reason(holder(X)) <- ROUND_ACCEPTED
+        CLOSE X as round-ended (NOT resumable)
+      # range NOT marked exhausted/searched; NOT reassigned under the closed TemplateID
   RETURNS: accepted_block | rejected | not_selected
-  NOTE: Local acceptance uses the earliest valid arrival; no chain-wide fork-choice proof is
-        claimed.
+  NOTE: Acceptance happens ONLY at the modeled acceptance point (C6); earliest arrival is the
+        discrete-event queue order; no chain-wide fork-choice proof is claimed.
 ```
 
 ## 18. Full-range exhaustion without solution
@@ -513,16 +650,23 @@ PROCEDURE ValidBlockAccept
 ```
 PROCEDURE FullRangeExhaustNoSolution
   INPUTS: RoundContext
-  PRECONDITIONS: assignment_ledger shows the entire nonce_domain searched under the I8a
-                 coverage partition AND no accepted_block
+  PRECONDITIONS: # C9: the entire assigned domain must be ACCEPTED searched coverage (I8a);
+                 # reported coverage alone is INSUFFICIENT.
+                 accepted_searched measure = measure(nonce_domain)
+                 AND active_unsearched measure = 0 AND inactive_unsearched measure = 0
+                 AND no accepted_block
   EFFECTS:
-    # CR4: reconcile using the I8a coverage partition; custody status (I8b) is NOT a coverage term.
-    ASSERT searched measure = measure(nonce_domain)             # I8a reconciliation
-    # CR5: the protocol-level exhaustion claim (reported_exhaustion) is distinct from simulator
-    # ground truth (actual_exhaustion). No progress commitment proves that no valid solution
-    # exists in the whole range.
-    SET reported_exhaustion <- aggregate reported coverage of the nonce_domain
+    # CR4/C3/C9: reconcile using the I8a ACCEPTED coverage partition; custody status (I8b) is
+    # NOT a coverage term. Do NOT enter ROUND_EXHAUSTED while any active_unsearched or
+    # inactive_unsearched coverage remains.
+    ASSERT accepted_searched measure = measure(nonce_domain)    # I8a: accepted coverage only
+    ASSERT active_unsearched measure = 0 AND inactive_unsearched measure = 0
+    # C9: every accepted coverage claim must have a defined adjudication outcome. For adversarial
+    #     runs, an unaudited claim may be accepted ONLY where the modeled policy explicitly defines
+    #     it, recorded as MODELED acceptance (not actual proof).
     IF simulation = adversarial:
+      FOR EACH range r contributing to accepted_searched:
+        ASSERT adjudication_outcome(r) is DEFINED               # audited, or modeled-policy accepted
       # ---- [SIMULATION SAMPLING] ----
       audit_selected <- [SIMULATION SAMPLING] audit_selection_model(nonce_domain)
       # ---- deterministic protocol logic ----
@@ -550,13 +694,26 @@ PROCEDURE TemplateRefresh
   PRECONDITIONS: round_state in {ROUND_EXHAUSTED, HASHING(systemic template disagreement)}
   EFFECTS:
     TRANSITION round_state -> TEMPLATE_REFRESH
+    # C5: a new TemplateID is a NEW search domain, not a reassignment-lineage event.
+    # (1) close all assignments under the OLD TemplateID
+    FOR EACH assignment X under the old TemplateID:
+      CLOSE X                                                   # closed because the template changed
+    # (2) preserve their historical coverage/provenance records (do not delete the ledger history)
+    PRESERVE historical coverage_state / custody_status / reassignment records of old assignments
+    # (3) build a new immutable template and fresh TemplateID
     build new candidate_template
-    RETURN CALL TemplateCommit(RoundContext, new candidate_template)  # yields new TemplateID
-    # existing assignments are rebound to the new TemplateID via RangeAssign/RangeReassign
+    new_TemplateID <- CALL TemplateCommit(RoundContext, new candidate_template)  # fresh TemplateID
+    # (4) create NEW ORIGINAL assignments over the new candidate-identity domain
+    FOR EACH participating miner m:
+      CREATE assignment(m, fresh_range(m), new_TemplateID, RoundID, new lease window)
+      SET custody_status(fresh_range(m)) <- original
+      SET previous_assignment_reference <- null                 # C5: not a reassignment lineage
+      # do NOT call RangeReassign for old ranges; do NOT rebind old assignments to new_TemplateID
     ASSERT difficulty unchanged                                 # I12
-  RETURNS: new TemplateID
+  RETURNS: new_TemplateID
   NOTE: Refresh is the ONLY sanctioned way mined content changes; it never mutates a committed
-        template in place.
+        template in place, and it NEVER reassigns a completed old range -- old assignments are
+        closed and new ORIGINAL assignments are created over the new domain (C5).
 ```
 
 ## 20. Round abort

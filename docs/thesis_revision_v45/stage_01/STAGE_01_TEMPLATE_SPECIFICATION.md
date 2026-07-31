@@ -522,7 +522,7 @@ it is not, and MUST NOT become, a difficulty controller.
 - **Invariants referenced:** I1 (no two valid active assignments overlap); I2 (an accepted
   solution lies in the signer's valid current assignment); I3 (an accepted solution matches the
   current RoundID and TemplateID); I8a (coverage-state partition:
-  searched + active_unsearched + inactive_unsearched = assigned_domain) with I8b (orthogonal
+  accepted_searched + active_unsearched + inactive_unsearched = assigned_domain) with I8b (orthogonal
   custody model {original, renewed, reassigned, revoked, expired, abandoned}, non-additive);
   I12 (difficulty constant in the confirmatory
   protocol). I1, I2, I8a, and I8b are specified operationally in

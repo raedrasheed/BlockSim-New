@@ -122,6 +122,10 @@ partitions the range into two contiguous parts:
   claim is modeled, not proven).
 - **Unsearched suffix** — the positions from just after the frontier to `range_end`. These are
   the positions still to be searched under the current lease.
+- **Reported vs. accepted frontier.** The **reported frontier** is a claim; it is promoted to
+  the **accepted frontier** (`accepted_frontier`) only by adjudication (a `RangeExhaust`
+  honest-completion or a passed audit). Reassignment (Section 5) operates on the **accepted
+  unsearched suffix** measured from `accepted_frontier`, never on an unadjudicated reported claim.
 
 By construction, `|searched prefix| + |unsearched suffix| = range_size` for a live lease.
 Stage 1 models search as advancing a single monotonic frontier per lease; non-contiguous search
@@ -137,7 +141,8 @@ rather than a single frontier.
 **Abandonment** occurs when a holder ceases to make sanctioned progress on a live lease
 **before completing it** — for example on transition to `OFFLINE` or departure. On
 abandonment the range's searched prefix (as last checkpointed) is retained for accounting, and
-the unsearched suffix becomes eligible for reassignment. Abandonment is holder-originated (the
+the **accepted unsearched suffix** (`[accepted_frontier + 1, range_end]`) becomes eligible for
+reassignment. Abandonment is holder-originated (the
 holder stops); revocation (5.2) is authority-originated. Abandonment is distinct from
 **exhaustion**: a holder that fully searches its range reaches `EXHAUSTED_PENDING` with the
 range **completed** (Section 5.4), which is not abandonment and does not make the range
@@ -152,10 +157,10 @@ with the last checkpointed searched prefix retained.
 
 ### 5.3 Reassignment
 
-**Reassignment** issues a new Assignment object for the **unsearched suffix** of a range
-(which may be the whole range when nothing has been searched) to a DIFFERENT `MinerID`.
+**Reassignment** issues a new Assignment object for the **accepted unsearched suffix** of a range
+(which may be the whole range when no accepted searched positions exist) to a DIFFERENT `MinerID`.
 Reassignment is the mechanism by which unsearched coverage of the nonce domain is maintained
-without requiring the original holder to continue. Only an **unsearched suffix** may be
+without requiring the original holder to continue. Only an **accepted unsearched suffix** may be
 reassigned; a searched prefix is never reassigned, and a **completed / exhausted** range is
 never reassigned (Section 5.4).
 
@@ -166,16 +171,34 @@ never reassigned (Section 5.4).
 ```
 
 Exhaustion is NOT a reassignment reason and MUST NOT appear in any reassignment-reason set.
+
+**Accepted unsearched suffix (the exact reassignable region).** For every one of the permitted
+reasons — `lease_expiry`, `abandonment`, `revocation`, `departure`, `conflict`,
+`security_recovery` — reassignment transfers ONLY the accepted unsearched suffix, computed from
+the accepted frontier:
+
+```
+suffix_start        = accepted_frontier + 1
+reassignable_suffix = [suffix_start, range_end]
+```
+
+- If no accepted searched positions exist, the suffix MAY be the whole range.
+- If `accepted_frontier = range_end`, the range is **completed** and **no suffix exists**
+  (nothing is reassignable; Section 5.4).
+- `RangeReassign` receives the **exact** unsearched suffix `[suffix_start, range_end]`, never the
+  original full range and never a searched prefix.
+
 The reassigned Assignment object:
 
-- references the unsearched suffix being transferred;
+- references the accepted unsearched suffix being transferred;
 - carries a fresh `AssignmentID` and the new holder's `MinerID`;
 - increments `assignment_version`;
 - sets `previous_assignment_reference` to the superseded `AssignmentID` (Section 6);
 - carries its own `lease_start`/`lease_expiry`.
 
-Reassignment of only the unsearched suffix narrows `range_start` to just after the transferred
-frontier so that the new lease does not re-cover the prior searched prefix (subject to Section 7).
+Reassignment of only the accepted unsearched suffix narrows `range_start` to just after the
+accepted frontier (`accepted_frontier + 1`) so that the new lease does not re-cover the prior
+searched prefix (subject to Section 7).
 
 ### 5.4 Completed / exhausted ranges are not reassignable
 
@@ -188,12 +211,23 @@ solution found (PATH A, reaching `EXHAUSTED_PENDING` with the range completed) �
 - is **NOT** marked `inactive_unsearched`;
 - is **NOT** reassigned under the same `TemplateID`.
 
-A **template refresh** does not reassign a completed range: it opens a **new**
-candidate-identity domain and issues **new original** assignments under the **new**
-`TemplateID` (`previous_assignment_reference = null`), which is not a reassignment of the
-completed old range. Only genuinely **unsearched** coverage (an unsearched suffix left by
-expiry, abandonment, revocation, departure, conflict, or security_recovery) is ever
-reassigned.
+A **template refresh** does not reassign a completed range, and is **not** a reassignment event
+at all. On `TemplateRefresh` the protocol:
+
+- **closes all assignments under the old `TemplateID`** and preserves their historical coverage
+  and provenance (the old-domain accounting still reconciles under I8a/I9);
+- **creates a new immutable template and a fresh `TemplateID`** (a new candidate-identity
+  domain);
+- **creates new ORIGINAL assignments** over the new domain with
+  `previous_assignment_reference = null`;
+- does **NOT** call `RangeReassign` for the old ranges;
+- does **NOT** rebind old assignments to the new domain;
+- **keeps difficulty fixed** (`D(t) = D_0`; I12).
+
+Issuing new original assignments under the new `TemplateID` is not a reassignment of the
+completed (or any) old range. Only genuinely **unsearched** coverage — an accepted unsearched
+suffix left by expiry, abandonment, revocation, departure, conflict, or security_recovery — is
+ever reassigned.
 
 ---
 
@@ -259,7 +293,7 @@ term in the coverage equation.
 accounting MUST reconcile exactly:
 
 ```
-searched + active_unsearched + inactive_unsearched = assigned_domain
+accepted_searched + active_unsearched + inactive_unsearched = assigned_domain
 ```
 
 where, for the scope being reconciled:
@@ -335,7 +369,7 @@ together.
   `range_start`, `range_end`, `range_size`, `lease_start`, `lease_expiry`, `assignment_version`,
   `previous_assignment_reference`, `signature/authentication`.
 - **Invariants used here:** **I8a** (coverage states partition the assigned domain:
-  searched + active_unsearched + inactive_unsearched = assigned_domain, positionally with no
+  accepted_searched + active_unsearched + inactive_unsearched = assigned_domain, positionally with no
   hidden gap or overlap); **I8b** (custody/provenance model
   `{original, renewed, reassigned, revoked, expired, abandoned, completed}`, orthogonal to
   coverage — a reassigned position keeps an independent coverage state, `reassigned` is never

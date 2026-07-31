@@ -221,6 +221,12 @@ Reserve activation is bound to the `SECURITY_RECOVERY` round state and paced by
 - The reserve policy is **specified structure only**. No implementation, validation,
   security, fairness, or incentive property is claimed. Selection predictability/manipulation
   risks are stated (Section 1.2) but no resistance result is asserted.
+- **No reward for RESERVE readiness or activation is assigned here: reward eligibility is NOT
+  SPECIFIED AT STAGE 1.** Holding a miner in `RESERVE`, its availability, and its activation
+  carry no availability reward, activation reward, or other reward eligibility at Stage 1; any
+  such component is **deferred to Stage 5** (see `STAGE_01_REWARD_PENALTY_INTERFACE.md`). A
+  reserve that fails to wake "is not credited with any progress" (Section 7.1) refers to
+  **coverage** progress, not to reward eligibility.
 - Range coverage/exhaustion relies on the **modeled progress-verification abstraction**,
   never a cryptographic proof.
 - **No final numeric parameter values are assigned at Stage 1** (reserve count,

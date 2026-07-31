@@ -15,6 +15,14 @@ component below is a named hook with a parameter, not a set value. No text in th
 asserts that the interface is incentive-compatible, fair, or Sybil-resistant. Those properties
 are explicitly OUT OF SCOPE at Stage 1 (see also `STAGE_01_PROTOCOL_SCOPE.md`, Section C).
 
+**Reward-eligibility wording (binding).** Reward eligibility is **NOT SPECIFIED AT STAGE 1**.
+Every reward and penalty component in this document is a named, unset hook whose eligibility,
+values, and assignment are **deferred to Stage 5**; none is assigned at Stage 1. The single
+exception is that a **valid solution may be recorded as having a solver identity** — recording
+a solver identity is not an assignment of reward eligibility. Wherever this document or any
+companion refers to reward eligibility, the canonical wording is exactly:
+*reward eligibility: NOT SPECIFIED AT STAGE 1*.
+
 ---
 
 ## 1. Purpose and stance
@@ -36,9 +44,15 @@ study; Stage 1 fixes only their existence, their triggering condition, and their
 
 ## 2. Reward components (parameterised)
 
+For every component below, **reward eligibility: NOT SPECIFIED AT STAGE 1** — each is a named
+hook whose eligibility and value are **deferred to Stage 5**, not assigned at Stage 1. The
+"Parameter" column names an unset symbol; naming a hook does not assign eligibility. The only
+reward-related fact Stage 1 records is that a **valid solution may be recorded as having a
+solver identity**.
+
 | Component | Triggering condition | Parameter (symbolic, unset) |
 |---|---|---|
-| **Work reward** | Reliable, provenance-complete searched progress over a leased range (searched prefix counted per I8, at most once per position per template). | `r_work` per unit searched |
+| **Work reward** | Reliable, provenance-complete accepted searched progress over a leased range (accepted searched prefix counted per I8a, at most once per position per template). NOT SPECIFIED / assigned at Stage 1 — a symbolic Stage-5 parameter only. | `r_work` per unit searched |
 | **Availability reward** | Remaining available for participation over the horizon, including sanctioned `LOW_POWER_LISTEN` and `RESERVE` readiness. | `r_avail` per unit availability |
 | **Winner reward** | Presenting a valid early-stop certificate whose block finalises the round (`ROUND_ACCEPTED`). | `r_win` per accepted round |
 | **Reserve-activation reward** | A `RESERVE` miner promoted to `ACTIVE_HASHING` (or to sanctioned coverage) on demand, incurring the `WAKING` transition. | `r_reserve` per activation |
@@ -59,7 +73,8 @@ introduces a new observable.
 | **Invalid-message penalty** | Emitting a certificate or message that fails validation (e.g. an early-stop certificate rejected under the strict validation order). | `q_invalid` per invalid message |
 
 Penalty hooks are the negative-sign counterparts to the rewards; like the rewards they are
-parameterised only. The false-claim penalty attaches to the penalty interface of
+parameterised only and **deferred to Stage 5** — none is assigned at Stage 1 (**reward
+eligibility: NOT SPECIFIED AT STAGE 1**). The false-claim penalty attaches to the penalty interface of
 `STAGE_01_PROGRESS_VERIFICATION_ABSTRACTION.md`; the invalid-message penalty attaches to the
 invalid-certificate behaviour of `STAGE_01_EARLY_STOP_CERTIFICATE.md`.
 
@@ -104,6 +119,9 @@ Stated explicitly and without qualification:
    fair treatment across miners.
 3. **No Sybil-resistance claim.** Nothing here asserts resistance to Sybil registration or to any
    identity-multiplication attack.
+4. **No reward-eligibility assignment.** Reward eligibility is **NOT SPECIFIED AT STAGE 1**;
+   all reward and penalty components are **deferred to Stage 5**. The only reward-related fact
+   Stage 1 records is that a valid solution may be recorded as having a solver identity.
 
 The interface is a set of parameterised hooks and a catalogue of attack surfaces. Whether any
 parameterisation of it yields desirable incentive behaviour is a later-stage research question and
@@ -118,11 +136,13 @@ is NOT answered — or asserted — at Stage 1.
 - **Penalty components:** abandonment penalty; false-claim penalty; invalid-message penalty.
 - **Miner/round states touched:** `RESERVE`, `LOW_POWER_LISTEN`, `WAKING`, `ACTIVE_HASHING`,
   `EXHAUSTED_PENDING`; `ROUND_ACCEPTED`.
-- **Invariants referenced:** **I8** (searched progress counted for work reward), **I9**
+- **Invariants referenced:** **I8a** (accepted searched progress counted for work reward), **I9**
   (provenance for reassignment reward).
 - **Related documents:** `STAGE_01_PROTOCOL_SCOPE.md`,
   `STAGE_01_RANGE_LEASE_AND_REASSIGNMENT.md`,
   `STAGE_01_PROGRESS_VERIFICATION_ABSTRACTION.md`, `STAGE_01_EARLY_STOP_CERTIFICATE.md`.
 
 This document specifies a parameterised interface only. It claims no incentive compatibility, no
-fairness, and no Sybil resistance.
+fairness, and no Sybil resistance. Reward eligibility is NOT SPECIFIED AT STAGE 1; all reward
+and penalty components are deferred to Stage 5 (a valid solution may be recorded as having a
+solver identity).

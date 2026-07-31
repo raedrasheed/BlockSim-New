@@ -37,8 +37,8 @@ Catalogue" denotes the separate document defining I1..I17.
 | Searched prefix | Subrange | The leading portion of an assigned range that a miner has already searched (covered), bounded above by the miner's progress frontier. | This document (§1) |
 | Unsearched suffix | Subrange | The trailing portion of an assigned range not yet searched, i.e. the complement of the searched prefix within the range. | This document (§1) |
 | assigned_domain | Position set | The positions placed under assignment for a `(RoundID, TemplateID)` (the union of leased ranges); the domain reconciled by the I8a coverage-state partition. | This document (§1) |
-| Coverage state | Per-position classification | Exactly one of `searched`, `active_unsearched`, or `inactive_unsearched`; the three partition `assigned_domain` exactly and are pairwise disjoint (I8a). Orthogonal to custody status (I8b). | This document (§1) |
-| searched | Coverage state | Positions counted as searched under reliable, provenance-complete checkpoints (counted at most once per position per template). A coverage state, not a custody status. | This document (§1) |
+| Coverage state | Per-position classification | Exactly one of `searched`, `active_unsearched`, or `inactive_unsearched`; the three partition `assigned_domain` exactly and are pairwise disjoint (I8a). The normative I8a measure uses **accepted** coverage: `accepted_searched + active_unsearched + inactive_unsearched = assigned_domain`. Orthogonal to custody status (I8b). | This document (§1) |
+| searched | Coverage state | Positions counted as searched under **ACCEPTED adjudication** — i.e. `accepted_searched` (counted at most once per position per template). The normative I8a searched measure uses accepted coverage only, never reported progress. A coverage state, not a custody status. | This document (§1) |
 | active_unsearched | Coverage state | Positions under a live lease not yet within a searched prefix. | This document (§1) |
 | inactive_unsearched | Coverage state | Positions not under any live lease and not yet searched (custody lapsed — expired, abandoned, or revoked — or awaiting (re)assignment). | This document (§1) |
 | Custody status | Per-assignment lineage status | Exactly one of `{original, renewed, reassigned, revoked, expired, abandoned, completed}` (I8b): the lineage/event history of an assignment. Orthogonal to coverage state and NOT an additive coverage term. | This document (§1) |
@@ -89,18 +89,22 @@ Catalogue" denotes the separate document defining I1..I17.
 | P_listen | Residency power [W] | Residency power of a `LOW_POWER_LISTEN` miner, and the shared low-power level for `REGISTERED` and `RESERVE`. | This document (§1) |
 | P_wake | Residency power [W] | Transient residency power of a `WAKING` miner while resuming hashing. | This document (§1) |
 | P_offline | Residency power [W] | Residency power of an `OFFLINE` (or `DISQUALIFIED`) miner. | This document (§1) |
-| Progress commitment | Attestation object | A miner-emitted attestation of how far its assigned range has been searched. Treated ONLY as a modeled progress-verification abstraction. | Scope §B.7 |
+| Progress commitment | Attestation object | A miner-emitted attestation of how far its assigned range has been searched. Treated ONLY as a modeled progress-verification abstraction. A progress commitment (`ProgressCommit`) updates the `reported_*` layer ONLY and never the normative I8a (accepted) searched measure. | Scope §B.7 |
 | Modeled progress-verification abstraction | Bounded term | The bounded, Stage-1 term for progress commitments and reported range-exhaustion claims. It is explicitly NOT a cryptographic proof and NOT a proof of range exhaustion. Early-stop certificates are a SEPARATE mechanism (generated only from a found valid solution, CR1) and are NOT part of this abstraction. | Preamble; Scope §B.7, §C |
-| Checkpoint frontier | Progress marker | The boundary between the searched prefix and the unsearched suffix of a range, as attested by progress commitments; the modeled position up to which coverage is claimed. | This document (§1) |
-| actual_frontier | Simulator ground truth | The true position up to which a range has actually been searched (simulator ground truth, CR5); distinct from `reported_frontier`. | This document (§1) |
+| Checkpoint frontier | Progress marker | The boundary between the searched prefix and the unsearched suffix of a range, as attested by progress commitments; the modeled position up to which coverage is claimed (the **reported** layer, i.e. `reported_frontier`; NOT the accepted I8a measure). | This document (§1) |
+| actual_frontier | Simulator ground truth | The true position up to which a range has actually been searched (simulator ground truth, CR5); distinct from `reported_frontier` and `accepted_frontier`. Coverage layer 1 of 3. | This document (§1) |
+| actual_searched | Simulator ground truth | Positions actually searched per simulator ground truth (bounded by `actual_frontier`). Ground-truth layer; NOT the normative I8a measure (which uses `accepted_searched`). | This document (§1) |
 | actual_positions_evaluated | Simulator ground truth | The true count of nonce positions actually evaluated by a miner. | This document (§1) |
 | actual_solution_positions | Simulator ground truth | The true positions that actually satisfy the target within a range. | This document (§1) |
 | actual_exhaustion | Simulator ground truth | Whether a range was actually exhausted. The simulator MAY know this exactly; the modeled progress-verification abstraction does NOT prove it. | This document (§1) |
-| reported_frontier | Protocol-level claim | The frontier a miner reports having searched — a claim subject to audit, not ground truth. | This document (§1) |
+| reported_frontier | Protocol-level claim | The frontier a miner reports having searched — a claim subject to audit, not ground truth; distinct from `actual_frontier` and `accepted_frontier`. Coverage layer 2 of 3. Updated by `ProgressCommit`. | This document (§1) |
+| reported_searched | Protocol-level claim | Positions a miner reports as searched (bounded by `reported_frontier`) — a claim subject to audit. Updated by a progress commitment (`ProgressCommit`) ONLY; it is NOT the normative I8a measure and never drives coverage_state on its own. | This document (§1) |
 | reported_exhaustion | Protocol-level claim | A miner's reported claim of range exhaustion — subject to audit, not a proof that no valid solution exists in the range. | This document (§1) |
 | audit_selected | Protocol-level claim | Whether a reported claim was selected for audit under the modeled audit abstraction. | This document (§1) |
 | audit_result | Protocol-level claim | The outcome of the modeled audit of a reported claim (compared against ground truth in adversarial simulations). | This document (§1) |
 | claim_accepted_or_rejected | Protocol-level claim | Whether the reported claim was accepted or rejected after audit. All such findings are modeled, not cryptographically proven. | This document (§1) |
+| accepted_frontier | Adjudicated coverage | The frontier up to which coverage has been ADJUDICATED as accepted; distinct from `actual_frontier` and `reported_frontier`. Coverage layer 3 of 3. Only `accepted_frontier` promotes `coverage_state` to `searched`; `ProgressCommit` never updates it. | This document (§1) |
+| accepted_searched | Adjudicated coverage | Positions counted as searched under ACCEPTED adjudication (bounded by `accepted_frontier`). **This is the coverage the normative I8a measure uses:** `accepted_searched + active_unsearched + inactive_unsearched = assigned_domain`. Honest-mode runs may set accepted = ground truth by explicit model rule; adversarial-mode runs promote reported → accepted only after the modeled audit/detection adjudication. | This document (§1) |
 | Accepted reported exhaustion under the modeled audit abstraction | Protocol-level claim outcome | The canonical phrase for an adversarial-path `reported_exhaustion` accepted after comparison with simulator ground truth through the modeled audit/detection abstraction. It is NEVER a cryptographic proof or a verified actual exhaustion. | This document (§1) |
 | Early-stop certificate | Certificate object | A certificate generated ONLY after a miner finds a valid candidate solution satisfying the current target; it contains exactly RoundID, TemplateID, AssignmentID, MinerID, nonce, candidate_hash, target, signature/authentication. It is NOT generated from progress commitments, searched-domain coverage, claimed exhaustion, or a progress frontier (CR1); progress verification and early-stop certification are completely separate mechanisms. Carries no security or soundness guarantee at Stage 1. | Scope §B.8, §C |
 | Target | Threshold value | The acceptance threshold for a round: a solution is valid only if its digest satisfies the target under the committed template. | Scope §A.5 |
@@ -120,6 +124,8 @@ Catalogue" denotes the separate document defining I1..I17.
 | Physical run | Run classification | A modeled run evaluated under the physical/energy accounting (real-power-time terms of the energy model), as opposed to a purely abstract or block-normalised view. | This document (§1) |
 | Master seed | Seed value | The root seed from which per-run allocation randomness is derived deterministically, so that assignment/allocation draws are reproducible across runs. | This document (§1) |
 | Allocation exponent | alpha (α) [dimensionless] | The exponent parameter governing the shape of the range-allocation distribution across miners (e.g. how range sizes scale). A modeled allocation parameter; carries no fairness or incentive claim at Stage 1. | This document (§1) |
+| Reward eligibility | Interface field (deferred) | **NOT SPECIFIED AT STAGE 1 (a valid solution may be recorded as having a solver identity)**. All reward and penalty components are deferred to Stage 5; Stage 1 assigns no reward eligibility (no idle credit, availability reward, work reward, winner reward, or penalty). See `STAGE_01_REWARD_PENALTY_INTERFACE.md`. | This document (§1) |
+| Solver identity | Recorded attribute | The `MinerID` recorded as having produced a valid solution. Recording a solver identity is the ONLY reward-related fact at Stage 1; it does NOT assign reward eligibility (which is NOT SPECIFIED AT STAGE 1). | This document (§1) |
 
 ---
 
@@ -145,6 +151,19 @@ Catalogue" denotes the separate document defining I1..I17.
   range exhaustion. The "early-stop certificate" is a SEPARATE mechanism, generated only from a
   found valid solution (CR1), and is NOT an instance of the progress-verification abstraction,
   security, or incentive properties at Stage 1 (Scope §C).
+- **Three coverage layers; I8a uses accepted only.** Coverage is tracked at three separate
+  layers — `actual_frontier`/`actual_searched` (ground truth), `reported_frontier`/
+  `reported_searched` (claim), and `accepted_frontier`/`accepted_searched` (adjudicated). A
+  progress commitment (`ProgressCommit`) updates the `reported_*` layer ONLY. The normative
+  I8a measure uses **accepted** coverage only: `accepted_searched + active_unsearched +
+  inactive_unsearched = assigned_domain`; only an ACCEPTED adjudication promotes
+  `coverage_state` to `searched`.
+- **Reward eligibility is deferred.** Reward eligibility is **NOT SPECIFIED AT STAGE 1**; all
+  reward/penalty components are deferred to Stage 5. The single reward-related fact recorded
+  at Stage 1 is that a valid solution may be recorded as having a solver identity. This
+  wording is consistent across `STAGE_01_REWARD_PENALTY_INTERFACE.md`,
+  `STAGE_01_RESERVE_POLICY_SPECIFICATION.md`, `STAGE_01_IDLE_POLICY_SPECIFICATION.md`, and
+  `STAGE_01_PROTOCOL_SCOPE.md`.
 - **A1 discipline.** `continuous full-participation control` equals the A1 value
   (8.420833333 kWh). `ΔE` is measured against this baseline and any reduction is
   attributable to reduced active power-time, never to nonce-domain partitioning.

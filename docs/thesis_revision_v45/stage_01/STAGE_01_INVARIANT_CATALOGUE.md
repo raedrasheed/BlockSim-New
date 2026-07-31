@@ -142,10 +142,14 @@ point, planned test stage, and consequence of violation.
 ### I8a — Coverage-state partition of the assigned domain.
 
 - **Formal statement.** For every assignment, and in aggregate over a round's assigned domain,
-  `searched + active_unsearched + inactive_unsearched = assigned_domain`, and the three coverage
-  categories are **pairwise disjoint** and **collectively exhaustive** over `assigned_domain`.
-- **Scope.** Coverage-state accounting, per assignment and per round.
-- **Required inputs.** Per-range progress frontiers; live-lease (active vs. inactive) status;
+  `accepted_searched + active_unsearched + inactive_unsearched = assigned_domain`, and the three
+  coverage categories are **pairwise disjoint** and **collectively exhaustive** over
+  `assigned_domain`. The normative I8a measure uses **accepted** coverage only. Reported coverage
+  is promoted to `accepted_searched` only by adjudication (a `RangeExhaust` honest-completion or a
+  passed audit); a progress commitment (`ProgressCommit`) never updates the normative I8a measure.
+- **Scope.** Accepted-coverage-state accounting, per assignment and per round.
+- **Required inputs.** Per-range accepted-coverage frontiers (`accepted_frontier`); adjudication
+  outcomes (honest-completion or audit); live-lease (active vs. inactive) status;
   `assigned_domain`.
 - **Enforcement point.** Coverage-state reconciliation (per round and at exhaustion).
 - **Planned test stage.** Stage 2 (assignment cover) with Stage 4 (lease / progress coverage
@@ -314,7 +318,7 @@ point, planned test stage, and consequence of violation.
 | I5 | Non-negative durations reconcile to horizon T | Stage 2 (+3) | duration reconciliation |
 | I6 | State energies sum to per-miner energy | Stage 2 (+3) | per-miner aggregation |
 | I7 | Per-miner energies sum to network energy | Stage 2 | network aggregation |
-| I8a | Coverage states partition the assigned domain exactly | Stage 2 (+4) | coverage-state reconciliation |
+| I8a | Accepted coverage states partition the assigned domain exactly (accepted_searched + active_unsearched + inactive_unsearched) | Stage 2 (+4) | coverage-state reconciliation |
 | I8b | Custody / provenance model (orthogonal to coverage) | Stage 4 | custody / lineage tracking |
 | I9 | Reassignments carry complete provenance | Stage 4 | reassignment logging |
 | I10 | Reserve activation adds no overlap | Stage 3 (+5) | reserve-activation guard |

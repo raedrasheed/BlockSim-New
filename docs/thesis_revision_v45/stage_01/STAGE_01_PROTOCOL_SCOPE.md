@@ -92,9 +92,13 @@ them so that the idle-policy additions in Section B attach to a fixed, unambiguo
 5. **Target validation.** A candidate solution is checked against the round target: a
    solution is valid only if its digest satisfies the target under the committed template.
    Target validation is the acceptance predicate for a proposed block.
-6. **Accepted-block handling.** When a valid solution is found and propagated, PoCol
-   performs accepted-block handling: recording the accepted block, closing the round, and
-   moving round state toward `ROUND_ACCEPTED`.
+6. **Accepted-block handling.** A valid solution is propagated as modeled discrete events
+   (early-stop certificate arrival, then full-block arrival) and is accepted only at the
+   **modeled acceptance point** — a designated coordinator/validator, or a clearly identified
+   canonical local view — after the full block arrives and validates. Block acceptance is
+   **NOT** at solution-discovery time. Accepted-block handling then records the accepted
+   block, closes the round, and moves round state toward `ROUND_ACCEPTED`; only exactly-equal
+   acceptance timestamps break by `candidate_hash`, then `MinerID`.
 7. **Template refresh.** PoCol replaces the committed template with a new immutable
    template (a new TemplateID), transitioning through `TEMPLATE_REFRESH`. Refresh is the
    only sanctioned way the mined content changes.
@@ -156,7 +160,10 @@ specification.
 2. **Real ASIC power-state enforcement** — NOT claimed. Miner states are modeled states,
    not enforced hardware power states.
 3. **Proven incentive compatibility** — NOT claimed. No incentive-compatibility result is
-   asserted for the idle policy or for base PoCol.
+   asserted for the idle policy or for base PoCol. Relatedly, **reward eligibility is NOT
+   SPECIFIED AT STAGE 1**: all reward and penalty components are deferred to Stage 5, and the
+   only reward-related fact recorded at Stage 1 is that a valid solution may be recorded as
+   having a solver identity (see `STAGE_01_REWARD_PENALTY_INTERFACE.md`).
 4. **Proven Sybil resistance** — NOT claimed.
 5. **Full chain-wide consensus-security proof** — NOT claimed. No end-to-end
    consensus-security proof is provided at Stage 1.

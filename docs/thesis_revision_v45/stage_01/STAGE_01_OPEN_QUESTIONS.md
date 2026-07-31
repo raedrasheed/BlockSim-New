@@ -108,7 +108,10 @@ the **Stage-2 default** where blocking.
   **orthogonal**, so a position's `searched` coverage state (`I8a`) persists when the range's
   custody status becomes `expired` then `reassigned` (`I8b`); the last *accepted* progress
   commitment is retained as `searched` and carried as `prior_progress_commitment` in the
-  reassignment record (`I9`). Only the uncommitted remainder is `active_unsearched` /
+  reassignment record (`I9`). The `searched` coverage state reflects **accepted** coverage only
+  (`accepted_searched`): a reported progress commitment (`ProgressCommit`) updates the
+  `reported_*` layer only and never the normative I8a measure, which uses accepted coverage
+  only (C3). Only the uncommitted remainder is `active_unsearched` /
   `inactive_unsearched`. `reassigned` is a custody status, never an additive coverage term. No
   double credit (`I13`).
 
@@ -158,7 +161,10 @@ the **Stage-2 default** where blocking.
   reproducible propagation/arrival time; local acceptance takes the **earliest valid arrival**;
   the other valid solutions are recorded as `competing`/`stale`. Only exact arrival-time ties
   break deterministically by smallest `candidate_hash`, then smallest `MinerID`. Deterministic and
-  reproducible; satisfies `I2`/`I3`; **no chain-wide fork-choice proof is claimed**. The former
+  reproducible; satisfies `I2`/`I3`; **no chain-wide fork-choice proof is claimed**. Acceptance
+  occurs only at the **modeled acceptance point** — a designated coordinator/validator, or a
+  clearly identified canonical local view — after the full block arrives and validates; block
+  acceptance is **NOT** at solution-discovery time. The former
   global-oracle rule ("smallest `(TemplateID, nonce, MinerID)`") is **not** used. Recipients of a
   validated solution **pause** via **PATH B** (`ACTIVE_HASHING → LOW_POWER_LISTEN` directly,
   `stop_reason = VALID_SOLUTION_VERIFIED`, assignment PAUSED, retained `actual_frontier`
@@ -177,13 +183,20 @@ the **Stage-2 default** where blocking.
 - **Stage where resolved.** Stage 2 (trigger semantics); Stage 4 (sensitivity).
 - **Stage-2-blocking?** **YES** (security-floor triggering).
 - **Stage-2 default.** Evaluate all three floors event-driven on every active-hash-rate update
-  and every miner state change; a breach of any floor triggers `SECURITY_RECOVERY` and is
-  recorded (`I16`). The hash-rate quantities are read from a **deterministic census** of the
-  active-state population per the new invariant **I17**: after miner states are determined,
-  `H_active(t) = H_honest(t) + H_adversarial(t)` is computed exactly from the `ACTIVE_HASHING`
-  census, and `H_adversarial` is **not** sampled independently once `H_active` is known. When
-  `H_active(t) = 0`, `q_adv(t)` is **undefined/NA** and a security-floor breach is recorded — not
-  treated as zero. Numeric floor values are configuration inputs, fixed per experiment.
+  and every miner state change. **Ownership is split (C7):** `ActiveHashRateUpdate` is
+  **compute-only** — it computes only `H_honest`, `H_adversarial`, `H_active`, and `q_adv` (or
+  `NA`), records no breach, and triggers no recovery; `SecurityFloorEvaluate` **alone** records
+  breaches and triggers `SECURITY_RECOVERY` (`I16`). The hash-rate quantities are read from a
+  **deterministic census** of the active-state population per the new invariant **I17**: after
+  miner states are determined, `H_active(t) = H_honest(t) + H_adversarial(t)` is computed
+  exactly from the `ACTIVE_HASHING` census, and `H_adversarial` is **not** sampled independently
+  once `H_active` is known. When `H_active(t) = 0`, `q_adv(t)` is **undefined/NA**;
+  `SecurityFloorEvaluate` records **both** an active-floor and a honest-floor breach, does
+  **not** compare `NA` with `maximum_adversarial_share` (`NA` is never numerically compared),
+  and triggers `SECURITY_RECOVERY` — the degenerate case is a breach, not treated as zero.
+  Otherwise it evaluates the active, honest, and `q_adv` thresholds. Duplicate breach records
+  for the same `(event, threshold, time)` are suppressed. Numeric floor values are configuration
+  inputs, fixed per experiment.
 
 ### Q10 — Reserve-promotion selection rule
 - **Why it matters.** Determines which `RESERVE` miner is promoted during recovery; affects
@@ -224,7 +237,10 @@ the **Stage-2 default** where blocking.
 - **Stage-2-blocking?** **YES** (range validity).
 - **Stage-2 default.** Fixed nonce-count interval per range (a configuration constant). The
   searched measure is defined at that granularity; the constant does not change semantics,
-  only resolution.
+  only resolution. A progress commitment (`ProgressCommit`) updates the `reported_*` layer
+  only; the normative I8a searched measure uses **accepted** coverage only (`accepted_searched`),
+  never reported progress (C3), so granularity sets reporting resolution but does not by itself
+  promote coverage to `searched`.
 
 ### Q13 — Detection/mitigation of solution withholding
 - **Why it matters.** Withholding prolongs honest active power-time and is a fairness/liveness
@@ -241,14 +257,19 @@ the **Stage-2 default** where blocking.
 
 ### Q14 — Reward / incentive semantics (free-riding)
 - **Why it matters.** Determines whether rational miners are motivated to contribute real work.
-- **Candidate options.** (a) no reward model at Stage 1; (b) coverage-proportional reward;
-  (c) solution-only reward.
+- **Candidate options.** (a) **reward eligibility NOT SPECIFIED AT STAGE 1** — no reward
+  eligibility assigned at Stage 1 (a valid solution may be recorded as having a solver
+  identity); (b) coverage-proportional reward; (c) solution-only reward.
 - **Scientific risk.** Any incentive claim at Stage 1 would be unsupported; a reward model
   interacts with Sybil/free-riding threats not modelled here.
 - **Implementation dependency.** Out of the current simulator's scope.
-- **Stage where resolved.** Deferred — REQUIRES_FORMAL_PROOF and/or REQUIRES_REAL_IMPLEMENTATION.
+- **Stage where resolved.** **Deferred to Stage 5.** Reward eligibility is **NOT SPECIFIED AT
+  STAGE 1**; all reward and penalty components are deferred to Stage 5 (see
+  `STAGE_01_REWARD_PENALTY_INTERFACE.md`). Any incentive property additionally
+  REQUIRES_FORMAL_PROOF and/or REQUIRES_REAL_IMPLEMENTATION.
 - **Stage-2-blocking?** **NO** (no reward term appears in the energy model or the seven blocking
-  semantics). Tracked as `UNRESOLVED` in the threat model.
+  semantics). The only reward-related fact recorded at Stage 1 is that a valid solution may be
+  recorded as having a solver identity. Tracked as `UNRESOLVED` in the threat model.
 
 ### Q15 — Reporting representation of `NA` block-normalised metrics
 - **Why it matters.** Ensures `I15` is applied consistently in outputs.

@@ -149,37 +149,47 @@ selection are separate decisions.
 Selection among competing valid solutions for the accepted block follows **network-arrival
 semantics** (CR6), consistent with `STAGE_01_ROUND_STATE_MACHINE.md`:
 
-1. Each valid solution receives a reproducible propagation/arrival time.
-2. Local acceptance uses the **earliest valid arrival**.
+1. Each valid solution's propagation is event-scheduled with modeled per-recipient delays, so
+   the **discrete-event queue** establishes a reproducible arrival order.
+2. Local acceptance at the **modeled acceptance point** uses the **earliest valid arrival**
+   established by the discrete-event queue.
 3. Other valid solutions are recorded as competing/stale proposals.
-4. Only exact arrival-time ties use a deterministic secondary rule: smallest `candidate_hash`,
-   then smallest `MinerID`.
+4. Only exactly-equal acceptance timestamps use a deterministic secondary rule: smallest
+   `candidate_hash`, then smallest `MinerID`.
 
-No global-oracle "smallest `(TemplateID, nonce, MinerID)`" primary rule is used, and **no
-chain-wide fork-choice proof** is claimed. Stage 1 makes no fairness or tie-break guarantee
-beyond this recorded ordering.
+No global-oracle "smallest `(TemplateID, nonce, MinerID)`" primary rule is used, no global set
+of future solutions is consulted, and **no chain-wide fork-choice proof** is claimed. Stage 1
+makes no fairness or tie-break guarantee beyond this recorded ordering.
 
 ### 4.6 Delayed full-block propagation
 
 A valid early-stop certificate is compact and may arrive *before* the full block it summarises. The
 certificate authorises halting active hashing once verified (steps 1–7), but round finalisation to
-`ROUND_ACCEPTED` still awaits the full block through `SOLUTION_PROPAGATION`. Between verified
+`ROUND_ACCEPTED` still awaits the full block, accepted **only at the modeled acceptance point**
+through `SOLUTION_PROPAGATION`. Between verified
 early-stop and full-block arrival, a miner has stopped active hashing but the round is not yet
 final; if the full block ultimately fails to arrive or fails validation, the round does not
 finalise on that certificate and normal round-progression/recovery handling applies. Stage 1
 specifies the ordering and does not claim a liveness guarantee for it.
 
-The network-arrival and early-stop ordering is (CR-B9):
+The network-arrival and early-stop ordering is (CR-B9, C6). Block acceptance is **never**
+performed at solution-discovery; it is event-scheduled and adjudicated only at the modeled
+acceptance point:
 
-1. A candidate solution is found.
-2. Its certificate propagates with modeled per-recipient arrival times.
-3. Each recipient continues hashing while validating.
-4. After successful validation, that recipient enters `LOW_POWER_LISTEN` with
+1. A candidate solution is found — the block is **not** accepted at discovery.
+2. An early-stop certificate is constructed.
+3. Per-recipient certificate-arrival events are scheduled with modeled propagation delays;
+   full-block propagation/arrival events are likewise scheduled with modeled per-recipient
+   delays.
+4. Each recipient keeps hashing (remains in `ACTIVE_HASHING`) until its certificate-arrival
+   event fully validates.
+5. On successful validation the recipient enters `LOW_POWER_LISTEN` with
    `stop_reason = VALID_SOLUTION_VERIFIED`, its assignment **PAUSED** (retained
    `actual_frontier`) — **directly**, never via `EXHAUSTED_PENDING`.
-5. Full block propagation/validation continues.
-6. If the full block is accepted, the round closes (`ROUND_ACCEPTED`); remaining assignments
-   close because the round ended, not because their ranges were exhausted.
+6. Full-block acceptance occurs **only at the modeled acceptance point** — a designated
+   coordinator/validator, or a clearly identified canonical local view — after the full block
+   arrives and validates; if accepted the round closes (`ROUND_ACCEPTED`) and remaining
+   assignments close because the round ended, not because their ranges were exhausted.
 7. If the full block is rejected or times out, stopped miners wake and resume their paused
    assignments (`LOW_POWER_LISTEN → WAKING → ACTIVE_HASHING`) from the retained
    `actual_frontier`, with wake and transition energy accounted.
