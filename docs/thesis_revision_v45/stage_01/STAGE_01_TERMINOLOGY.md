@@ -541,3 +541,50 @@ Catalogue" denotes the separate document defining I1..I19.
   different outcome supersedes a pending one; the same standing outcome is not re-seated.
 - **Historical freeze.** Stage-1A–1O lettered artifacts are unchanged; Stage-1P supersessions are recorded in
   `STAGE_01P_SUPERSESSION_REGISTER.md`.
+
+## Stage-1Q terminology addendum (recovery-freshness & runtime-context lock)
+
+- **Versioned final recovery census (Q1).** While in `SECURITY_RECOVERY`, the epilogue VERSIONS every final
+  event-time census: `recovery_census_seq` increments and `latest_recovery_census[episode]` is published
+  (fields: RecoveryEpisodeID, RecoveryCensusVersion, event_time, RoundID, TemplateID, state_version, H_active,
+  H_honest, H_adversarial, q_adv, breach, deadline_reached). A pending decision binds to a
+  `RecoveryCensusVersion`; `ReconcilePendingRecoveryDecisions` SUPERSEDES a decision the new census contradicts
+  (even when the new census produces no completion) and re-affirms a still-consistent one — so freshness is
+  judged against EVERY final census, not merely against the existence of a newer `RecoveryDecisionID`.
+- **Two-step recovery application (Q2).** The recovery exit no longer applies on dispatch. Step 1 —
+  `RecoveryCompletionDueEvent` (queued) records that a `RecoveryDecisionID` is due and refreshes the census; it
+  performs NO transition and NO `RoundAbort`. Step 2 — `ApplyRecoveryCompletionAfterEpilogue` (post-epilogue
+  hook run by `ProcessEventTime`) applies the outcome ONLY after the `event_time` is quiescent and its final
+  census version is published, and ONLY if the decision's `RecoveryCensusVersion` equals
+  `latest_recovery_census[episode].RecoveryCensusVersion` AND the outcome still matches the FINAL census. So a
+  `RESTORED` decision never leaves recovery under a newer breach census. The R13/R14 transition/abort is the
+  internal `CompleteSecurityRecovery` branch dispatch, called only by the post-epilogue hook.
+- **Atomic decision supersession + explicit status (Q3).** `RECOVERY_DECISION_STATUS in {CREATED, SCHEDULED,
+  SUPERSEDED, APPLIED, SCHEDULE_FAILED, CANCELLED}`. `recovery_decisions` (per-decision record) and
+  `pending_recovery_decisions[episode]` (a SET of RecoveryDecisionIDs, not a boolean) track the applicable set.
+  A newer final census marks a contradicted decision SUPERSEDED and cancels its due event BEFORE any replacement
+  is seated; if the replacement schedule fails (`SCHEDULE_FAILED`), the old decision stays SUPERSEDED (never
+  revived), `pending_recovery_decisions` reflects the remaining scheduled set, and the round stays
+  `SECURITY_RECOVERY`.
+- **One canonical census writer (Q4).** `CommitSecurityCensus` is the SOLE atomic writer of
+  `latest_security_census[event_time]` + `security_census_dirty[event_time]`, with three `census_source` values
+  {MINER_STATE_TRANSITION, APPLICABILITY_ENTRY, RECOVERY_DEADLINE}. `ApplyMinerStateTransition`,
+  `CaptureSecurityCensusOnApplicabilityEntry`, and `CaptureSecurityCensusOnRecoveryDeadline` CALL it rather than
+  writing the maps directly; the "two writers"/"third writer"/"sole writer" statements are replaced by "one
+  writer, three sources". `dirty[t] = true ⇒ latest[t] exists` is structural.
+- **Explicit RunContext ownership (Q5).** `RunContext` {RunID, EventQueueContext, RunHookContext,
+  rebased_boundaries, run_finalised, run_horizon_T, and the per-run security-census maps} is created ONCE by
+  `RunInitialise`. `RoundInitialise` receives `RunContext` explicitly, initialises ONLY per-round registries,
+  preserves/reuses `RunContext`, and RETURNS every per-round recovery registry explicitly.
+  `RunEventLoopToHorizon` obtains `RunHookContext` through `RunContext.RunHookContext`.
+- **Tagged run-hook namespace (Q6).** `envelope_namespace in {ORDINARY_EVENT, RUN_HOOK}`. Ordinary
+  `ScheduleEvent` envelopes are `ORDINARY_EVENT`; `CloseRoundAtHorizon` uses `RUN_HOOK` + `hook_id = (RunID, T,
+  HORIZON_CLOSE)`. Collision freedom derives from the TAG (not the `RUN_HOOK_CYCLE` number); a `TransitionEventID`
+  includes `envelope_namespace`/`hook_id`. `applied_run_hook_ids` carries an IN_PROGRESS/APPLIED state so a
+  partial horizon close cannot replay as a second full close.
+- **Deterministic recovery completion time (Q7).** `target_time = decision_time +
+  configured_recovery_completion_delay` (config `> 0`, or the next-representable instant), replacing the
+  undefined `t_next`. If `target_time > T`, no completion is seated, the decision records `horizon_deferred`
+  (status CANCELLED), a superseded decision stays invalid, and `CloseRoundAtHorizon` governs run end.
+- **Historical freeze.** Stage-1A–1P lettered artifacts are unchanged; Stage-1Q supersessions are recorded in
+  `STAGE_01Q_SUPERSESSION_REGISTER.md`.

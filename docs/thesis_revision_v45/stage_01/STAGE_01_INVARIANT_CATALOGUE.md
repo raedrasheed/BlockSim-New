@@ -314,11 +314,14 @@ point, planned test stage, and consequence of violation.
   re-checks this identity at **every** `ACTIVE_HASHING` entry and exit boundary. Every
   adversarial-participation change is carried by a scheduled `AdversarialParticipationChangeEvent`
   (G3/H6) that mutates the census ONLY through this hook; `ActiveHashRateUpdate` is **compute-only**
-  (no sampling, no census mutation — G3). The single settled-census event-time epilogue
-  `FinalizeEventTimeSecurityCensus` (H3, keyed by `event_time` alone per I-01/I-02; O5) reads the FINAL
-  census once per settled `event_time` — AFTER the whole `event_time` is quiescent, never before
-  certificate/discovery events — and invokes `SecurityFloorEvaluate` exactly once; no per-transition floor
-  decision is scheduled.
+  (no sampling, no census mutation — G3). **Q4:** the census maps `latest_security_census[event_time]` and
+  `security_census_dirty[event_time]` have ONE canonical atomic writer, `CommitSecurityCensus`, with three
+  named `census_source` values (MINER_STATE_TRANSITION, APPLICABILITY_ENTRY, RECOVERY_DEADLINE); this hook
+  calls it rather than writing the maps directly, and `dirty[t] = true ⇒ latest[t] exists` is structural. The
+  single settled-census event-time epilogue `FinalizeEventTimeSecurityCensus` (H3, keyed by `event_time` alone
+  per I-01/I-02; O5) reads the FINAL census once per settled `event_time` — AFTER the whole `event_time` is
+  quiescent, never before certificate/discovery events — and invokes `SecurityFloorEvaluate` exactly once; no
+  per-transition floor decision is scheduled.
 - **Planned test stage.** Stage 3 (time-varying hash rate, security floor, reserve activation).
 - **Consequence of violation.** Inconsistent hash-rate decomposition; `q_adv(t)` derived from an
   independently sampled adversarial term; a zero-active-rate regime silently reported as safe
