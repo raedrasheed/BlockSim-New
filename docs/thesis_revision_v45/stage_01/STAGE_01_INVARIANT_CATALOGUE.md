@@ -328,7 +328,13 @@ point, planned test stage, and consequence of violation.
   — AFTER the whole `event_time` is quiescent, never before certificate/discovery events — and invokes
   `SecurityFloorEvaluate` exactly once; no per-transition floor decision is scheduled. **R2:** any post-application
   re-dirty at `t` is settled by `FinalizePostRecoveryApplicationState` (a settlement, NOT a second floor decision),
-  so the epilogue still runs exactly once per `event_time`.
+  so the epilogue still runs exactly once per `event_time`. **S6:** `ProcessEventTime` invokes
+  `FinalizeEventTimeSecurityCensus(t)` EXACTLY ONCE and UNCONDITIONALLY (the procedure owns the dirty check and
+  returns `no_census_change` when nothing is dirty); the CALL is no longer guarded by `IF security_census_dirty[t]`.
+  **S5:** the dirty flag is cleared by EXACTLY ONE procedure `SettleSecurityCensusDirty` with two declared
+  settlement kinds (`PRIMARY_EPILOGUE` from the epilogue, `POST_RECOVERY_APPLICATION` from the settlement), removing
+  the earlier contradiction in which the epilogue was named the sole clearer while the settlement also cleared it;
+  `CommitSecurityCensus` remains the sole setter of `dirty = true` and the sole writer of the latest census.
 - **Planned test stage.** Stage 3 (time-varying hash rate, security floor, reserve activation).
 - **Consequence of violation.** Inconsistent hash-rate decomposition; `q_adv(t)` derived from an
   independently sampled adversarial term; a zero-active-rate regime silently reported as safe

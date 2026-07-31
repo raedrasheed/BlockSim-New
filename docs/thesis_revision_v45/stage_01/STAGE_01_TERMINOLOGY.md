@@ -644,3 +644,46 @@ Catalogue" denotes the separate document defining I1..I19.
   `t`; the deterministic target for a zero-modeled-latency continuation after post-epilogue recovery application.
 - **Historical freeze.** Stage-1A–1Q lettered artifacts are unchanged; Stage-1R supersessions are recorded in
   `STAGE_01R_SUPERSESSION_REGISTER.md`.
+
+## Stage-1S terminology addendum (full-envelope & deferred-recovery-atomicity lock)
+
+- **One explicit transition-envelope object (S1).** `ApplyMinerStateTransition` takes ONE `transition_envelope`
+  object — `{envelope_namespace, event_time, delta_cycle, event_seq, hook_id}` — and builds `TransitionEventID`
+  EXCLUSIVELY from it plus the transition-specific fields. EVERY call site passes exactly `transition_envelope =
+  dispatch_envelope` (ORDINARY_EVENT/null, or the RUN_HOOK horizon envelope + `HorizonHookID`). The R3 "namespace
+  fields travel implicitly" clause is WITHDRAWN — no identity field is decomposed or omitted at any executable call
+  site. The horizon path `CloseRoundAtHorizon → CloseRoundAssignments → EnterLowPowerListen /
+  ApplyMinerStateTransition` threads the SAME RUN_HOOK envelope and `HorizonHookID` throughout.
+- **Deferred branch-C application (S2/S3).** Branch C (RESTORED with range redistribution) does NOT mutate
+  `round_state` before its `RecoveryAssignmentContinuationEvent` is SEATED. `CompleteSecurityRecovery` computes
+  `t_cont`, validates `t_cont <= T`, seats the continuation (strictly later than `t`), and returns `DEFERRED`; a
+  failed seat / target-beyond-`T` stays `SECURITY_RECOVERY` and marks the decision `APPLY_FAILED`/`HORIZON_DEFERRED`,
+  preserving the episode. Seating is NOT applying RESTORED (S3): the decision stays `APPLYING` and the episode stays
+  active until `RecoveryAssignmentContinuationEvent` verifies the still-current APPLYING decision, transitions
+  `SECURITY_RECOVERY → ASSIGNMENT`, installs the disjoint set, and reaches `HASHING` — only THEN is it `APPLIED` and
+  the episode cleared. A failure before the transition stays `SECURITY_RECOVERY`; a failure after it takes a declared
+  recovery-finalising `RoundAbort`, so the round never lingers in `ASSIGNMENT` with an active episode and no live
+  continuation.
+- **`recovery_branch_result` (S3).** The disposition `CompleteSecurityRecovery` returns, with kind in
+  {SUCCESS (branches A/B/D), DEFERRED (branch C seated), FAILED}. The caller applies only on SUCCESS, keeps the
+  decision APPLYING on DEFERRED, and records `APPLY_FAILED`/`HORIZON_DEFERRED` on FAILED.
+- **`CancelActiveRecoveryEpisode` / `TERMINAL_CANCELLED` (S4).** The terminal-cleanup procedure invoked by
+  `CloseRoundAssignments` (for every terminal closure EXCEPT the recovery-finalising abort) when an episode is still
+  active: it cancels every pending/applying decision and its queued `RecoveryCompletionDueEvent` /
+  `RecoveryAssignmentContinuationEvent`, records `recovery_episode_disposition = TERMINAL_CANCELLED`, and clears
+  `current_recovery_episode` (without setting `recovery_outcome_finalised`). Enforces `current_recovery_episode !=
+  null IFF round_state = SECURITY_RECOVERY`. `recovery_finalising` is the flag threaded to `RoundAbort` /
+  `CloseRoundAssignments` marking a closure that IS the application of a recovery outcome (so its cleanup is skipped).
+- **`SettleSecurityCensusDirty` (S5).** The SOLE clearer of `security_census_dirty[event_time]`, with
+  `settlement_kind in {PRIMARY_EPILOGUE, POST_RECOVERY_APPLICATION}` — called by `FinalizeEventTimeSecurityCensus`
+  and `FinalizePostRecoveryApplicationState` respectively. `CommitSecurityCensus` remains the sole setter of
+  `dirty = true`.
+- **Unconditional single primary epilogue (S6).** `ProcessEventTime` calls `FinalizeEventTimeSecurityCensus(t)`
+  EXACTLY ONCE and UNCONDITIONALLY; the procedure owns the dirty check and returns `no_census_change` when nothing
+  is dirty. The CALL is not guarded by `IF security_census_dirty[t]`.
+- **`PostEpilogueSchedulingContext` (S7).** The declared source of a post-epilogue `ScheduleEvent` call (the
+  branch-C continuation seat): `{source_event_time, source_envelope, EventQueueContext, RunContext}`. `ScheduleEvent`
+  requires `target_event_time > source_event_time` and derives `delta_cycle = 0`, so a post-epilogue caller can never
+  enqueue at the source event_time; `event_creation_seq` is still minted solely by `ScheduleEvent`.
+- **Historical freeze.** Stage-1A–1R lettered artifacts are unchanged; Stage-1S supersessions are recorded in
+  `STAGE_01S_SUPERSESSION_REGISTER.md`.
