@@ -109,6 +109,34 @@ Difficulty is **FIXED** in the confirmatory design (invariant **I12**). No trans
 guard, or action in this document changes difficulty; dynamic-difficulty behaviour is out
 of scope (scope §C).
 
+### 1.7 Concurrency and event-model convention (Stage 1F)
+
+The miner state machine executes under the discrete-event model of
+`STAGE_01_PROTOCOL_PSEUDOCODE.md` §0. Three rules bind every transition in this document:
+
+- **Central transition hook (F6).** Every miner-state change is applied by the single
+  `ApplyMinerStateTransition` hook (pseudocode §0.9). It is the SOLE writer of `miner_state`, and it
+  closes the old residency interval, opens the new one, charges one-shot transition energy,
+  recomputes `H_honest`/`H_adversarial`/`H_active` from the post-transition `ACTIVE_HASHING`
+  census, re-checks **I17** at the boundary, sets `q_adv` (or `NA`), schedules
+  `SecurityFloorEvaluate`, and suppresses duplicate transitions at the same event. Nothing in this
+  document mutates `miner_state` by any other means.
+- **Event-scheduled wake (F5).** Entry to `WAKING` and the `WAKING → ACTIVE_HASHING` ramp (T5) are
+  split across two events: `StartWake` (non-blocking) performs the entry to `WAKING` and schedules a
+  `WakeCompleteEvent`; the ramp to `ACTIVE_HASHING` (or the wake-failure edge to `OFFLINE`, T12)
+  occurs when that event fires, at its own completion timestamp. Several miners entering `WAKING` at
+  the same instant complete independently. `T5` is therefore effected at the miner's
+  `WakeCompleteEvent`, never by a blocking call inside the caller.
+- **Immutable assignment versions (F7).** A `CURRENT` range assignment is an immutable versioned
+  object. A same-range lease renewal creates a NEW `CURRENT` version and marks the old one
+  `SUPERSEDED`; the range and holder do not change and no wake cycle occurs (the miner stays
+  `ACTIVE_HASHING`). Exactly one version per lineage is `CURRENT`. An early-stop certificate
+  discovered under an older version stays valid because its `SolutionEligibilitySnapshot` resolves
+  to that immutable version (which was `CURRENT` at discovery).
+
+These conventions add no new miner state and no new transition; they specify **how** the existing
+T1–T30 (minus the retired T6) transitions are executed under concurrency.
+
 ---
 
 ## 2. Per-state specification
@@ -369,7 +397,11 @@ solver identity for a valid solution.
 
 - **Exact meaning.** The spin-up state a miner occupies while ramping from a reduced-power
   or unassigned state back toward active hashing. It carries a bound pending assignment that
-  is validated before hashing begins; it incurs wake latency and wake energy.
+  is validated before hashing begins; it incurs wake latency and wake energy. **Entry is via the
+  non-blocking `StartWake`, which schedules a `WakeCompleteEvent` (F5);** the miner leaves `WAKING`
+  only when that event fires — to `ACTIVE_HASHING` (T5) on a valid, in-deadline wake, or to
+  `OFFLINE` (T12) on wake-deadline expiry / validation failure. Miners entering `WAKING` at the same
+  instant complete independently at their own event timestamps.
 - **Allowed computation.** Ramp/initialisation of the hashing pipeline and validation of the
   bound pending assignment against the committed `TemplateID` and I1; no scored nonce search
   is counted yet.
@@ -483,7 +515,7 @@ verified valid-solution stop, assignment PAUSED) and the revocation/closure reas
 | T2 | `REGISTERED` | AdmitToReserve | Reserve-pool capacity available | Mark standby; enroll in reserve pool | `RESERVE` | Switch residency `P_registered → P_reserve` (both = `P_listen`); `E_coordination` | No census change | If pool full, guard fails; miner remains `REGISTERED` |
 | T3 | `REGISTERED` | AssignmentOffer (WakeForAssignment) | Committed `TemplateID` exists; offered range disjoint per I1 | Bind pending assignment; begin spin-up | `WAKING` | Switch residency `P_registered → P_wake`; entry `E_transition` | No census change (not yet hashing) | Overlapping/invalid range (I1): offer rejected, miner remains `REGISTERED` |
 | T4 | `RESERVE` | ReserveActivation | Round activation event (typically from `SECURITY_RECOVERY`); offered range disjoint per I1 | Bind pending assignment; begin spin-up | `WAKING` | Switch residency `P_reserve → P_wake`; entry `E_transition` | No census change yet; activation is toward raising `H_active(t)` | Invalid range (I1) or no activation event: guard fails, miner remains `RESERVE` |
-| T5 | `WAKING` | RampComplete | Ramp complete AND bound assignment validated disjoint per I1 and bound to current `TemplateID` | Activate range lease; start `t_hash` accrual (a **resumed** paused PATH-B assignment continues from its retained `actual_frontier`) | `ACTIVE_HASHING` | End `P_wake`; exit `E_transition`; begin `P_hash` residency | Census +rate: add miner rate to `H_active(t)` (and `H_honest(t)`/`H_adversarial(t)` by attribution) | Validation failure → wake abort to `OFFLINE` (T12); range released |
+| T5 | `WAKING` | RampComplete (**`WakeCompleteEvent` fires**, F5) | Ramp complete AND bound assignment validated disjoint per I1 and bound to current `TemplateID`; effected by `ApplyMinerStateTransition` (F6) at the event's own timestamp | Activate range lease (PENDING→CURRENT, or a **resumed** PATH-B assignment restored to CURRENT from its retained `actual_frontier`); start `t_hash` accrual | `ACTIVE_HASHING` | End `P_wake`; exit `E_transition`; begin `P_hash` residency | Census +rate via the hook: recompute `H_active(t)=H_honest(t)+H_adversarial(t)` (I17) at this boundary | Validation failure / wake-deadline expiry → wake abort to `OFFLINE` (T12); range released |
 | T6 | *(retired — E5)* | — | — | **REMOVED:** the former `ACTIVE_HASHING → ACTIVE_HASHING` range-reassignment shortcut is deleted. Acquiring a DIFFERENT range now always closes the current assignment and activates the new holder through `WAKING` (T3/T4/T9/T10 → T5). Same-range **lease renewal** is a non-state-changing in-state administrative operation (E5): the range is unchanged, `AssignmentID`/`assignment_version`/provenance are updated, the status stays `CURRENT`, and no wake energy is charged — it is NOT a state transition. | *(no transition)* | — | — | — |
 | T7 | `ACTIVE_HASHING` | RangeExhausted (PATH A) | Entire assigned range searched with no valid solution encountered in the actual evaluated sequence (honest: `actual_frontier = range_end`, `actual_positions_evaluated = range_size`, `actual_exhaustion = true`; adversarial: accepted reported exhaustion under the modeled audit abstraction); governed by I4/I8a and the actual-vs-reported progress model, not I11 | Freeze final progress commitment; on ACCEPTED exhaustion mark `coverage_state = searched`, `custody_status = completed`; `stop_reason = RANGE_EXHAUSTED`; do NOT release or reassign the completed range | `EXHAUSTED_PENDING` | Continue `P_hash` residency (short `EXHAUSTED_PENDING` transient; no idle saving credited); entry `E_transition` | Census −rate: remove miner rate from `H_active(t)` | Fabricated/false exhaustion detected by the modeled audit (adversarial path) → exhaustion NOT recorded, range not closed; attributable violation → `DISQUALIFIED` (T18) |
 | T8 | `EXHAUSTED_PENDING` | ExhaustionConfirmed (PATH A) | Valid exhaustion confirmation for the range (I4) | Confirm/finalise the accepted exhaustion (coverage_state/custody already set at T7); record confirmed exhaustion and `stop_reason = RANGE_EXHAUSTED` in audit log; do NOT release or reassign the completed range | `LOW_POWER_LISTEN` | End `P_hash` transient; begin `P_listen` residency; one-shot `E_coordination` | No census change (already removed at T7) | No confirmation before deadline → reassign (T9) or `OFFLINE` (T13); NEVER auto-drop here (I4) |

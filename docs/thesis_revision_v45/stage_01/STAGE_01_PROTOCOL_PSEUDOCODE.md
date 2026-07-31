@@ -32,6 +32,243 @@
 
 ---
 
+## 0. Concurrency and discrete-event model (Stage 1F)
+
+Stage-1F makes the concurrency and discrete-event semantics of PoCol explicit. Seven normative
+rules govern the whole specification; every procedure below conforms to them.
+
+**(0.1) Single-threaded discrete-event loop.** The simulator advances one global discrete-event
+queue. Each event fires at a definite `event_time`; a handler runs to completion without
+preemption. A long-latency physical process (wake ramp, message propagation) is NEVER executed by
+a blocking call that occupies the loop; it is represented by SCHEDULING a future event (F5).
+Concurrency is modeled by many independent future events, not by parallel handlers, so two miners
+"doing something at once" are two independently scheduled events, each firing at its own timestamp.
+
+**(0.2) Event envelope (F1).** Every scheduled event carries an immutable envelope:
+
+    { event_type, event_time, RoundID, TemplateID,
+      CandidateID?, PropagationID?, MinerID?, AssignmentID?, assignment_version?, seq }
+
+`CandidateID` and `PropagationID` are REQUIRED on every certificate-arrival, block-arrival,
+validation, timeout, cancellation, and resume event. `seq` is a strictly monotonic per-run
+creation counter used ONLY as the final deterministic tie-break (F8). A propagation context is
+NEVER identified by `RoundID` alone.
+
+**(0.3) Central miner-state hook (F6).** No procedure mutates `miner_state` directly. Every
+miner-state change is performed by `ApplyMinerStateTransition`, the SOLE owner of residency
+accounting, one-shot transition energy, the `H_active = H_honest + H_adversarial` recompute
+(I17), `q_adv`/NA, and security-floor scheduling. The keyword `TRANSITION miner_state(...)` does
+not appear in any procedure; a state change is always written `CALL ApplyMinerStateTransition(...)`.
+
+**(0.4) Event-scheduled wake (F5).** Every activation into `ACTIVE_HASHING` passes through
+`StartWake` (non-blocking) and its scheduled `WakeCompleteEvent`. Miners starting to wake at the
+same instant wake independently on their own completion timestamps; no wake serialises another.
+
+**(0.5) Immutable assignment versions (F7).** An assignment is an immutable versioned object.
+Renewal creates a NEW version and SUPERSEDES the old one; EXACTLY ONE version per lineage is
+`CURRENT`. A `SolutionEligibilitySnapshot` resolves to the exact version that was `CURRENT` at
+discovery, so a solution discovered under an old version stays verifiable after renewal.
+
+**(0.6) Active propagation set (F3).** `active_propagation_set` holds every live
+`CandidatePropagationContext`. The round is `SOLUTION_PROPAGATION` iff this set is non-empty OR a
+same-timestamp acceptance batch or a live candidate-specific acceptance event remains. A context is
+"live" while its `status ∈ {DISCOVERED, SELF_VALIDATED, PROPAGATING, PENDING_ACCEPTANCE}`; it
+leaves the set on `FAILED` (candidate-scoped failure) or on round acceptance
+(`ACCEPTED`/`COMPETING`/`STALE`/`CANCELLED`). The predicate
+
+    propagation_quiescent(RoundContext) :=
+        active_propagation_set is empty
+        AND no ACCEPTED_CANDIDATE same-timestamp acceptance batch is pending
+        AND no live candidate-specific CertificateArrival / BlockAcceptancePoint event remains
+        AND no block has been accepted this round
+
+is the ONLY condition under which `SOLUTION_PROPAGATION → HASHING` is permitted (F3). Failure of one
+candidate removes only that candidate; the round stays `SOLUTION_PROPAGATION` while any other
+candidate is live.
+
+**(0.7) Global event-priority contract (F8).** Same-timestamp events of different types are
+ordered by the deterministic priority table of `STAGE_01F_EVENT_PRIORITY_TABLE.md`; ties within a
+type break by the event's `(CandidateID, MinerID, AssignmentID, seq)`, NEVER by data-structure
+iteration order. The order is reproducible across reruns.
+
+### 0.8 Core data model (Stage 1F)
+
+```
+STRUCTURE CandidatePropagationContext (CPC)   # F1: one per discovered candidate solution; immutable identity
+  CandidateID                 : fresh globally-unique id (immutable)
+  PropagationID               : fresh globally-unique id (immutable)
+  RoundID, TemplateID
+  certificate                 : signed early-stop certificate (EarlyStopGenerate)
+  snapshot                    : SolutionEligibilitySnapshot (immutable, discovery-time)
+  finder_MinerID
+  discovery_time
+  certificate_arrival_events  : set of scheduled per-recipient events (each carries CandidateID/PropagationID)
+  block_arrival_event         : the scheduled BlockAcceptancePoint event (carries CandidateID/PropagationID)
+  acceptance_timestamp        : set when a block-arrival with outcome ACCEPTED_CANDIDATE fires (else null)
+  status                      : one of the candidate statuses below
+  failure_reason              : one of {REJECTED, BLOCK_UNAVAILABLE, PROPAGATION_TIMEOUT, NO_VALID_CANDIDATE} or null
+
+# F1 candidate status enum (mutually exclusive):
+#   DISCOVERED -> SELF_VALIDATED -> PROPAGATING -> PENDING_ACCEPTANCE -> {ACCEPTED | FAILED}
+#   plus, set by another candidate's acceptance: COMPETING, STALE, CANCELLED
+CANDIDATE_STATUS in {DISCOVERED, SELF_VALIDATED, PROPAGATING, PENDING_ACCEPTANCE,
+                     FAILED, ACCEPTED, COMPETING, STALE, CANCELLED}
+
+STRUCTURE Assignment (immutable version object)   # F7: renewal makes a NEW version; never mutate in place
+  AssignmentID                : identity of THIS version (immutable once created)
+  assignment_version          : monotonic version number within the lineage
+  lineage_id                  : stable id shared by all versions of one assignment lineage
+  MinerID, range = [range_start, range_end], RoundID, TemplateID
+  status                      : one of {PENDING, CURRENT, PAUSED, SUPERSEDED, CLOSED}
+  previous_assignment_reference : prior version's AssignmentID (null for an ORIGINAL first version)
+  assignment_origin           : one of {ORIGINAL, RENEWED, REASSIGNED}
+  custody_status              : {original, renewed, reassigned, revoked, expired, abandoned, completed, superseded_by_template_refresh}
+  actual_frontier, reported_frontier, accepted_frontier
+  provenance                  : I9 reassignment/lineage records
+  lease_start, lease_expiry
+  superseded_at               : set when status becomes SUPERSEDED (else null)
+  # F2 pause bookkeeping (set only while PAUSED via VALID_SOLUTION_VERIFIED):
+  pause_cause_candidate_id    : the CandidateID whose certificate this holder verified (or null)
+  pause_cause_propagation_id  : the matching PropagationID (or null)
+  retained_actual_frontier    : the frontier retained at pause (or null)
+
+INVARIANT (F7): for each lineage_id, EXACTLY ONE version has status = CURRENT at any instant.
+```
+
+### 0.9 Central miner-state transition hook (F6)
+
+```
+PROCEDURE ApplyMinerStateTransition
+  INPUTS: MinerID, old_state, new_state, event_time, reason, assignment_ref, candidate_ref
+  PRECONDITIONS: old_state = miner_state(MinerID), EXCEPT the registration entry (T1) where
+                 old_state = the sentinel NONE and step (1) is a no-op;                  # F6
+                 (old_state -> new_state) is a legal miner transition (STAGE_01_MINER_STATE_MACHINE.md §3)
+  EFFECTS:
+    # F6: the SOLE owner of every miner-state change. It is idempotent per (MinerID, event_time,
+    #     new_state): a duplicate call for the same transition at the same event is a NO-OP.
+    IF already_applied(MinerID, event_time, old_state -> new_state):
+      RETURN duplicate_suppressed                                        # prevent duplicate transitions at the same event
+    # (1) close the OLD residency interval at event_time; (2) open the NEW one at event_time.
+    IF old_state != NONE: CLOSE residency(MinerID, old_state) at event_time   # accrues P_old * (event_time - last_boundary)
+    OPEN  residency(MinerID, new_state) at event_time                    # begins P_new accrual (I5/I6)
+    # (3) one-shot boundary energy for this crossing (E_transition and/or E_coordination as defined per edge).
+    RECORD E_transition/E_coordination for (old_state -> new_state)      # I6; never folded into P*t; never double-counted
+    # (4) assignment status update where the edge specifies one (e.g. WAKING->ACTIVE_HASHING activates PENDING->CURRENT).
+    IF edge specifies an assignment status change: UPDATE status(assignment_ref) accordingly
+    # (5) atomically set the new miner_state.
+    SET miner_state(MinerID) <- new_state
+    # (6) recompute the census DETERMINISTICALLY from the post-transition ACTIVE_HASHING set (I17).
+    SET H_honest(event_time)      <- SUM over honest miners in ACTIVE_HASHING of modeled hash rate
+    SET H_adversarial(event_time) <- SUM over adversarial miners in ACTIVE_HASHING of modeled hash rate
+    SET H_active(event_time)      <- H_honest(event_time) + H_adversarial(event_time)   # I17 EXACT at this boundary
+    IF H_active(event_time) = 0: SET q_adv(event_time) <- NA             # I17: undefined at zero
+    ELSE:                        SET q_adv(event_time) <- H_adversarial(event_time) / H_active(event_time)
+    RECORD transition_audit(MinerID, old_state, new_state, event_time, reason, assignment_ref, candidate_ref)
+    # (7) schedule (do NOT inline) the security-floor evaluation for this boundary.
+    SCHEDULE event SecurityFloorEvaluate(RoundContext, event_time, (H_active, H_honest, q_adv), floor_state)
+  RETURNS: transition_record
+  NOTE: This is the ONLY writer of miner_state (0.3). It recomputes H_active/H_honest/H_adversarial
+        and re-checks I17 at EVERY ACTIVE_HASHING boundary (entry and exit). It never SAMPLES a hash
+        rate; the adversarial active-census draw remains solely in ActiveHashRateUpdate. Duplicate
+        suppression makes concurrent handlers that reference the same transition safe.
+```
+
+### 0.10 Event-scheduled wake (F5)
+
+```
+PROCEDURE StartWake
+  INPUTS: RoundContext, MinerID, target_assignment, from_state
+  PRECONDITIONS: from_state = miner_state(MinerID) in {REGISTERED, RESERVE, EXHAUSTED_PENDING, LOW_POWER_LISTEN};
+                 target_assignment is a bound PENDING (or PAUSED-resumed) assignment for MinerID
+  EFFECTS:
+    # F5: NON-BLOCKING. Begin the wake and RETURN to the event loop immediately; do NOT run the
+    #     wake latency inside this handler (that would serialise other miners).
+    CALL ApplyMinerStateTransition(MinerID, from_state, WAKING, now, reason = wake_start,
+                                   assignment_ref = target_assignment, candidate_ref = null)   # F6
+    # ---- [SIMULATION SAMPLING] ----
+    wake_latency <- [SIMULATION SAMPLING] wake_latency_model(MinerID)    # the ONLY wake draw (sampling summary item 3)
+    # ---- deterministic protocol logic ----
+    SCHEDULE event WakeCompleteEvent(RoundContext, MinerID, target_assignment) AT now + wake_latency
+    RETURN wake_started                                                  # returns immediately (0.1)
+  RETURNS: wake_started
+
+PROCEDURE WakeCompleteEvent
+  INPUTS: RoundContext, MinerID, target_assignment
+  PRECONDITIONS: this is the scheduled wake-completion event for MinerID; miner_state(MinerID) = WAKING
+  EFFECTS:
+    # F5: runs at its OWN event timestamp (now = the completion time), independently of any other
+    #     miner's wake. Wake residency P_wake * wake_latency is accrued by ApplyMinerStateTransition
+    #     when it closed the WAKING interval at this timestamp.
+    IF wake_within_deadline(MinerID):                                    # completion timestamp <= wake_deadline
+      # validate the bound PENDING (or resumed PAUSED) assignment before hashing.
+      VALIDATE target_assignment against I1, current RoundID, committed TemplateID   # re-checks I1/I10/I3
+      # WAKING -> ACTIVE_HASHING (T5); the edge activates PENDING -> CURRENT for a fresh assignment,
+      # or restores a resumed PAUSED assignment to CURRENT from its retained actual_frontier.
+      CALL ApplyMinerStateTransition(MinerID, WAKING, ACTIVE_HASHING, now, reason = ramp_complete,
+                                     assignment_ref = target_assignment, candidate_ref = null)   # F6 (activates status, recomputes I17)
+      # begin (or resume) hashing from the assignment's frontier; identical for a fresh or resumed range.
+      RETURN CALL ActiveHashing(RoundContext, target_assignment, step_budget)
+      # activation_record is recorded by ApplyMinerStateTransition above
+    ELSE:
+      RECORD reserve_wake_failure(MinerID)
+      CALL ApplyMinerStateTransition(MinerID, WAKING, OFFLINE, now, reason = wake_deadline_expiry,
+                                     assignment_ref = target_assignment, candidate_ref = null)   # T12
+      # E4/F5: never leave a bound-but-un-activated range as if held; release it cleanly.
+      MARK range(target_assignment) as inactive_unsearched / reassignable   # supports I8a (unsearched only)
+      SET custody_status(target_assignment) <- abandoned
+      CLOSE target_assignment as not-activated (status PENDING -> CLOSED)   # no CURRENT assignment recorded
+      RETURN activation_failure
+  RETURNS: activation_record | activation_failure
+  NOTE: Three miners that call StartWake at the same timestamp schedule three independent
+        WakeCompleteEvents at three (generally different) completion timestamps; they never wake
+        serially inside one handler (F5). The former synchronous WakeComplete is replaced by this
+        pair; no procedure performs a blocking wake.
+```
+
+### 0.11 Shared pending-assignment constructor (F4)
+
+```
+PROCEDURE CreatePendingAssignment
+  INPUTS: RoundContext, MinerID, range, assignment_origin, source_assignment, reason
+  PRECONDITIONS: assignment_origin in {ORIGINAL, RENEWED, REASSIGNED};
+                 range disjoint from all valid active assignments (I1);
+                 custody_status(range) != completed AND coverage_state(range) != searched
+  EFFECTS:
+    # F4: the SINGLE constructor used by RangeAssign, ReserveActivate, RangeReassign, TemplateRefresh.
+    #     It sets provenance CORRECTLY from assignment_origin -- a reassignable suffix is NEVER
+    #     labelled ORIGINAL.
+    SET new_lineage <- (assignment_origin = REASSIGNED ? lineage_id(source_assignment) : fresh lineage_id)
+    CREATE assignment version A WITH
+        AssignmentID       = fresh id
+        assignment_version = (assignment_origin = REASSIGNED ? version(source_assignment)+1 : 1)
+        lineage_id         = new_lineage
+        MinerID, range, RoundID, TemplateID
+        status             = PENDING
+        assignment_origin  = assignment_origin
+    SWITCH assignment_origin:
+      CASE ORIGINAL:
+        SET custody_status(range)                <- original
+        SET previous_assignment_reference(A)     <- null
+      CASE REASSIGNED:
+        ASSERT source_assignment is not null AND reason is a permitted reassignment reason
+        SET custody_status(range)                <- reassigned
+        SET previous_assignment_reference(A)     <- AssignmentID(source_assignment)
+        SET prior_pc <- last accepted ProgressCommit covering range(source_assignment)    # I13 de-dup key
+        APPEND provenance(A) <- reassignment_record(range, from = source_assignment, reason,
+                                                     timestamp = now, prior_pc)          # I9 complete provenance
+      CASE RENEWED:
+        SET custody_status(range)                <- renewed
+        SET previous_assignment_reference(A)     <- AssignmentID(source_assignment)
+        COPY actual/reported/accepted frontiers AND provenance FROM source_assignment    # F7 continuity
+    APPEND A to assignment_ledger                                        # supports I8a
+  RETURNS: A
+  NOTE: ORIGINAL is used ONLY for a fresh never-assigned range; a previously-assigned unsearched
+        suffix MUST use REASSIGNED with full I9 provenance (F4). RENEWED is used by RenewAssignment
+        (F7) and copies the lineage's coverage forward.
+```
+
+---
+
 ## 1. Round initialisation
 
 ```
@@ -78,8 +315,12 @@ PROCEDURE MinerRegister
     SET MinerID <- identifier for join_request
     CREATE miner_record(MinerID) with declared power parameters
         (P_hash, P_listen, P_wake, P_offline)
-    TRANSITION miner_state(MinerID) -> REGISTERED
-    OPTIONALLY TRANSITION miner_state(MinerID) -> RESERVE   # held, not yet assigned
+    # F6: every miner-state change routes through the hook (0.3); T1 uses old_state = NONE.
+    CALL ApplyMinerStateTransition(MinerID, old_state = NONE, new_state = REGISTERED, event_time = now,
+                                   reason = register, assignment_ref = null, candidate_ref = null)   # T1
+    OPTIONALLY CALL ApplyMinerStateTransition(MinerID, old_state = REGISTERED, new_state = RESERVE,
+                                   event_time = now, reason = admit_to_reserve,
+                                   assignment_ref = null, candidate_ref = null)          # T2 (held, not yet assigned)
   RETURNS: MinerID
   NOTE: Registration is the precondition for any assignment. Sybil considerations are OUT OF
         SCOPE at Stage 1 (see STAGE_01_THREAT_MODEL.md); this procedure does not claim Sybil
@@ -93,25 +334,21 @@ PROCEDURE RangeAssign
   INPUTS: RoundContext, MinerID, requested_size, lease_duration
   PRECONDITIONS: miner_state(MinerID) in {REGISTERED, RESERVE}; round_state = ASSIGNMENT or HASHING
   EFFECTS:
-    SELECT candidate_range from unassigned portion of nonce_domain
-    # Deterministic overlap guard -- enforces I1
-    FOR EACH active_assignment A in assignment_ledger:
-      ASSERT candidate_range INTERSECT range(A) = EMPTY        # I1
-    SET lease_start  <- now
-    SET lease_expiry <- now + lease_duration
-    # D2: activation ALWAYS passes through WAKING; NEVER REGISTERED/RESERVE -> ACTIVE_HASHING directly.
-    # (1)-(2) create a PENDING assignment and bind it to the miner.
-    CREATE assignment(MinerID, candidate_range, TemplateID, RoundID, lease_start, lease_expiry)
-        WITH status = PENDING
-    APPEND assignment to assignment_ledger                     # supports I8a
-    # (3) REGISTERED -> WAKING (T3) or RESERVE -> WAKING (T4)
-    TRANSITION miner_state(MinerID) -> WAKING
-    # (4)-(6) wake accounting, I1/RoundID/TemplateID validation, and WAKING -> ACTIVE_HASHING (T5)
-    #         are performed by WakeComplete.
-    RETURN CALL WakeComplete(RoundContext, MinerID, candidate_range)
-  RETURNS: assignment
+    SELECT candidate_range from unassigned portion of nonce_domain      # fresh, never-assigned -> ORIGINAL
+    # F4: the shared constructor performs the I1 overlap guard, ledgers the version, and sets
+    #     custody_status = original / previous_assignment_reference = null.
+    assignment <- CALL CreatePendingAssignment(RoundContext, MinerID, candidate_range,
+                    assignment_origin = ORIGINAL, source_assignment = null, reason = null)
+    SET lease_start(assignment)  <- now
+    SET lease_expiry(assignment) <- now + lease_duration
+    # F5/F6/D2: activation ALWAYS passes through WAKING via the NON-BLOCKING StartWake; WAKING ->
+    #           ACTIVE_HASHING (T5) and PENDING -> CURRENT happen later in WakeCompleteEvent.
+    RETURN CALL StartWake(RoundContext, MinerID, target_assignment = assignment,
+                          from_state = miner_state(MinerID))            # T3 (REGISTERED) or T4 (RESERVE)
+  RETURNS: assignment (PENDING; becomes CURRENT at its scheduled WakeCompleteEvent)
   NOTE: A zero wake-latency experimental value is permitted later, but the WAKING state and its
-        P_wake*t_wake + E_transition accounting path always exist (D2).
+        P_wake*t_wake + E_transition accounting path always exist (D2). StartWake returns to the
+        event loop immediately; the miner reaches ACTIVE_HASHING at its own wake-completion event (F5).
 ```
 
 ## 5. Active hashing
@@ -230,7 +467,9 @@ PROCEDURE ExhaustionAdjudicate
       SET coverage_state(range(assignment))    <- searched
       SET custody_status(range(assignment))    <- completed      # CR-B5: NOT reassignable under same TemplateID
       SET entry_stop_reason(MinerID)           <- RANGE_EXHAUSTED   # why the miner left ACTIVE_HASHING (I4)
-      TRANSITION miner_state(MinerID) -> EXHAUSTED_PENDING       # PATH A only (I4)
+      # F6: PATH-A exit routes through the hook (recomputes H_active/I17 at the ACTIVE_HASHING boundary).
+      CALL ApplyMinerStateTransition(MinerID, ACTIVE_HASHING, EXHAUSTED_PENDING, now,
+                                     reason = RANGE_EXHAUSTED, assignment_ref = assignment, candidate_ref = null)   # T7
     # REJECTED: do NOT mark searched/completed; do NOT enter EXHAUSTED_PENDING
     ELSE:
       RECORD false_exhaustion_detected(MinerID, assignment)      # progress/audit violation, NOT I11
@@ -248,31 +487,41 @@ PROCEDURE ExhaustionAdjudicate
 
 ```
 PROCEDURE EnterLowPowerListen
-  INPUTS: RoundContext, MinerID, stop_reason
+  INPUTS: RoundContext, MinerID, stop_reason,
+          pause_cause_candidate_id = null, pause_cause_propagation_id = null    # F2: required for PATH B only
   PRECONDITIONS: stop_reason in {RANGE_EXHAUSTED, ASSIGNMENT_REVOKED, VALID_SOLUTION_VERIFIED,
-                 ROUND_ACCEPTED, ROUND_ABORTED}                # I4: every entry records a reason
+                 ROUND_ACCEPTED, ROUND_ABORTED};               # I4: every entry records a reason
+                 IF stop_reason = VALID_SOLUTION_VERIFIED THEN pause_cause_candidate_id != null
+                   AND pause_cause_propagation_id != null      # F2: the pause cause is a specific candidate
   EFFECTS:
+    SET from_state <- miner_state(MinerID)
     # C1: reason-specific disposition. There is NO generic "release held range to pool" step.
     SWITCH stop_reason:
 
       CASE RANGE_EXHAUSTED:                                    # PATH A
-        ASSERT miner_state(MinerID) = EXHAUSTED_PENDING
+        ASSERT from_state = EXHAUSTED_PENDING
         ASSERT accepted_exhaustion(assignment) = TRUE          # accepted exhaustion accounting exists
         ASSERT coverage_state(range) = searched AND custody_status(range) = completed
         CLOSE the assignment
         # do NOT release or reassign any part of the completed range
 
       CASE ASSIGNMENT_REVOKED:
-        ASSERT miner_state(MinerID) = ACTIVE_HASHING
+        ASSERT from_state = ACTIVE_HASHING
         PRESERVE accepted searched prefix [range_start, accepted_frontier]
         SET suffix <- accepted unsearched suffix [accepted_frontier + 1, range_end]
         MARK suffix as inactive_unsearched / reassignable      # only the accepted unsearched suffix (C4)
         CLOSE/SUPERSEDE the assignment
 
       CASE VALID_SOLUTION_VERIFIED:                            # PATH B
-        ASSERT miner_state(MinerID) = ACTIVE_HASHING
+        ASSERT from_state = ACTIVE_HASHING
         ASSERT the honoured early-stop certificate passed I11
-        PAUSE the assignment; retain actual_frontier AND accepted_frontier
+        PAUSE the assignment (status CURRENT -> PAUSED); retain actual_frontier AND accepted_frontier
+        # F2: record the SPECIFIC candidate that caused this pause, so a later candidate-scoped
+        #     failure resumes ONLY the miners paused by that candidate.
+        SET pause_cause_candidate_id(assignment)   <- pause_cause_candidate_id
+        SET pause_cause_propagation_id(assignment) <- pause_cause_propagation_id
+        SET paused_assignment_id(assignment)       <- AssignmentID(assignment)
+        SET retained_actual_frontier(assignment)   <- actual_frontier(assignment)
         # do NOT change coverage to searched; do NOT release the assignment
 
       CASE ROUND_ACCEPTED OR ROUND_ABORTED:
@@ -280,8 +529,12 @@ PROCEDURE EnterLowPowerListen
         # do NOT mark the range exhausted; do NOT reassign it under the closed TemplateID
 
     RECORD entry_stop_reason(MinerID) <- stop_reason           # I4: why the miner left ACTIVE_HASHING
-    TRANSITION miner_state(MinerID) -> LOW_POWER_LISTEN
-    BEGIN accumulating t_listen at P_listen                    # supports I6; not active rate
+    # F6: the LOW_POWER_LISTEN entry (and its P_hash/P_listen boundary + I17 recompute) is applied
+    #     by the hook. For PATH A the source is EXHAUSTED_PENDING (already off H_active); for the
+    #     other reasons the source is ACTIVE_HASHING (this is the H_active exit boundary).
+    CALL ApplyMinerStateTransition(MinerID, from_state, LOW_POWER_LISTEN, now,
+                                   reason = stop_reason, assignment_ref = assignment,
+                                   candidate_ref = pause_cause_candidate_id)     # T8 / T26 / T27 / T28 / T29
   RETURNS: listen_record(MinerID, stop_reason)
   NOTE: EXHAUSTED_PENDING is the source ONLY for RANGE_EXHAUSTED; the other four reasons enter
         LOW_POWER_LISTEN directly from ACTIVE_HASHING (or on round closure) and never pass
@@ -365,62 +618,79 @@ PROCEDURE ReserveActivate
   EFFECTS:
     SELECT reserve_miner from miners in RESERVE
     SELECT candidate_range from unsearched/reassignable portion of nonce_domain
-    FOR EACH active_assignment A in assignment_ledger:
-      ASSERT candidate_range INTERSECT range(A) = EMPTY        # I10 (preserves I1)
-    ASSERT custody_status(candidate_range) != completed        # never activate over a completed range
-    ASSERT coverage_state(candidate_range) != searched         # never over a searched prefix
-    # E4: create and LEDGER a PENDING assignment and BIND it BEFORE waking; activation to CURRENT
-    #     happens ONLY inside WakeComplete on a successful wake. This mirrors RangeAssign so a
-    #     reserve activation can never reach ACTIVE_HASHING without a bound PENDING assignment.
-    SET lease_start  <- now
-    SET lease_expiry <- now + default_lease_duration
-    CREATE assignment(reserve_miner, candidate_range, TemplateID, RoundID, lease_start, lease_expiry)
-        WITH status = PENDING
-    APPEND assignment to assignment_ledger                     # supports I8a
-    SET custody_status(candidate_range) <- original            # a fresh reserve range, not a reassignment
-    # D2: activation ALWAYS passes through WAKING; NEVER RESERVE -> ACTIVE_HASHING directly (T4 -> T5).
-    TRANSITION miner_state(reserve_miner) -> WAKING            # T4; incurs wake latency/energy
-    # (a) on success WakeComplete validates I1/RoundID/TemplateID and flips PENDING -> CURRENT (T5);
-    # (b) on wake failure WakeComplete records reserve_wake_failure and moves the miner OFFLINE,
-    #     leaving the PENDING assignment un-activated for the caller to release.
-    activation <- CALL WakeComplete(RoundContext, reserve_miner, candidate_range)
-    IF activation = activation_failure:
-      # E4: never leave a bound-but-un-activated range as if it were held; release it cleanly.
-      MARK candidate_range as inactive_unsearched / reassignable    # supports I8a (unsearched only)
-      CLOSE the PENDING assignment as not-activated (custody_status <- abandoned)
-      RETURN activation_failure
-    RETURN activation
-  RETURNS: activation_record | activation_failure
-  NOTE: PENDING -> CURRENT occurs ONLY in WakeComplete on a successful wake (E4). A failed wake
-        never yields a CURRENT assignment; the reserved range is released as inactive_unsearched.
+    # F4: choose the CORRECT provenance. A fresh never-assigned range is ORIGINAL; a previously
+    #     assigned unsearched suffix is REASSIGNED (source + reason + full I9 provenance). A
+    #     reassignable suffix is NEVER labelled ORIGINAL.
+    IF candidate_range is a fresh never-assigned range:
+      origin <- ORIGINAL   ; source <- null                         ; reason <- null
+    ELSE:
+      origin <- REASSIGNED ; source <- source_assignment(candidate_range) ; reason <- security_recovery
+    # F4: the shared constructor performs the I1/I10 overlap guard, ledgers the PENDING version, and
+    #     sets custody_status + previous_assignment_reference + provenance from origin. Activation to
+    #     CURRENT happens ONLY at the scheduled WakeCompleteEvent on a successful wake (E4/F5).
+    assignment <- CALL CreatePendingAssignment(RoundContext, reserve_miner, candidate_range,
+                    assignment_origin = origin, source_assignment = source, reason = reason)
+    SET lease_start(assignment)  <- now
+    SET lease_expiry(assignment) <- now + default_lease_duration
+    # F5/D2: activation ALWAYS passes through WAKING via the NON-BLOCKING StartWake (T4). PENDING ->
+    #        CURRENT and the wake-failure release both occur in WakeCompleteEvent, so several reserve
+    #        activations at the same instant wake independently.
+    RETURN CALL StartWake(RoundContext, reserve_miner, target_assignment = assignment, from_state = RESERVE)   # T4
+  RETURNS: activation_started
+  NOTE: PENDING -> CURRENT occurs ONLY at the scheduled WakeCompleteEvent on a successful wake
+        (E4/F5); a failed wake yields OFFLINE and WakeCompleteEvent releases the reserved range as
+        inactive_unsearched (custody_status = abandoned). Reserve provenance distinguishes ORIGINAL
+        from REASSIGNED (F4).
 ```
 
 ## 11. Wake completion
 
-```
-PROCEDURE WakeComplete
-  INPUTS: RoundContext, MinerID, target_range
-  PRECONDITIONS: miner_state(MinerID) = WAKING
-  EFFECTS:
-    # ---- [SIMULATION SAMPLING] ----
-    wake_latency <- [SIMULATION SAMPLING] wake_latency_model(MinerID)
-    # ---- deterministic protocol logic ----
-    ACCUMULATE t_wake at P_wake for wake_latency; ADD E_transition   # supports I6
-    IF wake_latency <= wake_deadline:
-      # D2: validate the bound PENDING assignment; do NOT recurse into RangeAssign.
-      VALIDATE target_range against I1, current RoundID, and committed TemplateID   # re-checks I1/I10/I3
-      ACTIVATE the bound assignment: status PENDING -> CURRENT
-      TRANSITION miner_state(MinerID) -> ACTIVE_HASHING                 # T5
-      RETURN activation_record
-    ELSE:
-      RECORD reserve_wake_failure(MinerID)
-      TRANSITION miner_state(MinerID) -> OFFLINE                # or DISQUALIFIED per policy
-      RETURN activation_failure
-```
+Wake completion is specified as the event-scheduled pair `StartWake` / `WakeCompleteEvent` in
+**§0.10** (F5). The former synchronous `WakeComplete` is removed: no procedure performs a blocking
+wake. All activation callers (`RangeAssign`, `ReserveActivate`, `RangeReassign`, `TemplateRefresh`,
+`ResumeFromPause`) invoke `StartWake`, and the miner reaches `ACTIVE_HASHING` at its own scheduled
+`WakeCompleteEvent`.
 
 ## 12. Range lease expiry
 
 ```
+PROCEDURE RenewAssignment
+  INPUTS: RoundContext, old_assignment, t
+  PRECONDITIONS: miner_state(holder(old_assignment)) = ACTIVE_HASHING;
+                 status(old_assignment) = CURRENT;
+                 custody_status(range(old_assignment)) != completed;   # a completed range is not renewable
+                 policy allows same-range renewal
+  EFFECTS:
+    # F7: atomic same-range renewal by IMMUTABLE VERSIONING. The old version is SUPERSEDED (kept
+    #     immutable and snapshot-resolvable); a NEW CURRENT version is created on the SAME range.
+    #     The identity of the old version is NEVER mutated in place.
+    CREATE new version V2 WITH
+        AssignmentID       = fresh id
+        assignment_version = assignment_version(old_assignment) + 1
+        lineage_id         = lineage_id(old_assignment)                 # SAME lineage
+        MinerID            = MinerID(old_assignment)                    # SAME holder
+        range              = range(old_assignment)                      # SAME range
+        RoundID            = RoundID(old_assignment)                    # unchanged
+        TemplateID         = TemplateID(old_assignment)                 # unchanged
+        assignment_origin  = RENEWED
+        custody_status     = renewed
+        previous_assignment_reference = AssignmentID(old_assignment)
+        COPIED actual_frontier / reported_frontier / accepted_frontier FROM old_assignment   # retained progress
+        COPIED provenance FROM old_assignment                          # retained provenance
+        lease_start = t ; lease_expiry = t + default_lease_duration
+    # ATOMIC swap: supersede old and publish new CURRENT so exactly one version is CURRENT throughout.
+    ATOMICALLY:
+      SET status(old_assignment)        <- SUPERSEDED
+      SET superseded_at(old_assignment) <- t
+      APPEND V2 to assignment_ledger
+      SET status(V2)                    <- CURRENT
+    ASSERT exactly one version with status = CURRENT in lineage_id(V2)  # F7 lineage invariant
+    # miner_state(holder) stays ACTIVE_HASHING; NO WAKING; the holder keeps hashing the SAME range.
+  RETURNS: V2
+  NOTE: The old version stays IMMUTABLE and resolvable (F7/E1): a SolutionEligibilitySnapshot taken
+        under it resolves to that SUPERSEDED version, which was CURRENT at discovery and not revoked
+        before discovery, so its already-discovered solution remains verifiable after renewal.
+
 PROCEDURE LeaseExpiry
   INPUTS: RoundContext, assignment, time t
   PRECONDITIONS: t >= lease_expiry(assignment)   # the lease window elapsed; renewal not yet decided
@@ -428,19 +698,10 @@ PROCEDURE LeaseExpiry
     # E9: DECIDE renewal BEFORE invalidating anything. A renewed assignment is NEVER invalidated and
     #     is NEVER routed through RangeReassign or WAKING -- the holder keeps hashing the SAME range.
     IF miner_state(holder) = ACTIVE_HASHING AND holder wishes to continue AND policy allows renewal:
-      # ---- RENEWAL (same holder, same range, stays CURRENT; no wake cycle; E5/E9) ----
-      ASSERT custody_status(range(assignment)) != completed        # a completed range is not renewable
-      # canonical lease renewal: mint a fresh AssignmentID + version bound to the SAME range/holder,
-      # and extend the lease window in place. The range and all coverage/progress are preserved.
-      SET assignment_version(assignment) <- assignment_version(assignment) + 1
-      SET AssignmentID(assignment)       <- fresh AssignmentID bound to the SAME range and holder
-      SET lease_start(assignment)        <- t
-      SET lease_expiry(assignment)       <- t + lease_duration
-      SET custody_status(range(assignment)) <- renewed            # I8b lineage only; coverage unchanged
-      PRESERVE range(assignment), actual_frontier, accepted_frontier, reported_frontier, provenance
-      KEEP status(assignment) = CURRENT                           # E9: never invalidated on renewal
-      # miner_state(holder) stays ACTIVE_HASHING; NO WAKING and NO RangeReassign (E5/E9)
-      RETURN renewed
+      # ---- RENEWAL (same holder, same range, stays CURRENT; no wake cycle; E5/E9/F7) ----
+      # F7: renewal is an ATOMIC immutable version swap; the old version is SUPERSEDED and a new
+      #     CURRENT version is created on the SAME range with copied progress/provenance.
+      RETURN renewed(CALL RenewAssignment(RoundContext, assignment, t))
     # ---- EXPIRY WITHOUT RENEWAL: the holder actually stopped -- ONLY NOW invalidate and reassign ----
     INVALIDATE assignment (holder's assignment no longer CURRENT)   # stale mining -> I2 reject
     IF miner_state(holder) = ACTIVE_HASHING:
@@ -482,24 +743,24 @@ PROCEDURE RangeReassign
     ASSERT coverage_state(unsearched_suffix) != searched
     ASSERT unsearched_suffix contains no accepted searched position   # C4: suffix only
     SELECT to_miner from {RESERVE, REGISTERED} miners (or via ReserveActivate)
-    FOR EACH active_assignment A in assignment_ledger:
-      ASSERT unsearched_suffix INTERSECT range(A) = EMPTY             # I1 preserved
-    prior_pc <- last accepted ProgressCommit covering the source range   # de-dup key material (I13)
-    CREATE assignment(to_miner, unsearched_suffix, TemplateID, RoundID, new lease window)
-        WITH status = PENDING
-    # D2: to_miner activation passes through WAKING; never REGISTERED/RESERVE -> ACTIVE_HASHING directly.
-    TRANSITION miner_state(to_miner) -> WAKING
-    CALL WakeComplete(RoundContext, to_miner, unsearched_suffix)     # validates I1/RoundID/TemplateID; T5 -> ACTIVE_HASHING
-    APPEND reassignment record
-        (unsearched_suffix, from_miner, to_miner, reason, timestamp, prior_pc)   # I9 complete provenance
+    # F4: the shared constructor creates a PENDING REASSIGNED version: it performs the I1 overlap
+    #     guard, ledgers the version, sets custody_status = reassigned, records
+    #     previous_assignment_reference = source, and appends the I9 provenance (with prior_pc, I13).
+    #     A reassignable suffix is therefore NEVER labelled ORIGINAL.
+    assignment <- CALL CreatePendingAssignment(RoundContext, to_miner, unsearched_suffix,
+                    assignment_origin = REASSIGNED,
+                    source_assignment = source_assignment(unsearched_suffix), reason = reason)
+    SET lease_start(assignment)  <- now
+    SET lease_expiry(assignment) <- now + default_lease_duration
+    # F5/D2: to_miner activation passes through WAKING via the NON-BLOCKING StartWake (T3/T4 -> T5).
+    CALL StartWake(RoundContext, to_miner, target_assignment = assignment,
+                   from_state = miner_state(to_miner))
     # CR4/C3: coverage uses I8a with ACCEPTED coverage; custody/provenance is tracked SEPARATELY as I8b.
     UPDATE assignment_ledger so the coverage partition still holds (I8a):
         accepted_searched + active_unsearched + inactive_unsearched = assigned_domain
-    # I8b custody/lineage status is orthogonal and is NEVER an additive coverage term.
-    SET custody_status(unsearched_suffix) <- reassigned   # in {original, renewed, reassigned, revoked, expired, abandoned, completed}
-    # The reassigned suffix retains an INDEPENDENT coverage state
-    # (accepted_searched / active_unsearched / inactive_unsearched).
-  RETURNS: reassignment_record
+    # I8b custody/lineage status is orthogonal and is NEVER an additive coverage term. The reassigned
+    # suffix retains an INDEPENDENT coverage state (accepted_searched/active_unsearched/inactive_unsearched).
+  RETURNS: provenance(assignment)   # the I9 reassignment record created by CreatePendingAssignment
 ```
 
 ## 14. Progress commitment
@@ -591,9 +852,9 @@ PROCEDURE EarlyStopGenerate
 
 ```
 PROCEDURE EarlyStopVerify
-  INPUTS: RoundContext, certificate, snapshot, verifying_MinerID
+  INPUTS: RoundContext, certificate, snapshot, CandidateID, PropagationID, verifying_MinerID
   PRECONDITIONS: round_state in {HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY};
-                 miner_state(verifying_MinerID) = ACTIVE_HASHING
+                 miner_state(verifying_MinerID) = ACTIVE_HASHING       # F2: a paused miner never re-verifies
   EFFECTS:
     # CR2: the verifying miner REMAINS in ACTIVE_HASHING and CONTINUES hashing while verifying;
     #      it stays in H_active(t). NO VERIFYING state. E1/E2: validate the SIGNED certificate
@@ -604,47 +865,52 @@ PROCEDURE EarlyStopVerify
     ADD the incremental verification cost to E_verification
     IF result = ok:
       MARK certificate VERIFIED
-      # PATH B: the recipient PAUSES ITS OWN assignment and enters LOW_POWER_LISTEN DIRECTLY
-      # (via the canonical disposition); it does NOT pass through EXHAUSTED_PENDING.
-      CALL EnterLowPowerListen(RoundContext, verifying_MinerID, stop_reason = VALID_SOLUTION_VERIFIED)
+      # PATH B: the recipient PAUSES ITS OWN assignment and enters LOW_POWER_LISTEN DIRECTLY.
+      # F2: record THIS candidate as the pause cause so a later candidate-scoped failure resumes
+      #     ONLY the miners paused by this candidate.
+      CALL EnterLowPowerListen(RoundContext, verifying_MinerID, stop_reason = VALID_SOLUTION_VERIFIED,
+                               pause_cause_candidate_id = CandidateID,
+                               pause_cause_propagation_id = PropagationID)
       RETURN VERIFIED
     ELSE:
       RECORD false_early_stop_rejected(certificate)
       DO NOT terminate hashing; NO state transition              # I11 upheld
       RETURN REJECTED
   RETURNS: VERIFIED | REJECTED
-  NOTE: Validation is against the discovery snapshot (E1), so a finder's later PAUSED assignment
-        does NOT invalidate an already-discovered solution. The recipient's OWN assignment is
-        PAUSED on VERIFIED; if the full block is later rejected/unavailable/timed out, the miner
-        resumes via ResumeFromPause.
+  NOTE: Validation is against the discovery snapshot (E1). F2 multi-candidate policy: a miner
+        verifies a certificate ONLY while ACTIVE_HASHING; once PAUSED it is not ACTIVE_HASHING, so a
+        second candidate's CertificateArrival is ignored (§16c). Therefore a miner has AT MOST ONE
+        pause cause at a time, and that pause cause is unambiguous.
 ```
 
 ## 16a. Resume after a paused (PATH B) stop
 
 ```
 PROCEDURE ResumeFromPause
-  INPUTS: RoundContext, MinerID, trigger
-  PRECONDITIONS: miner_state(MinerID) = LOW_POWER_LISTEN with recorded entry_stop_reason = VALID_SOLUTION_VERIFIED;
-                 trigger in {BLOCK_REJECTED, BLOCK_UNAVAILABLE, PROPAGATION_TIMEOUT};
-                 the miner's assignment is PAUSED (actual_frontier retained), NOT searched/exhausted
+  INPUTS: RoundContext, MinerID, trigger, pause_cause_candidate_id
+  PRECONDITIONS: miner_state(MinerID) = LOW_POWER_LISTEN with entry_stop_reason = VALID_SOLUTION_VERIFIED;
+                 trigger in {REJECTED, BLOCK_UNAVAILABLE, PROPAGATION_TIMEOUT, NO_VALID_CANDIDATE};
+                 # F2: resume ONLY because THIS miner's pause cause failed.
+                 pause_cause_candidate_id(paused_assignment(MinerID)) = pause_cause_candidate_id;
+                 the miner's assignment is PAUSED (retained_actual_frontier retained), NOT searched/exhausted
   EFFECTS:
-    # CR-B1: a paused PATH B assignment resumes; it was never marked searched or completed, so no
-    # coverage was falsely credited. The miner wakes and continues from where it paused.
-    TRANSITION miner_state(MinerID) -> WAKING                   # wake/transition energy accounted below
-    # ---- [SIMULATION SAMPLING] ----
-    wake_latency <- [SIMULATION SAMPLING] wake_latency_model(MinerID)
-    # ---- deterministic protocol logic ----
-    ACCUMULATE t_wake at P_wake for wake_latency; ADD E_transition   # supports I5, I6 (wake + transition energy)
-    SET cursor <- retained actual_frontier of the paused assignment  # resume exactly where it paused
-    RESTORE paused_assignment status -> CURRENT from the retained actual_frontier   # D5: assignment CURRENT again
-    TRANSITION miner_state(MinerID) -> ACTIVE_HASHING                 # T5
-    CALL ActiveHashRateUpdate(RoundContext, now)                     # D5: recompute H_active/H_honest/H_adversarial/q_adv
-    RETURN CALL ActiveHashing(RoundContext, paused_assignment, step_budget)   # continues from actual_frontier
-  RETURNS: resume_record(MinerID, resumed_from = actual_frontier)
-  NOTE: Resume applies ONLY to PATH B pauses (entry_stop_reason = VALID_SOLUTION_VERIFIED). A PATH A
-        exhausted range (coverage_state = searched, custody_status = completed) is NOT resumable.
-        If instead the full block is ACCEPTED, the round closes (ROUND_ACCEPTED) and the paused
-        assignment closes on round closure -- NOT by exhaustion.
+    # CR-B1/F2: a paused PATH B assignment resumes because the SPECIFIC candidate that paused it
+    # failed; it was never marked searched or completed, so no coverage was falsely credited.
+    SET paused_assignment <- the miner's PAUSED assignment (paused_assignment_id)
+    # F2: the miner is no longer paused by any candidate.
+    CLEAR pause_cause_candidate_id(paused_assignment), pause_cause_propagation_id(paused_assignment)
+    # F5/F6/D5: resume passes through WAKING via the NON-BLOCKING StartWake (T30). The paused
+    #           assignment is the wake target; WakeCompleteEvent restores it to CURRENT from
+    #           retained_actual_frontier (WAKING -> ACTIVE_HASHING, T5), recomputes H_active/I17 at
+    #           the ACTIVE_HASHING boundary (via ApplyMinerStateTransition), and resumes hashing.
+    RETURN CALL StartWake(RoundContext, MinerID, target_assignment = paused_assignment,
+                          from_state = LOW_POWER_LISTEN)                        # T30
+  RETURNS: resume_started(MinerID, resumed_from = retained_actual_frontier)
+  NOTE: Resume applies ONLY to PATH B pauses whose pause_cause matches the FAILED candidate (F2). A
+        PATH A exhausted range (coverage_state = searched, custody_status = completed) is NOT
+        resumable. Resume is event-scheduled (F5); several miners resuming at the same instant wake
+        independently. If instead the full block is ACCEPTED, the round closes (ROUND_ACCEPTED) and
+        the paused assignment closes on round closure -- NOT by exhaustion.
 ```
 
 ## 16b. Event-ordered solution propagation (C6) and finder self-validation (D4)
@@ -665,6 +931,21 @@ PROCEDURE SelfValidateFoundSolution
 ```
 
 ```
+PROCEDURE CreatePropagationContext
+  INPUTS: RoundContext, certificate, snapshot, finder
+  PRECONDITIONS: certificate self-validated (SelfValidateFoundSolution ok)
+  EFFECTS:
+    # F1: mint IMMUTABLE unique identifiers and build the candidate's propagation context.
+    SET CandidateID   <- fresh globally-unique id (immutable)
+    SET PropagationID <- fresh globally-unique id (immutable)
+    CREATE cpc = CandidatePropagationContext WITH
+        CandidateID, PropagationID, RoundID = certificate.RoundID, TemplateID = certificate.TemplateID,
+        certificate, snapshot, finder_MinerID = finder, discovery_time = snapshot.discovery_time,
+        certificate_arrival_events = empty, block_arrival_event = null,
+        acceptance_timestamp = null, status = SELF_VALIDATED, failure_reason = null
+    RETURN cpc
+  RETURNS: cpc
+
 PROCEDURE ScheduleSolutionPropagation
   INPUTS: RoundContext, certificate, snapshot, finder
   PRECONDITIONS: round_state in {HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY};
@@ -675,40 +956,59 @@ PROCEDURE ScheduleSolutionPropagation
     IF NOT self_ok:
       RECORD invalid_self_certificate(finder, certificate)       # finder does NOT stop; stays ACTIVE_HASHING
       RETURN not_scheduled
-    # E6: enter solution propagation at the FIRST valid found-solution event (NOT after acceptance).
-    IF round_state = HASHING: TRANSITION round_state -> SOLUTION_PROPAGATION
-    # C6: (3) schedule per-recipient certificate-arrival events using modeled propagation delays.
+    # F1: build the candidate's immutable propagation context (fresh CandidateID/PropagationID).
+    cpc <- CALL CreatePropagationContext(RoundContext, certificate, snapshot, finder)
+    # F3: register the live context. The round is SOLUTION_PROPAGATION iff active_propagation_set
+    #     is non-empty; entering the FIRST live context performs HASHING -> SOLUTION_PROPAGATION (E6).
+    SET was_empty <- (active_propagation_set is empty)
+    ADD cpc to active_propagation_set
+    SET status(cpc) <- PROPAGATING
+    IF was_empty AND round_state = HASHING: TRANSITION round_state -> SOLUTION_PROPAGATION
+    # C6/F1: (3) schedule per-recipient certificate-arrival events; every event carries CandidateID/PropagationID.
     FOR EACH recipient r in current miners, r != finder:
       cert_delay(r) <- deterministic modeled propagation delay(finder -> r)   # reproducible
-      SCHEDULE event CertificateArrival(RoundContext, r, certificate, snapshot) AT now + cert_delay(r)
-    # (4) schedule the full-block propagation/arrival event toward the modeled acceptance point.
+      ev <- SCHEDULE event CertificateArrival(RoundContext, r, cpc.certificate, cpc.snapshot,
+                                              CandidateID = cpc.CandidateID, PropagationID = cpc.PropagationID)
+                          AT now + cert_delay(r)
+      ADD ev to certificate_arrival_events(cpc)
+    # (4) schedule the full-block acceptance event toward the modeled acceptance point (carries the ids).
     block_delay <- deterministic modeled propagation delay(finder -> acceptance_point)  # reproducible
-    SCHEDULE event BlockAcceptancePoint(RoundContext, certificate, snapshot, outcome-at-arrival) AT now + block_delay
-    # (5) the finder ceases hashing (PATH B, resumable) via the canonical disposition; it does NOT
-    #     pass through EXHAUSTED_PENDING. Block-propagation energy is accounted.
-    CALL EnterLowPowerListen(RoundContext, finder, stop_reason = VALID_SOLUTION_VERIFIED)
-  RETURNS: scheduled_marker
+    SET block_arrival_event(cpc) <- SCHEDULE event BlockAcceptancePoint(RoundContext, cpc.certificate,
+                          cpc.snapshot, CandidateID = cpc.CandidateID, PropagationID = cpc.PropagationID,
+                          outcome = outcome-at-arrival) AT now + block_delay
+    SET status(cpc) <- PENDING_ACCEPTANCE
+    # (5) the finder ceases hashing (PATH B, resumable) via the canonical disposition, recording THIS
+    #     candidate as its pause cause (F2); it does NOT pass through EXHAUSTED_PENDING.
+    CALL EnterLowPowerListen(RoundContext, finder, stop_reason = VALID_SOLUTION_VERIFIED,
+                             pause_cause_candidate_id = cpc.CandidateID,
+                             pause_cause_propagation_id = cpc.PropagationID)
+  RETURNS: cpc.CandidateID
   NOTE: The discrete-event queue orders arrivals; no global set of future solutions is consulted.
         Do NOT call ValidBlockAccept here. Unpaused miners may keep hashing during
-        SOLUTION_PROPAGATION (E6); further candidate solutions may still be scheduled.
+        SOLUTION_PROPAGATION and may discover FURTHER candidates, each of which gets its OWN
+        CandidatePropagationContext added to active_propagation_set (E6/F1/F3).
 ```
 
 ## 16c. Certificate arrival at a recipient (C6)
 
 ```
 PROCEDURE CertificateArrival
-  INPUTS: RoundContext, recipient r, certificate, snapshot
-  PRECONDITIONS: this is the scheduled certificate-arrival event for r
+  INPUTS: RoundContext, recipient r, certificate, snapshot, CandidateID, PropagationID
+  PRECONDITIONS: this is the scheduled certificate-arrival event for r (carries CandidateID/PropagationID, F1);
+                 the context CandidateID is still live (not FAILED/ACCEPTED/CANCELLED)
   EFFECTS:
+    # F2/F3: ignore an arrival whose candidate is no longer live (its events may have been cancelled).
+    IF status(context(CandidateID)) not in {PROPAGATING, PENDING_ACCEPTANCE}:
+      RETURN ignored_stale_candidate
     # (6) the recipient stays ACTIVE_HASHING until its certificate-arrival event fully validates.
     #     E1/E2: verification is against the finder's immutable discovery snapshot, carried on the event.
     IF miner_state(r) = ACTIVE_HASHING:
-      result <- CALL EarlyStopVerify(RoundContext, certificate, snapshot, verifying_MinerID = r)
-      # (7) on VERIFIED, EarlyStopVerify pauses r into LOW_POWER_LISTEN
-      #     (stop_reason = VALID_SOLUTION_VERIFIED, assignment PAUSED). On REJECTED, r stays
-      #     ACTIVE_HASHING and keeps hashing (I11); no transition.
+      result <- CALL EarlyStopVerify(RoundContext, certificate, snapshot,
+                                     CandidateID, PropagationID, verifying_MinerID = r)
+      # (7) on VERIFIED, EarlyStopVerify pauses r into LOW_POWER_LISTEN recording THIS candidate as
+      #     the pause cause (F2). On REJECTED, r stays ACTIVE_HASHING and keeps hashing (I11).
     ELSE:
-      IGNORE                                                     # r not currently hashing
+      IGNORE                                                     # F2: r not ACTIVE_HASHING (already paused by some candidate)
   RETURNS: verify_result
 ```
 
@@ -716,61 +1016,76 @@ PROCEDURE CertificateArrival
 
 ```
 PROCEDURE BlockAcceptancePoint
-  INPUTS: RoundContext, certificate, snapshot, outcome
-  PRECONDITIONS: this is the scheduled full-block arrival event at the MODELED ACCEPTANCE POINT;
-                 outcome in {ACCEPTED_CANDIDATE, REJECTED, BLOCK_UNAVAILABLE, PROPAGATION_TIMEOUT}
+  INPUTS: RoundContext, certificate, snapshot, CandidateID, PropagationID, outcome
+  PRECONDITIONS: this is the scheduled full-block arrival event at the MODELED ACCEPTANCE POINT
+                 for CandidateID (F1); outcome in {ACCEPTED_CANDIDATE, REJECTED, BLOCK_UNAVAILABLE,
+                 PROPAGATION_TIMEOUT}
   EFFECTS:
+    # F2/F3: ignore an arrival whose candidate is no longer live (already ACCEPTED/FAILED/CANCELLED).
+    IF status(context(CandidateID)) not in {PROPAGATING, PENDING_ACCEPTANCE}:
+      RETURN ignored_stale_candidate
+    SET acceptance_timestamp(context(CandidateID)) <- now
     # C6: the modeled acceptance point is EITHER a designated coordinator/validator OR a clearly
     #     identified canonical local view (RoundContext.acceptance_point_policy).
     IF outcome = ACCEPTED_CANDIDATE:
-      # D6: batch EXACT-same-timestamp candidates BEFORE accepting; do NOT accept the first event
-      #     immediately when other candidate events share the exact acceptance timestamp. Each
-      #     batched candidate carries its own (certificate, snapshot) for validation (E1/E2).
+      # D6: batch EXACT-same-timestamp candidates BEFORE accepting; this candidate joins the batch
+      #     for the current acceptance timestamp (each batched candidate carries its own ids/cert/snapshot).
       RETURN CALL AcceptanceTimestampBatch(RoundContext, acceptance_timestamp = now)
     ELSE:
-      # E3/D5: REJECTED / BLOCK_UNAVAILABLE / PROPAGATION_TIMEOUT -> the SINGLE failure-recovery path.
-      RETURN CALL HandlePropagationFailure(RoundContext, certificate, snapshot, failure_reason = outcome)
-  RETURNS: accepted_block | resume_scheduled | no_valid_candidate
+      # E3/D5/F2: REJECTED / BLOCK_UNAVAILABLE / PROPAGATION_TIMEOUT -> the CANDIDATE-SCOPED
+      #           failure-recovery path (resumes ONLY miners paused by THIS candidate).
+      RETURN CALL HandlePropagationFailure(RoundContext, CandidateID, PropagationID, failure_reason = outcome)
+  RETURNS: accepted_block | resume_scheduled | ignored_stale_candidate
   NOTE: A strictly-earlier full-block arrival wins by discrete-event queue order; EXACT-timestamp
         ties are arbitrated by AcceptanceTimestampBatch. No event inspects unknown future timestamps.
-        Every non-acceptance outcome (including an empty valid batch) funnels through
-        HandlePropagationFailure, the ONLY procedure that resumes PATH-B paused miners (E3).
+        Every non-acceptance outcome funnels through the candidate-scoped HandlePropagationFailure
+        (E3/F2), which resumes ONLY the miners paused by THIS candidate.
 ```
 
 ## 16d-bis. Propagation-failure recovery (E3)
 
 ```
 PROCEDURE HandlePropagationFailure
-  INPUTS: RoundContext, certificate, snapshot, failure_reason
-  PRECONDITIONS: failure_reason in {REJECTED, BLOCK_UNAVAILABLE, PROPAGATION_TIMEOUT,
-                 NO_VALID_CANDIDATE}                       # the four non-acceptance outcomes (E3)
+  INPUTS: RoundContext, CandidateID, PropagationID, failure_reason
+  PRECONDITIONS: failure_reason in {REJECTED, BLOCK_UNAVAILABLE, PROPAGATION_TIMEOUT, NO_VALID_CANDIDATE};
+                 CandidateID identifies a live context (status in {PROPAGATING, PENDING_ACCEPTANCE})
   EFFECTS:
-    # E3: the SINGLE recovery path for every non-acceptance outcome. It is invoked by
-    #     BlockAcceptancePoint (REJECTED/BLOCK_UNAVAILABLE/PROPAGATION_TIMEOUT) and by
-    #     AcceptanceTimestampBatch (NO_VALID_CANDIDATE, empty valid batch). No round closure occurs.
-    RECORD propagation_failure(RoundID, TemplateID, certificate, failure_reason)
-    # (1) return the round to HASHING unless a floor breach requires SECURITY_RECOVERY.
+    SET cpc <- context(CandidateID)
+    # E3/F2/F3: fail ONLY this candidate. This procedure NEVER touches another candidate's context,
+    #           events, or paused miners, and NEVER accepts a block or closes the round.
+    SET status(cpc)         <- FAILED
+    SET failure_reason(cpc) <- failure_reason
+    RECORD propagation_failure(RoundID, TemplateID, CandidateID, PropagationID, failure_reason)
+    REMOVE cpc from active_propagation_set                          # F3: ONLY this candidate leaves the set
+    # (1) cancel ONLY this candidate's obsolete events (F2): its per-recipient certificate-arrival
+    #     events and its block-arrival event. Another candidate's events are NEVER cancelled here.
+    CANCEL every event in certificate_arrival_events(cpc)
+    CANCEL block_arrival_event(cpc)
+    # (2) resume ONLY miners whose pause cause is THIS candidate (F2). A miner paused by another
+    #     live candidate, or with no matching pause cause, is left unchanged.
+    FOR EACH miner M with a PAUSED assignment AND
+             pause_cause_candidate_id(paused_assignment(M)) = CandidateID:
+      SCHEDULE event ResumeFromPause(RoundContext, M, trigger = failure_reason,
+                                     pause_cause_candidate_id = CandidateID)   # candidate-scoped resume (F2)
+    # (3) round-state rule (F3): evaluate the security floor, then decide the round state.
     breach <- CALL SecurityFloorEvaluate(RoundContext, latest (H_active, H_honest, q_adv), floor_state)
     IF breach:
-      ENSURE round_state = SECURITY_RECOVERY                # SecurityFloorEvaluate performed the transition
-    ELSE:
-      # E6: SOLUTION_PROPAGATION was entered at the first found-solution; a failed propagation
-      #     returns the round to HASHING so surviving/ resumed miners keep searching.
-      IF round_state = SOLUTION_PROPAGATION: TRANSITION round_state -> HASHING
-      ELSE: ENSURE round_state = HASHING
-    # (2) cancel obsolete events tied to THIS failed candidate so no stale acceptance can fire.
-    CANCEL all pending CertificateArrival / BlockAcceptancePoint events carrying this certificate
-    # (3)-(4) enumerate EVERY PATH-B paused miner and schedule its resume. ResumeFromPause restores
-    #         the paused assignment to CURRENT from its retained actual_frontier, charges wake +
-    #         transition energy, and recomputes H_active/H_honest/H_adversarial/q_adv.
-    FOR EACH miner M with a PAUSED assignment AND entry_stop_reason(M) = VALID_SOLUTION_VERIFIED:
-      SCHEDULE event ResumeFromPause(RoundContext, M, trigger = failure_reason)
-    RETURN resume_scheduled
-  RETURNS: resume_scheduled
-  NOTE: This procedure NEVER accepts a block and NEVER closes the round. It is the sole owner of
-        propagation-failure recovery (E3): it returns the round to HASHING (or SECURITY_RECOVERY on
-        a breach), cancels the failed candidate's obsolete events, and resumes each PATH-B paused
-        miner via ResumeFromPause. A PATH-A exhausted (searched/completed) range is never resumed.
+      # F3 defined rule: a floor breach moves the round to SECURITY_RECOVERY and PRESERVES the
+      #     remaining live candidate contexts in active_propagation_set; on recovery the round
+      #     returns to SOLUTION_PROPAGATION if the set is still non-empty, else to HASHING.
+      ENSURE round_state = SECURITY_RECOVERY                        # SecurityFloorEvaluate performed the transition
+    ELSE IF round_state = SOLUTION_PROPAGATION AND propagation_quiescent(RoundContext):
+      # F3: return to HASHING ONLY when propagation is FULLY quiescent (no block accepted, set empty,
+      #     no same-timestamp acceptance batch pending, no live candidate-specific acceptance event).
+      TRANSITION round_state -> HASHING
+    # ELSE: the round STAYS SOLUTION_PROPAGATION because other candidates are still live (F3).
+    RETURN candidate_failed(CandidateID)
+  RETURNS: candidate_failed
+  NOTE: Candidate-scoped (F2/F3). One candidate's failure NEVER cancels or resumes another
+        candidate's certificate-arrival, block-arrival, acceptance-batch, or timeout events, and
+        NEVER resumes a miner paused by a different live candidate. The round remains
+        SOLUTION_PROPAGATION while any live candidate exists (F3). `propagation_quiescent` is
+        defined in §0.6. No block is accepted and no round is closed here.
 ```
 
 ## 16e. Same-timestamp acceptance arbitration (D6)
@@ -805,58 +1120,70 @@ PROCEDURE AcceptanceTimestampBatch
   PRECONDITIONS: at least one BlockAcceptancePoint(outcome = ACCEPTED_CANDIDATE) event fires at
                  acceptance_timestamp for this acceptance point
   EFFECTS:
-    # D6: (1) gather ALL same-acceptance-point candidate events with EXACTLY this timestamp. Each
-    #     event carries its own (certificate, snapshot) captured at discovery (E1/E2).
+    # D6/F1: (1) gather ALL same-acceptance-point candidate events with EXACTLY this timestamp. Each
+    #     event carries its own CandidateID/PropagationID/certificate/snapshot (E1/E2/F1).
     batch <- all ACCEPTED_CANDIDATE BlockAcceptancePoint events at this acceptance point with
-             timestamp = acceptance_timestamp   # each event c has c.certificate and c.snapshot
+             timestamp = acceptance_timestamp   # each event c has c.CandidateID, c.certificate, c.snapshot
     # (2)-(3) validate every candidate against ITS OWN discovery snapshot; discard invalid.
     valid <- empty
     FOR EACH candidate event c in batch:
       IF CALL ValidateCandidate(RoundContext, c.certificate, c.snapshot): APPEND c to valid   # E1/E2
     IF valid is empty:
-      # E3: no valid candidate -> the SINGLE failure-recovery path (resumes PATH-B paused miners).
-      #     Uses the earliest batch event's (certificate, snapshot) only to label the failure record.
-      RETURN CALL HandlePropagationFailure(RoundContext, batch.first.certificate,
-                                           batch.first.snapshot, failure_reason = NO_VALID_CANDIDATE)
-    # (4) among valid candidates choose smallest candidate_hash, then smallest MinerID.
+      # E3/F2: no valid candidate -> fail EACH batched candidate INDIVIDUALLY (candidate-scoped), so
+      #        each resumes ONLY its own paused miners. No cross-candidate cancellation occurs.
+      FOR EACH candidate event c in batch:
+        CALL HandlePropagationFailure(RoundContext, c.CandidateID, c.PropagationID,
+                                      failure_reason = NO_VALID_CANDIDATE)
+      RETURN no_valid_candidate
+    # (4) among valid candidates choose smallest candidate_hash, then smallest MinerID (F8 deterministic).
     winner <- argmin over valid of (c.certificate.candidate_hash, then c.certificate.MinerID)
-    # (5) record all others as competing/stale.
-    FOR EACH c in valid, c != winner: RECORD competing_valid(c.certificate)
+    # (5) the losing same-timestamp valid candidates become COMPETING (their contexts are handled by
+    #     ValidBlockAccept, which cancels ALL non-winner live contexts and closes the round once, F3).
+    FOR EACH c in valid, c != winner: SET status(context(c.CandidateID)) <- COMPETING
     # (6) ONLY AFTER arbitration finishes: accept + close (no round closure occurs before this).
-    RETURN CALL ValidBlockAccept(RoundContext, winner.certificate, winner.snapshot)
-  RETURNS: accepted_block | not_selected | resume_scheduled
+    RETURN CALL ValidBlockAccept(RoundContext, winner.CandidateID, winner.certificate, winner.snapshot)
+  RETURNS: accepted_block | not_selected | no_valid_candidate
   NOTE: For DIFFERENT timestamps the earliest timestamp wins by discrete-event queue order; this
-        procedure arbitrates ONLY exact-timestamp ties. No event inspects unknown future
-        timestamps; no round closure occurs before same-timestamp arbitration completes. An empty
-        valid batch is a propagation failure (E3), not a silent no-op.
+        procedure arbitrates ONLY exact-timestamp ties (F8 tie-break: candidate_hash then MinerID).
+        An empty valid batch fails each batched candidate candidate-scoped (E3/F2), not as one
+        blanket failure. No round closure occurs before same-timestamp arbitration completes.
 ```
 
 ## 17. Valid block acceptance
 
 ```
 PROCEDURE ValidBlockAccept
-  INPUTS: RoundContext, winner_certificate, winner_snapshot
+  INPUTS: RoundContext, winner_CandidateID, winner_certificate, winner_snapshot
   PRECONDITIONS: invoked ONLY from AcceptanceTimestampBatch after arbitration (D6);
                  winner_certificate already validated by ValidateCandidate against winner_snapshot
                  and chosen as the batch winner;
-                 # E6: the round entered SOLUTION_PROPAGATION at the FIRST valid found-solution
-                 #     (ScheduleSolutionPropagation); acceptance therefore transitions from it.
+                 # E6: the round entered SOLUTION_PROPAGATION at the FIRST valid found-solution.
                  round_state = SOLUTION_PROPAGATION
   EFFECTS:
+    # F3: close the round EXACTLY ONCE. A second entry (a later same-round acceptance) is a no-op.
     IF a block has ALREADY been accepted this round:
-      RECORD competing_valid(winner_certificate)                 # a strictly-earlier timestamp already won
+      SET status(context(winner_CandidateID)) <- COMPETING       # a strictly-earlier timestamp already won
       RETURN not_selected
     RECORD accepted_block(winner_certificate)
+    SET status(context(winner_CandidateID)) <- ACCEPTED
+    # F3: mark EVERY OTHER live context stale/cancelled and cancel THEIR remaining events. The winner
+    #     is excluded. This is the ONE place cross-candidate cancellation is legitimate (acceptance).
+    FOR EACH other cpc in active_propagation_set, other.CandidateID != winner_CandidateID:
+      SET status(other) <- (other was a same-timestamp valid loser ? COMPETING : CANCELLED)
+      CANCEL every event in certificate_arrival_events(other)
+      CANCEL block_arrival_event(other)
+    CLEAR active_propagation_set                                  # no live candidate remains after acceptance
     # E6: a SINGLE transition; the round is already in SOLUTION_PROPAGATION (no double transition).
     TRANSITION round_state -> ROUND_ACCEPTED
-    # D7: centralised round closure (the SINGLE closure path).
+    # D7: centralised round closure (the SINGLE closure path); paused miners of cancelled candidates
+    #     are closed by round closure (ROUND_ACCEPTED), NOT resumed.
     CALL CloseRoundAssignments(RoundContext, disposition = ROUND_ACCEPTED, stop_reason = ROUND_ACCEPTED)
   RETURNS: accepted_block | not_selected
-  NOTE: Earliest arrival is the discrete-event queue order (strictly-earlier timestamps win before
-        this batch); exact-timestamp ties are arbitrated in AcceptanceTimestampBatch; per-candidate
-        validation is done by ValidateCandidate against each candidate's own snapshot (E1/E2). The
-        round entered SOLUTION_PROPAGATION at the first found-solution, so this performs the single
-        SOLUTION_PROPAGATION -> ROUND_ACCEPTED transition (E6). No chain-wide fork-choice proof is claimed.
+  NOTE: F3: acceptance of one candidate sets it ACCEPTED, marks all other live candidates
+        COMPETING/STALE/CANCELLED, cancels their remaining events, and closes the round EXACTLY
+        ONCE. Miners paused by a cancelled candidate are NOT resumed (the round ended); they close
+        with stop_reason = ROUND_ACCEPTED via CloseRoundAssignments. No chain-wide fork-choice proof
+        is claimed.
 ```
 
 ## 17a. Centralised round closure (D7)
@@ -887,19 +1214,23 @@ PROCEDURE CloseRoundAssignments
           # PATH-A holder mid-completion: entry_stop_reason is already RANGE_EXHAUSTED. PRESERVE it.
           ASSERT entry_stop_reason(h) = RANGE_EXHAUSTED
           CLOSE X as round-ended                                 # completed range stays searched/completed
-          TRANSITION miner_state(h) -> LOW_POWER_LISTEN          # finishes PATH A; RANGE_EXHAUSTED NOT overwritten
+          CALL ApplyMinerStateTransition(h, EXHAUSTED_PENDING, LOW_POWER_LISTEN, now,
+                 reason = RANGE_EXHAUSTED, assignment_ref = X, candidate_ref = null)   # T8; RANGE_EXHAUSTED NOT overwritten
 
         CASE LOW_POWER_LISTEN:
           # already parked (PATH-A RANGE_EXHAUSTED, PATH-B VALID_SOLUTION_VERIFIED, or ASSIGNMENT_REVOKED).
           ASSERT entry_stop_reason(h) in {RANGE_EXHAUSTED, VALID_SOLUTION_VERIFIED, ASSIGNMENT_REVOKED}
           CLOSE X as round-ended                                 # a PATH-B PAUSED assignment is NOT resumed
-          # miner_state(h) stays LOW_POWER_LISTEN; entry_stop_reason(h) unchanged (E7)
+          # miner_state(h) stays LOW_POWER_LISTEN; entry_stop_reason(h) unchanged (E7); no transition
 
         CASE WAKING:
           # a pending activation: cancel it; the miner never reaches ACTIVE_HASHING for this round.
-          CANCEL the pending WakeComplete for h
+          # F6/F8: WAKING -> LOW_POWER_LISTEN is ILLEGAL (miner SM §3.1); the legal closure edge is
+          #        WAKING -> OFFLINE (T12), which also prevents activation into a closed round (TV37).
+          CANCEL the pending WakeCompleteEvent for h
           CLOSE X as round-ended                                 # bound PENDING assignment left un-activated
-          TRANSITION miner_state(h) -> LOW_POWER_LISTEN          # park; no entry_stop_reason forced onto the range
+          CALL ApplyMinerStateTransition(h, WAKING, OFFLINE, now, reason = round_closed_while_waking,
+                 assignment_ref = X, candidate_ref = null)       # T12 (legal); miner rejoins next round via T17
 
         CASE REGISTERED OR RESERVE:
           # holds no CURRENT range under this round; nothing to stop and nothing to resume.
@@ -985,15 +1316,17 @@ PROCEDURE CloseTemplateAssignments
         CASE EXHAUSTED_PENDING:
           # PATH-A holder: finish the exhaustion drop (legal T8); entry_stop_reason RANGE_EXHAUSTED kept.
           CLOSE X
-          TRANSITION miner_state(h) -> LOW_POWER_LISTEN                                  # T8
+          CALL ApplyMinerStateTransition(h, EXHAUSTED_PENDING, LOW_POWER_LISTEN, now,
+                 reason = RANGE_EXHAUSTED, assignment_ref = X, candidate_ref = null)     # T8 (F6)
         CASE LOW_POWER_LISTEN:
           # a PAUSED PATH-B assignment is CLOSED (it is NOT resumed under a discarded template).
           CLOSE X
-          # miner_state(h) stays LOW_POWER_LISTEN; entry_stop_reason(h) unchanged
+          # miner_state(h) stays LOW_POWER_LISTEN; entry_stop_reason(h) unchanged; no transition
         CASE WAKING:
           # the bound assignment is on the discarded template -> fails TemplateID validation (legal T12).
-          CANCEL the pending WakeComplete for h ; release the bound range
-          TRANSITION miner_state(h) -> OFFLINE                                           # T12
+          CANCEL the pending WakeCompleteEvent for h ; release the bound range
+          CALL ApplyMinerStateTransition(h, WAKING, OFFLINE, now, reason = template_refresh_wake_abort,
+                 assignment_ref = X, candidate_ref = null)                               # T12 (F6)
         CASE REGISTERED OR RESERVE OR OFFLINE OR DISQUALIFIED:
           # holds no CURRENT assignment under old_TemplateID; nothing to close; state unchanged
           NO-OP
@@ -1024,22 +1357,24 @@ PROCEDURE TemplateRefresh
     #         OFFLINE and DISQUALIFIED miners receive NO assignment; mid-wake WAKING miners are skipped.
     eligible <- { m : miner_state(m) in {REGISTERED, RESERVE, LOW_POWER_LISTEN} }
     FOR EACH miner m in eligible:
-      # E8-(6): a FRESH ORIGINAL assignment over the NEW domain (NOT a reassignment lineage; C5).
-      CREATE assignment(m, fresh_range(m), new_TemplateID, RoundID, new lease window) WITH status = PENDING
-      SET custody_status(fresh_range(m)) <- original
-      SET previous_assignment_reference <- null                 # C5: NOT a reassignment lineage
-      # E8-(7): use the LEGAL per-source-state transition into WAKING (D2: never *->ACTIVE_HASHING directly).
-      SWITCH miner_state(m):
-        CASE REGISTERED:        TRANSITION miner_state(m) -> WAKING     # T3
-        CASE RESERVE:           TRANSITION miner_state(m) -> WAKING     # T4
-        CASE LOW_POWER_LISTEN:  TRANSITION miner_state(m) -> WAKING     # T10 (template-refresh wake trigger)
-      # E8-(8): WakeComplete validates I1/RoundID/new_TemplateID and flips PENDING -> CURRENT (T5).
-      CALL WakeComplete(RoundContext, m, fresh_range(m))
+      # E8-(6)/F4: a FRESH ORIGINAL assignment over the NEW domain via the shared constructor
+      #            (I1 guard + ledger + custody_status = original + previous_assignment_reference = null).
+      assignment_m <- CALL CreatePendingAssignment(RoundContext, m, fresh_range(m),
+                        assignment_origin = ORIGINAL, source_assignment = null, reason = null)
+      SET lease_start(assignment_m)  <- now
+      SET lease_expiry(assignment_m) <- now + default_lease_duration
+      # E8-(7)/F5: the LEGAL per-source edge into WAKING (T3 REGISTERED / T4 RESERVE / T10
+      #            LOW_POWER_LISTEN) is performed by the NON-BLOCKING StartWake; PENDING -> CURRENT
+      #            happens at each miner's own WakeCompleteEvent (T5), so activations wake in parallel.
+      CALL StartWake(RoundContext, m, target_assignment = assignment_m, from_state = miner_state(m))
       # do NOT call RangeReassign for old ranges; do NOT rebind old assignments to new_TemplateID
     ASSERT difficulty unchanged                                 # I12
-    # E8-(9): after the intended assignment set is valid, START the new mining phase EXPLICITLY.
+    # E8-(9)/F5: the intended assignment set is now valid (every eligible miner has a bound PENDING
+    #            assignment on the new domain and its wake is scheduled). START the new mining phase
+    #            EXPLICITLY; miners reach ACTIVE_HASHING at their own later WakeCompleteEvents, never
+    #            before the round is HASHING (§3.2).
     ASSERT round_state = ASSIGNMENT
-    TRANSITION round_state -> HASHING                           # E8: explicit ASSIGNMENT -> HASHING
+    TRANSITION round_state -> HASHING                           # E8: explicit ASSIGNMENT -> HASHING (R4)
   RETURNS: new_TemplateID
   NOTE: Refresh NEVER bypasses TEMPLATE_COMMITMENT (TemplateCommit runs only from it, D8/E8) and
         NEVER reassigns a completed old range -- old assignments are CLOSED via CloseTemplateAssignments
@@ -1079,22 +1414,72 @@ The ONLY `[SIMULATION SAMPLING]` steps in the entire specification are:
    active-state census). `H_honest(t)`, `H_adversarial(t)`, and `H_active(t)` are then computed
    **deterministically** from that census; `H_adversarial(t)` is **never** sampled independently
    after `H_active(t)` (I17).
-3. **WakeComplete** and **ResumeFromPause** — the wake latency draw.
+3. **StartWake** — the wake latency draw (F5). The draw now lives in `StartWake`; the scheduled
+   `WakeCompleteEvent` consumes it deterministically at the completion timestamp. Every activation
+   caller (`RangeAssign`, `ReserveActivate`, `RangeReassign`, `TemplateRefresh`, `ResumeFromPause`)
+   reaches this single draw through `StartWake`.
 4. **ExhaustionAdjudicate** and **FullRangeExhaustNoSolution** — the adversarial-path audit selection
    (`audit_selection_model`) that decides whether a `reported_exhaustion` claim is audited
    against simulator ground truth (`actual_exhaustion`). This is the modeled audit/detection
    abstraction of CR5; the comparison itself (`audit_result`, `claim_accepted_or_rejected`) is
    deterministic once the audit is selected.
 
-The Stage-1E procedures add **no** new sampling site. `ReserveActivate` (E4) and `TemplateRefresh`
-(E8) reach the wake-latency draw ONLY through `WakeComplete` (already item 3); `HandlePropagationFailure`
-(E3), `CloseRoundAssignments` (E7), `CloseTemplateAssignments` (E8), `LeaseExpiry` renewal (E9),
-`ValidateCandidate`/`SelfValidateFoundSolution`/`EarlyStopVerify` (E1/E2), and the acceptance
-cluster (`BlockAcceptancePoint`/`AcceptanceTimestampBatch`/`ValidBlockAccept`, E6) are entirely
-deterministic protocol logic — the discrete-event queue order and the exact-timestamp tie-break
-(`candidate_hash`, then `MinerID`) contain no random draw.
+The Stage-1F procedures add **no** new sampling site. `ApplyMinerStateTransition` (F6),
+`WakeCompleteEvent` (F5), `CreatePendingAssignment` (F4), `CreatePropagationContext` (F1),
+`HandlePropagationFailure` (E3/F2/F3), `RenewAssignment` (F7), the acceptance cluster (E6/F3), and
+the whole event-priority contract (F8) are entirely deterministic protocol logic. The discrete-event
+queue order, the same-timestamp priority table, and the tie-breaks (`candidate_hash` then `MinerID`
+for acceptance; `(CandidateID, MinerID, AssignmentID, seq)` within an event type) contain **no**
+random draw and are independent of data-structure iteration order.
 
 Every other step is deterministic protocol logic. This separation is deliberate: it keeps the
 protocol's decision logic reproducible and audit-checkable against `I1..I17`, while confining
 all randomness to clearly labelled model draws that exist solely because Stage-1 evaluation is
 a simulation and not a real deployment. None of the above is executable source.
+
+---
+
+## 21. Global event-priority contract (F8)
+
+When two or more scheduled events carry the **exact same** `event_time`, they are processed in a
+**deterministic** order fixed by the global event-priority contract (F8). The complete priority
+table, the per-pair race resolutions, and the required-race walkthroughs are in
+`STAGE_01F_EVENT_PRIORITY_TABLE.md`; that document is normative and this section binds to it.
+
+The contract has two levels:
+
+1. **Inter-type priority.** Same-timestamp events of different types fire in this fixed order
+   (highest first), so that no event ever acts on a round/miner/assignment that a
+   higher-priority same-timestamp event has already invalidated:
+
+       1  RoundAbort closure            (ROUND_ABORTED)
+       2  Round-acceptance closure      (ValidBlockAccept -> ROUND_ACCEPTED)
+       3  Same-timestamp acceptance arbitration (AcceptanceTimestampBatch)
+       4  Template invalidation / refresh (TemplateRefresh / CloseTemplateAssignments)
+       5  Security-floor evaluation / breach (SecurityFloorEvaluate)
+       6  Full-block arrival            (BlockAcceptancePoint)
+       7  Certificate arrival           (CertificateArrival)
+       8  Solution discovery            (ActiveHashing hit -> ScheduleSolutionPropagation)
+       9  Range completion              (ActualRangeCompletion / ExhaustionAdjudicate)
+      10  Reported exhaustion           (ReportedExhaustionClaim)
+      11  Lease expiry                  (LeaseExpiry)
+      12  Wake completion               (WakeCompleteEvent)
+      13  Resume-from-pause             (ResumeFromPause)
+      14  Periodic monitoring           (ActiveHashRateUpdate / heartbeat)
+
+2. **Intra-type tie-break.** Events of the SAME type at the SAME timestamp are ordered by
+   `(CandidateID, MinerID, AssignmentID, seq)` lexicographically, where `seq` is the monotonic
+   creation counter of the event envelope (§0.2). Acceptance arbitration additionally uses the
+   value tie-break `candidate_hash` then `MinerID` (D6). No ordering ever depends on
+   data-structure iteration order, so the processing order is identical across reruns (F8).
+
+Consequences enforced by this order (see the table for the full list): a full-block arrival that
+shares a timestamp with a round closure is processed **after** the closure and finds the round
+already closed (so it cannot accept into a closed round); a `WakeCompleteEvent` sharing a timestamp
+with round acceptance is processed **after** the closure and, per `CloseRoundAssignments`, the
+waking miner was already moved to `OFFLINE` (T12), so it never activates into a closed round;
+solution discovery sharing a timestamp with a lease expiry is processed **after** the lease-expiry
+decision, so the discovery is evaluated against the assignment version the priority order has
+established. `ValidateCandidate` still resolves each certificate against its immutable discovery
+snapshot (E1), so these orderings change *which event acts first*, never *whether a validly
+discovered solution stays valid*.

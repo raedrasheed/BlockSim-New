@@ -1,7 +1,8 @@
-# Stage 1 — PoCol Invariant Catalogue (I1..I17)
+# Stage 1 — PoCol Invariant Catalogue (I1..I18)
 
 **Document status:** Stage-1 specification-only. This catalogue DEFINES the numbered
-invariants `I1..I17` of **PoCol** with **the idle policy within PoCol** enabled. Defining an
+invariants `I1..I18` of **PoCol** with **the idle policy within PoCol** enabled (I18 added in
+Stage 1F for immutable assignment versioning). Defining an
 invariant is a specification act. It is NOT a claim that the invariant is implemented,
 enforced in code, validated, or that any security, fairness, or incentive property follows
 from it. At Stage 1 no invariant is experimentally supported.
@@ -298,12 +299,37 @@ point, planned test stage, and consequence of violation.
   security-floor evaluation.
 - **Required inputs.** Per-miner honest/adversarial classification; the per-miner active-state
   census at `t`; per-miner modeled hash rates.
-- **Enforcement point.** Active-hash-rate update step (census-based decomposition), consumed by the
-  security-floor-evaluation step.
+- **Enforcement point.** The central `ApplyMinerStateTransition` hook (Stage 1F, F6) recomputes
+  `H_honest`/`H_adversarial`/`H_active` from the post-transition `ACTIVE_HASHING` census and
+  re-checks this identity at **every** `ACTIVE_HASHING` entry and exit boundary; the periodic
+  `ActiveHashRateUpdate` step supplies the adversarial-participation census draw. Both are consumed
+  by the security-floor-evaluation step.
 - **Planned test stage.** Stage 3 (time-varying hash rate, security floor, reserve activation).
 - **Consequence of violation.** Inconsistent hash-rate decomposition; `q_adv(t)` derived from an
   independently sampled adversarial term; a zero-active-rate regime silently reported as safe
   instead of as a recorded floor breach.
+
+---
+
+### I18 — Exactly one CURRENT version per assignment lineage (Stage 1F, F7).
+
+- **Formal statement.** An assignment is an immutable versioned object with a stable `lineage_id`
+  shared by all its versions. For each `lineage_id`, **exactly one** version has `status = CURRENT`
+  at any instant. A same-range lease renewal is an **atomic** operation that marks the old version
+  `SUPERSEDED` (with `superseded_at`) and publishes a new `CURRENT` version on the SAME range/holder
+  with copied actual/reported/accepted frontiers and provenance; the old version's identity is never
+  mutated in place. Old (`SUPERSEDED`) versions remain immutable and resolvable, so a
+  `SolutionEligibilitySnapshot` taken under an old version resolves to that exact version.
+- **Scope.** Range-lease renewal; assignment versioning; discovery-snapshot resolution. This is an
+  internal structural consistency invariant; it introduces no new consensus feature.
+- **Required inputs.** The assignment version ledger keyed by `(lineage_id, assignment_version)`;
+  per-version `status`; the renewal timestamp.
+- **Enforcement point.** `RenewAssignment` (the atomic supersede-and-publish); `ValidateCandidate`
+  resolves each snapshot's `(AssignmentID, assignment_version)` to its immutable version.
+- **Planned test stage.** Stage 4 (leases, reassignment, renewal).
+- **Consequence of violation.** Two CURRENT versions in one lineage (ambiguous acceptance target);
+  or a renewal that mutates identity in place, invalidating an already-discovered solution's snapshot
+  and violating E1.
 
 ---
 
@@ -328,7 +354,8 @@ point, planned test stage, and consequence of violation.
 | I14 | Zero-block outcomes retained | Stage 8 (+7) | results recording |
 | I15 | Undefined block-normalised metrics are NA | Stage 8 | metrics computation |
 | I16 | Floor breaches recorded, never silently repaired | Stage 3 (+5/8) | floor eval + recording |
-| I17 | H_active = H_honest + H_adversarial (census-deterministic); q_adv NA at zero active rate | Stage 3 | active-hash-rate decomposition |
+| I17 | H_active = H_honest + H_adversarial (census-deterministic; recomputed at every ACTIVE_HASHING boundary via ApplyMinerStateTransition, F6); q_adv NA at zero active rate | Stage 3 | central transition hook + active-hash-rate decomposition |
+| I18 | Exactly one CURRENT version per assignment lineage; renewal is atomic supersede-and-publish (F7) | Stage 4 | RenewAssignment / version ledger |
 
 No invariant above is asserted to hold in any implementation at Stage 1; each is a
 specification target with a planned verification stage.

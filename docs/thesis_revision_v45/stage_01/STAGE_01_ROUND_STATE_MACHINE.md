@@ -135,13 +135,30 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
      certificate **continue hashing** (they remain in `ACTIVE_HASHING` and in `H_active(t)`),
      and `ActiveHashing` is permitted in `{HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY}`;
   3. **further candidate solutions may still be found and scheduled** during
-     `SOLUTION_PROPAGATION`;
-  4. a rejected/unavailable/timed-out full block returns the round `SOLUTION_PROPAGATION →
-     HASHING` (R7), or `SOLUTION_PROPAGATION → SECURITY_RECOVERY` (R8) on a coincident floor
-     breach — via the single `HandlePropagationFailure` handler;
+     `SOLUTION_PROPAGATION`; each gets its OWN `CandidatePropagationContext` and joins the
+     `active_propagation_set` (F1/F3);
+  4. a rejected/unavailable/timed-out full block, or an empty valid acceptance batch, fails ONLY
+     that candidate (candidate-scoped `HandlePropagationFailure`, F2); the round returns
+     `SOLUTION_PROPAGATION → HASHING` (R7) **only when `active_propagation_set` becomes empty and
+     no acceptance batch / candidate acceptance event remains** (`propagation_quiescent`, F3), or
+     `SOLUTION_PROPAGATION → SECURITY_RECOVERY` (R8) on a coincident floor breach (which PRESERVES
+     the remaining live contexts);
   5. accepted same-timestamp arbitration transitions `SOLUTION_PROPAGATION → ROUND_ACCEPTED`
-     (R6) in a **single** step (the round is already in `SOLUTION_PROPAGATION`, so acceptance
-     performs no `HASHING → SOLUTION_PROPAGATION` transition of its own).
+     (R6) in a **single** step (the round is already in `SOLUTION_PROPAGATION`); acceptance of one
+     candidate marks every OTHER live candidate `COMPETING`/`STALE`/`CANCELLED`, cancels their
+     remaining events, and closes the round **exactly once** (F3).
+- **Active propagation set (F3).** `active_propagation_set` holds every live
+  `CandidatePropagationContext`. The round is `SOLUTION_PROPAGATION` **iff** the set is non-empty
+  (or a same-timestamp acceptance batch / a live candidate acceptance event remains). Failure of one
+  candidate removes ONLY that candidate; the round stays `SOLUTION_PROPAGATION` while any other
+  candidate is live. One candidate's failure never cancels another candidate's certificate-arrival,
+  block-arrival, acceptance-batch, or timeout events, and never resumes a miner paused by a
+  different live candidate (F2).
+- **Same-timestamp event priority (F8).** When events share a timestamp, they fire in the
+  deterministic order of `STAGE_01F_EVENT_PRIORITY_TABLE.md` (round closure before block arrival
+  before certificate arrival before discovery, etc.), with intra-type ties broken by
+  `(CandidateID, MinerID, AssignmentID, seq)` — never by iteration order. This makes the round-state
+  evolution reproducible across reruns.
 - **Miner-state note (CR2).** While a round is in `SOLUTION_PROPAGATION`, certificate
   verification does **not** remove verifying miners from `ACTIVE_HASHING` or from `H_active(t)`:
   each miner remains in `ACTIVE_HASHING` and continues hashing until it has itself completed all
@@ -180,13 +197,15 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
   exhausted. No chain-wide fork-choice proof is claimed.
 - **Entry condition.** From `HASHING` when a miner submits a candidate digest satisfying the
   target.
-- **Exit condition(s).** To `ROUND_ACCEPTED` when the solution validates (I2 ∧ I3 hold and
-  target is satisfied) and the full block is accepted at the **modeled acceptance point**; back
-  to `HASHING` if the candidate is
-  invalid or withheld, or the full block is rejected or times out — in which case stopped
-  (PATH-B paused) miners wake and resume from their retained `actual_frontier` (T30 → T5) and
-  searching continues; to `SECURITY_RECOVERY` if invalidation coincides with a
-  security-floor breach.
+- **Exit condition(s).** To `ROUND_ACCEPTED` when a candidate validates (I2 ∧ I3 hold and target is
+  satisfied) and its full block is accepted at the **modeled acceptance point** (acceptance marks
+  all other live candidates COMPETING/STALE/CANCELLED and closes the round exactly once, F3); back
+  to `HASHING` **only when `propagation_quiescent` holds** — i.e. no block was accepted,
+  `active_propagation_set` is empty, no same-timestamp acceptance batch is pending, and no live
+  candidate-specific acceptance event remains (F3) — in which case the PATH-B miners paused by the
+  failed candidates have already resumed candidate-scoped (T30 → T5); to `SECURITY_RECOVERY` if a
+  floor breach coincides, preserving the remaining live candidate contexts. A single candidate's
+  failure does **not** exit `SOLUTION_PROPAGATION` while other candidates are still live (F3).
 
 ### 2.7 `ROUND_ACCEPTED`
 
@@ -389,9 +408,9 @@ the notes and specified in `STAGE_01_MINER_STATE_MACHINE.md`.
 | R3 | `TEMPLATE_COMMITMENT` | TemplateCommitted | Immutable template finalised; difficulty fixed (I12) | Publish `TemplateID` | `ASSIGNMENT` | Template content frozen until `TEMPLATE_REFRESH` |
 | R4 | `ASSIGNMENT` | AssignmentSetValid | Ranges pairwise disjoint (I1), bound to `RoundID`+`TemplateID` (I3), leased with `lease_start`/`lease_expiry` | Distribute range leases; emit assignment offers | `HASHING` | Emits miner offers → `REGISTERED/RESERVE/… → WAKING → ACTIVE_HASHING`; hashing may begin (§3.2–3.3) |
 | R5 | `HASHING` | CandidateSolution | A submitted digest satisfies the fixed target | Begin propagation/validation | `SOLUTION_PROPAGATION` | Validation checks I2 (in signer's assignment) and I3 (current round/template) |
-| R6 | `SOLUTION_PROPAGATION` | SolutionValid | Target satisfied AND I2 ∧ I3 hold AND full block accepted at the **modeled acceptance point** after it arrives and validates (never at solution-discovery) | Accepted-block handling: record block, credit solver, close round | `ROUND_ACCEPTED` | Solver is the `ACTIVE_HASHING` miner whose assignment contained the solution (I2); competing valid solutions resolved by earliest valid arrival established by the discrete-event queue, exactly-equal acceptance timestamps by `candidate_hash` then `MinerID` (§3.13, CR6, C6); all remaining assignments — including PATH-B paused miners in `LOW_POWER_LISTEN` — close because the **round ended** (`stop_reason = ROUND_ACCEPTED`), NOT because their ranges were exhausted (CR-B1, CR-B9) |
-| R7 | `SOLUTION_PROPAGATION` | SolutionInvalidOrWithheld | Candidate fails validation or was not propagated; floor still satisfied | Discard candidate; resume searching | `HASHING` | Withheld/invalid solution does not advance the round (§3.8) |
-| R8 | `SOLUTION_PROPAGATION` | InvalidWithFloorBreach | Candidate invalid AND `H_honest(t)` below floor | Enter remediation | `SECURITY_RECOVERY` | Coverage shortfall handled by reserve activation |
+| R6 | `SOLUTION_PROPAGATION` | SolutionValid | Target satisfied AND I2 ∧ I3 hold AND full block accepted at the **modeled acceptance point** after it arrives and validates (never at solution-discovery) | `ValidBlockAccept`: record block, credit solver; mark every OTHER live candidate COMPETING/STALE/CANCELLED and cancel their events; close round **exactly once** (F3) | `ROUND_ACCEPTED` | Solver is the `ACTIVE_HASHING` miner whose assignment contained the solution (I2); competing valid solutions resolved by earliest valid arrival (discrete-event queue), exactly-equal acceptance timestamps by `candidate_hash` then `MinerID` (§3.13, CR6, C6, F8); all remaining assignments — including PATH-B paused miners and cancelled-candidate finders in `LOW_POWER_LISTEN` — close because the **round ended** (`stop_reason = ROUND_ACCEPTED`), NOT because their ranges were exhausted and NOT resumed (CR-B1, CR-B9, F3) |
+| R7 | `SOLUTION_PROPAGATION` | PropagationQuiescent | A candidate failed (invalid/withheld/rejected/timeout/empty-batch) AND, after candidate-scoped `HandlePropagationFailure`, `propagation_quiescent` holds — `active_propagation_set` empty, no acceptance batch pending, no live candidate acceptance event, no block accepted (F3); floor still satisfied | Return to searching; the PATH-B miners paused by the failed candidate(s) have already resumed candidate-scoped (T30 → T5) | `HASHING` | The round returns to `HASHING` ONLY when quiescent; a single candidate's failure while others remain live does NOT fire R7 (F3, §3.8) |
+| R8 | `SOLUTION_PROPAGATION` | InvalidWithFloorBreach | A candidate failed AND `H_honest(t)` below floor | Enter remediation; PRESERVE the remaining live candidate contexts in `active_propagation_set` (F3 defined rule) | `SECURITY_RECOVERY` | Coverage shortfall handled by reserve activation; on recovery the round returns to `SOLUTION_PROPAGATION` if the set is still non-empty, else to `HASHING` |
 | R9 | `HASHING` | AllActiveRangesExhausted | Every active range reached accepted exhaustion (I4/I8a; PATH A) and `EXHAUSTED_PENDING`; the I8a ledger shows the entire assigned domain as accepted searched coverage with no `active_unsearched`/`inactive_unsearched` remaining | Close current template's search | `ROUND_EXHAUSTED` | Only accepted exhaustion counts, reported coverage alone is insufficient (§3.5, §3.9, C9) |
 | R10 | `HASHING` | SecurityFloorViolation | Modeled `H_honest(t)` below the security floor, or invariant-risk detected | Trigger reserve activation | `SECURITY_RECOVERY` | Emits miner activation → `RESERVE → WAKING` (T4), `LOW_POWER_LISTEN → WAKING` (T10) |
 | R11 | `HASHING` | RefreshTrigger | A superseding immutable template is available | Prepare template replacement | `TEMPLATE_REFRESH` | Refresh is the only way mined content changes (§3.11) |
