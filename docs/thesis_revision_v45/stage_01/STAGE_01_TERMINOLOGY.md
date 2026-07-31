@@ -322,3 +322,34 @@ Catalogue" denotes the separate document defining I1..I19.
   `event_time`, assigns `event_creation_seq`, applies the delta-cycle forward rule, attaches
   `RoundID`/`TemplateID` and the candidate envelope fields, and inserts by the deterministic total-order
   key. Every `SCHEDULE` in the specification is shorthand for a `ScheduleEvent` call.
+
+## Stage-1K terminology addendum (core-handoff closure)
+
+- **Complete next-round eligibility (K1).** `PrepareParticipantsForNewRound` gives EVERY parked
+  `LOW_POWER_LISTEN` miner an explicit next-round disposition for all five stop reasons; a
+  `VALID_SOLUTION_VERIFIED` finder/recipient is archived, its old head confirmed CLOSED, and re-assigned
+  a fresh `ORIGINAL` under the NEW `RoundID`/`TemplateID` via T10 (never reopening a PAUSED/CLOSED head).
+- **`CompleteAssignmentPhase` (K2).** The named procedure that performs the executable `ASSIGNMENT →
+  HASHING` transition (R4) after the intended assignment set is built; a `HashWorkEvent` is a no-op while
+  the round is still `ASSIGNMENT`.
+- **Cross-round residency rebase (`FinalizeRoundResidency`/`BeginRoundResidency`, K3).** A state that
+  persists across a round boundary is closed for the old round and reopened at the IDENTICAL
+  `boundary_time` for the new round with NO transition energy; the idle interval is counted exactly once
+  (I19 amended).
+- **`DriverEventEnvelope` (K4).** The explicit `(event_time, delta_cycle, event_seq)` a sim-driver
+  transition carries so it is never ambient; sourced from `ScheduleEvent` or stamped from the
+  `EventQueueContext`.
+- **Applied-transition registry (K5).** A `TransitionEventID` enters `applied_transition_registry` ONLY
+  inside `ApplyMinerStateTransition`'s atomic apply; a suppressed replay or a rejected (stale/illegal/
+  malformed) transition is never registered — rejections go to `transition_rejection_log`.
+- **Canonical lease termination (`termination_reason`, K6).** Lease expiry closes the CURRENT version
+  canonically (`status = CLOSED`, `custody_status = expired`, `termination_reason = lease_expiry`); there
+  is NO undefined `INVALIDATE` state. `SUPERSEDED` remains renewal-only; I18a/I18b hold throughout.
+- **`CaptureSecurityCensusOnApplicabilityEntry` (K7).** The second coherent writer of the security
+  census; invoked on entry to `HASHING` (by `CompleteAssignmentPhase`) and `SOLUTION_PROPAGATION`, it
+  writes a coherent dirty+latest even when no miner boundary occurred (e.g. `H_active = 0`), so the
+  epilogue evaluates the floor. It never runs while the round is `ASSIGNMENT`.
+- **`EventQueueContext` (K8).** The single explicit dispatch/scheduling state (`event_queue`,
+  `current_event_time`, `current_delta_cycle`, `current_microphase`, `event_creation_seq`,
+  `finalised_event_times`). `ScheduleEvent` DERIVES the target `delta_cycle` from it; a caller supplies
+  only `event_time` + `microphase` and cannot override `delta_cycle`.

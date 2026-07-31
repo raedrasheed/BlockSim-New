@@ -360,7 +360,7 @@ replaced by two consistent invariants** (the old form was impossible while a lin
 
 ---
 
-### I19 — State-residency time has a single owner and is never double-counted (H7).
+### I19 — State-residency time has a single owner and is never double-counted (H7; cross-round continuity K3).
 
 - **Formal statement.** For every miner and every occupancy of a state, the residency duration
   `t_<state>` (including `t_ACTIVE_HASHING = t_hash`) is produced **exactly once**, by the single
@@ -371,6 +371,12 @@ replaced by two consistent invariants** (the old form was impossible while a lin
   once (at the boundary) and never a second time per hash unit. For each `(miner, state occupancy)`
   the sum of all recorded residency contributions equals the single boundary-to-boundary interval,
   and these intervals partition the miner's timeline with the state-energy accounting of I5/I6.
+  **Cross-round continuity (K3, amended):** a state that PERSISTS across a round boundary is NOT reset
+  silently; the round boundary is a bookkeeping REBASE — `FinalizeRoundResidency(boundary_time)` closes
+  the open interval (attributing its energy to the OLD round) and `BeginRoundResidency(boundary_time)`
+  reopens the SAME state at the IDENTICAL `boundary_time` for the new round, charging NO transition
+  energy (the miner state did not change). The idle interval between a round's closure and the next
+  round's `StartWake` is therefore counted **exactly once**, across the boundary.
 - **Scope.** Per-miner residency-time accounting; the `ACTIVE_HASHING`/`t_hash` boundary in
   particular; the interaction between event-scheduled hashing (G9) and residency accrual. A
   structural accounting invariant; it introduces no new consensus feature and does not change the
@@ -380,7 +386,9 @@ replaced by two consistent invariants** (the old form was impossible while a lin
   the per-state power levels `P_<state>`; the ordered `ApplyMinerStateTransition` boundaries.
 - **Enforcement point.** `ApplyMinerStateTransition` (SOLE residency owner — opens/closes every
   interval, H7); `HashWorkEvent` (records metadata only, increments no `t_<state>` — H7/G9);
-  `residency_ledger` (single writer). I5/I6 reconcile the resulting durations and energies.
+  `FinalizeRoundResidency`/`BeginRoundResidency` (the ONLY cross-round rebase — no-state-change
+  close+reopen at the identical boundary_time, K3); `residency_ledger` (single writer). I5/I6 reconcile
+  the resulting durations and energies.
 - **Planned test stage.** Stage 3 (state-residency and energy accounting).
 - **Consequence of violation.** The same `ACTIVE_HASHING` interval charged twice (once at the
   boundary and again per hash unit), inflating `t_hash`/`E_hash`; a residency time written by two
