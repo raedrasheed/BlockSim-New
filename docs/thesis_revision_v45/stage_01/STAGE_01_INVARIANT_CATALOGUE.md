@@ -1,9 +1,10 @@
-# Stage 1 — PoCol Invariant Catalogue (I1..I18)
+# Stage 1 — PoCol Invariant Catalogue (I1..I19)
 
 **Document status:** Stage-1 specification-only. This catalogue DEFINES the numbered
-invariants `I1..I18` of **PoCol** with **the idle policy within PoCol** enabled (I18 added in
+invariants `I1..I19` of **PoCol** with **the idle policy within PoCol** enabled (I18 added in
 Stage 1F for immutable assignment versioning; in Stage 1G, I2 is corrected to discovery-time
-eligibility (G1) and I18 is split into the consistent pair I18a/I18b (G2)). Defining an
+eligibility (G1) and I18 is split into the consistent pair I18a/I18b (G2); in Stage 1H, I19 is
+added for single-owner, no-double-count state-residency accounting (H7)). Defining an
 invariant is a specification act. It is NOT a claim that the invariant is implemented,
 enforced in code, validated, or that any security, fairness, or incentive property follows
 from it. At Stage 1 no invariant is experimentally supported.
@@ -307,9 +308,12 @@ point, planned test stage, and consequence of violation.
   census at `t`; per-miner modeled hash rates.
 - **Enforcement point.** The central `ApplyMinerStateTransition` hook (Stage 1F, F6) recomputes
   `H_honest`/`H_adversarial`/`H_active` from the post-transition `ACTIVE_HASHING` census and
-  re-checks this identity at **every** `ACTIVE_HASHING` entry and exit boundary; the periodic
-  `ActiveHashRateUpdate` step supplies the adversarial-participation census draw. Both are consumed
-  by the security-floor-evaluation step.
+  re-checks this identity at **every** `ACTIVE_HASHING` entry and exit boundary. Every
+  adversarial-participation change is carried by a scheduled `AdversarialParticipationChangeEvent`
+  (G3/H6) that mutates the census ONLY through this hook; `ActiveHashRateUpdate` is **compute-only**
+  (no sampling, no census mutation — G3). The single settled-census `FinalizeTimestampSecurityCensus`
+  (H3) reads the FINAL census once per settled timestamp and invokes `SecurityFloorEvaluate` exactly
+  once; no per-transition floor decision is scheduled.
 - **Planned test stage.** Stage 3 (time-varying hash rate, security floor, reserve activation).
 - **Consequence of violation.** Inconsistent hash-rate decomposition; `q_adv(t)` derived from an
   independently sampled adversarial term; a zero-active-rate regime silently reported as safe
@@ -348,6 +352,35 @@ replaced by two consistent invariants** (the old form was impossible while a lin
 
 ---
 
+### I19 — State-residency time has a single owner and is never double-counted (H7).
+
+- **Formal statement.** For every miner and every occupancy of a state, the residency duration
+  `t_<state>` (including `t_ACTIVE_HASHING = t_hash`) is produced **exactly once**, by the single
+  `residency_ledger` owned by `ApplyMinerStateTransition`, which opens the interval at the entry
+  boundary and closes it at the exit boundary and accrues `P_<state> · (t_exit − t_entry)`. No other
+  procedure increments any `t_<state>`: in particular a `HashWorkEvent` records hash-work **metadata
+  only** and adds **zero** duration, so the elapsed time of an `ACTIVE_HASHING` occupancy is counted
+  once (at the boundary) and never a second time per hash unit. For each `(miner, state occupancy)`
+  the sum of all recorded residency contributions equals the single boundary-to-boundary interval,
+  and these intervals partition the miner's timeline with the state-energy accounting of I5/I6.
+- **Scope.** Per-miner residency-time accounting; the `ACTIVE_HASHING`/`t_hash` boundary in
+  particular; the interaction between event-scheduled hashing (G9) and residency accrual. A
+  structural accounting invariant; it introduces no new consensus feature and does not change the
+  A1 baseline (`8.420833333 kWh`) — any energy change is attributable ONLY to reduced active
+  power-time, never to a change in how time is counted.
+- **Required inputs.** The `residency_ledger` interval log keyed by `(MinerID, state, entry_time)`;
+  the per-state power levels `P_<state>`; the ordered `ApplyMinerStateTransition` boundaries.
+- **Enforcement point.** `ApplyMinerStateTransition` (SOLE residency owner — opens/closes every
+  interval, H7); `HashWorkEvent` (records metadata only, increments no `t_<state>` — H7/G9);
+  `residency_ledger` (single writer). I5/I6 reconcile the resulting durations and energies.
+- **Planned test stage.** Stage 3 (state-residency and energy accounting).
+- **Consequence of violation.** The same `ACTIVE_HASHING` interval charged twice (once at the
+  boundary and again per hash unit), inflating `t_hash`/`E_hash`; a residency time written by two
+  owners; or an energy figure whose reduction is mis-attributed to double-counted time rather than
+  to reduced active power-time.
+
+---
+
 ## Cross-reference summary
 
 | ID | one-line statement | primary test stage | primary enforcement point |
@@ -372,6 +405,7 @@ replaced by two consistent invariants** (the old form was impossible while a lin
 | I17 | H_active = H_honest + H_adversarial (census-deterministic; recomputed at every ACTIVE_HASHING boundary via ApplyMinerStateTransition, F6); q_adv NA at zero active rate | Stage 3 | central transition hook + active-hash-rate decomposition |
 | I18a | At most one CURRENT version per lineage; zero CURRENT is legal (G2) | Stage 4 | RenewAssignment / version ledger |
 | I18b | Every OPEN lineage has exactly one live head in {PENDING, CURRENT, PAUSED}; zero after closure; renewal atomic at renewal_time (G2) | Stage 4 | RenewAssignment / CreatePendingAssignment |
+| I19 | State-residency time (incl. t_ACTIVE_HASHING = t_hash) has a single owner (residency_ledger via ApplyMinerStateTransition) and is never double-counted; HashWorkEvent adds zero duration (H7) | Stage 3 | central transition hook / residency_ledger |
 
 No invariant above is asserted to hold in any implementation at Stage 1; each is a
 specification target with a planned verification stage.

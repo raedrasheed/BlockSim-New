@@ -46,15 +46,19 @@ a blocking call that occupies the loop; it is represented by SCHEDULING a future
 Concurrency is modeled by many independent future events, not by parallel handlers, so two miners
 "doing something at once" are two independently scheduled events, each firing at its own timestamp.
 
-**(0.2) Event envelope (F1).** Every scheduled event carries an immutable envelope:
+**(0.2) Event envelope (F1, extended with `delta_cycle` and `microphase` in H2).** Every scheduled
+event carries an immutable envelope:
 
-    { event_type, event_time, RoundID, TemplateID,
+    { event_type, event_time, delta_cycle, microphase, RoundID, TemplateID,
       CandidateID?, PropagationID?, MinerID?, AssignmentID?, assignment_version?, seq }
 
 `CandidateID` and `PropagationID` are REQUIRED on every certificate-arrival, block-arrival,
-validation, timeout, cancellation, and resume event. `seq` is a strictly monotonic per-run
-creation counter used ONLY as the final deterministic tie-break (F8). A propagation context is
-NEVER identified by `RoundID` alone.
+validation, timeout, cancellation, and resume event. `microphase` is the target microphase (§0.7);
+`delta_cycle` is the causal generation within one `event_time` (H2). Events are ordered by the total
+key `(event_time, delta_cycle, microphase, stable_tie_key, seq)`, where `stable_tie_key =
+(CandidateID, MinerID, AssignmentID)` and `seq` is a strictly monotonic per-run creation counter used
+ONLY as the final deterministic tie-break. A propagation context is NEVER identified by `RoundID`
+alone.
 
 **(0.3) Central miner-state hook (F6).** No procedure mutates `miner_state` directly. Every
 miner-state change is performed by `ApplyMinerStateTransition`, the SOLE owner of residency
@@ -99,18 +103,35 @@ candidate; the round stays in propagation while any other candidate is live. **T
 the propagation set are NOT identified**: `SECURITY_RECOVERY` may coexist with a non-empty
 `active_propagation_set` (G8), and there is no "iff" forbidding that coexistence.
 
-**(0.7) Timestamp microphase contract (G5, replacing the F8 priority sequence).** At each
-`event_time` the loop processes events in explicit **microphases** (full contract in
-`STAGE_01G_EVENT_MICROPHASE_SPEC.md`): PHASE 1 terminal abort / previously-committed closure; PHASE 2
-template invalidation/refresh; PHASE 3 collect ALL full-block arrivals at this timestamp into
-`acceptance_batch_registry` (each `BlockAcceptancePoint` only REGISTERS and returns); PHASE 4 run
-`AcceptanceBatchFinalize` exactly once per (timestamp, acceptance point) — validate all collected
-candidates, select a winner, commit acceptance and close the round ATOMICALLY; PHASE 5 security-floor
-evaluation (with the terminal-round guard, G10); PHASE 6+ certificate arrivals, solution-discovery,
-range completion, reported exhaustion, lease expiry, wake completion, resume, periodic monitoring.
-Round-acceptance closure is NOT an independent event that precedes arbitration — it is the atomic
-result of `AcceptanceBatchFinalize`. Within a microphase, ties break by the deterministic key
-`(CandidateID, MinerID, AssignmentID, seq)` (G7), NEVER by data-structure iteration order.
+**(0.7) Timestamp microphase contract (authoritative: `STAGE_01G_EVENT_MICROPHASE_SPEC.md`; extended
+in H2).** At each `event_time` the loop processes events in explicit **microphases**: PHASE 1 terminal
+abort / previously-committed closure; PHASE 2 template invalidation/refresh; PHASE 3 collect ALL
+full-block arrivals into `acceptance_batch_registry` (each `BlockAcceptancePoint` only REGISTERS and
+returns); PHASE 4 run `AcceptanceBatchFinalize` exactly once per (timestamp, acceptance point) —
+validate all collected candidates, select a winner, commit acceptance and close the round ATOMICALLY;
+PHASE 5 the SINGLE settled-census security evaluation (`FinalizeTimestampSecurityCensus` →
+`SecurityFloorEvaluate`, H3, terminal/source-guarded, G10/H4); PHASE 6+ certificate arrivals,
+solution-discovery, range completion, reported exhaustion, lease expiry, wake completion, resume,
+periodic monitoring. Round-acceptance closure is the atomic result of `AcceptanceBatchFinalize`, not
+an independent preceding event. **The authoritative same-timestamp contract is
+`STAGE_01G_EVENT_MICROPHASE_SPEC.md`, extended by the H2 delta-cycle rule below; the frozen Stage-1F
+`STAGE_01F_EVENT_PRIORITY_TABLE.md` is NOT authoritative.**
+
+**(0.7-H2) Delta-cycle scheduling (no backward travel within a timestamp).** A handler running in
+microphase `m` of `(event_time, delta_cycle = k)` may create same-`event_time` events; to keep
+scheduling CAUSALLY FORWARD it obeys:
+  1. an event whose target `microphase > m` is scheduled in the CURRENT `delta_cycle = k`;
+  2. an event whose target `microphase <= m` (same or earlier microphase) is scheduled in
+     `delta_cycle = k + 1` (never backward into a phase of cycle `k`);
+  3. the loop completes ALL microphases of `delta_cycle k` before processing any event of
+     `delta_cycle k + 1` at the same `event_time`;
+  4. no event may travel backward into a completed `delta_cycle`.
+This rule governs, in particular: `FinalizeTimestampSecurityCensus`/`SecurityFloorEvaluate` scheduled
+from miner transitions (H3); a zero-latency `WakeCompleteEvent` (H5); `ResumeFromPause`; candidate-
+failure cleanup (`HandlePropagationFailure` and its scheduled resumes); and ANY same-`event_time`
+event created inside another handler. The full contract, worked examples, and the required-race table
+are in `STAGE_01H_DELTA_CYCLE_CONTRACT.md`. Within a microphase, ties break by
+`(CandidateID, MinerID, AssignmentID, seq)`, NEVER by data-structure iteration order.
 
 **(0.7a) Deterministic identifiers and iteration (G7).** `CandidateID` and `PropagationID` are
 DETERMINISTIC, not random: `CandidateID = (RoundID, candidate_discovery_seq)` and
@@ -123,10 +144,13 @@ identical across reruns with the same seeds and inputs.
 
 **(0.7b) Event-scheduled hashing (G9).** Hashing is modeled by discrete `HashWorkEvent`s
 (`StartHashing` / `HashWorkEvent` / `ScheduleNextHashWork`), NOT by a blocking `WHILE` loop. Each
-`HashWorkEvent` evaluates one candidate position or one explicitly bounded chunk, accounts residency
-by elapsed event time, may emit a candidate or range-completion event, then schedules the next
-`HashWorkEvent` and returns to the loop. A pending `HashWorkEvent` becomes a no-op (or is cancelled)
-once its miner is no longer `ACTIVE_HASHING` or its exact assignment version is no longer `CURRENT`.
+`HashWorkEvent` evaluates one candidate position or one explicitly bounded chunk, records hash-work
+METADATA only, may emit a candidate or range-completion event, then schedules the next `HashWorkEvent`
+and returns to the loop. It does **not** increment any state-residency time: `t_ACTIVE_HASHING =
+t_hash` is owned SOLELY by `ApplyMinerStateTransition`'s `residency_ledger` and is computed once when
+the `ACTIVE_HASHING` interval is closed at its boundary (H7/I19), never accumulated per hash unit. A
+pending `HashWorkEvent` becomes a no-op (or is cancelled) once its miner is no longer `ACTIVE_HASHING`
+or its exact assignment version is no longer `CURRENT`.
 
 **(0.7c) Terminal-round security guard (G10).** `SecurityFloorEvaluate` is always SCHEDULED (never
 called inline) and carries `(RoundID, TemplateID, state_version)`. It returns `stale_noop` — never
@@ -167,6 +191,12 @@ STRUCTURE RoundContext registries (initialised by RoundInitialise, cleared on cl
   candidate_discovery_seq     : monotonic per-round counter for CandidateID (G7)
   block_accepted              : boolean flag, false until a block is accepted this round
   state_version               : monotonic round-state epoch, bumped on every round-state transition (G10)
+  security_evaluation_required : per (event_time, delta_cycle) boolean flag set by ApplyMinerStateTransition
+                                 when a miner-state boundary changed the ACTIVE_HASHING census (H3); cleared
+                                 by FinalizeTimestampSecurityCensus. NO per-transition floor decision is scheduled.
+  residency_ledger            : the SOLE owner of every per-miner state-residency duration t_<state>,
+                                 including t_ACTIVE_HASHING = t_hash (H7). Only ApplyMinerStateTransition
+                                 opens/closes residency intervals; no other procedure increments a t_<state>.
 
 STRUCTURE Assignment (immutable version object)   # F7: renewal makes a NEW version; never mutate in place
   AssignmentID                : identity of THIS version (immutable once created)
@@ -224,13 +254,21 @@ PROCEDURE ApplyMinerStateTransition
     IF H_active(event_time) = 0: SET q_adv(event_time) <- NA             # I17: undefined at zero
     ELSE:                        SET q_adv(event_time) <- H_adversarial(event_time) / H_active(event_time)
     RECORD transition_audit(MinerID, old_state, new_state, event_time, reason, assignment_ref, candidate_ref)
-    # (7) schedule (do NOT inline) the security-floor evaluation for this boundary.
-    SCHEDULE event SecurityFloorEvaluate(RoundContext, event_time, (H_active, H_honest, q_adv), floor_state)
+    # current_delta_cycle is the delta-cycle of the event being dispatched (§0.2/§0.7-H2); every caller
+    # passes event_time = now, so (event_time, current_delta_cycle) is exactly the settling timestamp.
+    RECORD intermediate_census_for_audit(event_time, current_delta_cycle, (H_active, H_honest, H_adversarial, q_adv))  # H3: audit only
+    # (7) H3: do NOT schedule an independent floor decision for THIS transition. Instead flag that a
+    #     single settled-census evaluation is required for this (event_time, current_delta_cycle); ONE
+    #     FinalizeTimestampSecurityCensus runs after all same-time state changes settle. The
+    #     intermediate census above is recorded for audit but NEVER triggers a round-state transition.
+    IF this transition changed the ACTIVE_HASHING census:
+      SET security_evaluation_required[(event_time, current_delta_cycle)] <- true
   RETURNS: transition_record
-  NOTE: This is the ONLY writer of miner_state (0.3). It recomputes H_active/H_honest/H_adversarial
-        and re-checks I17 at EVERY ACTIVE_HASHING boundary (entry and exit). It never SAMPLES a hash
-        rate; the adversarial active-census draw remains solely in ActiveHashRateUpdate. Duplicate
-        suppression makes concurrent handlers that reference the same transition safe.
+  NOTE: This is the ONLY writer of miner_state (0.3) and the SOLE owner of state-residency time
+        t_<state> including t_ACTIVE_HASHING = t_hash (H7). It recomputes H_active/H_honest/H_adversarial
+        and re-checks I17 at EVERY ACTIVE_HASHING boundary. It never SAMPLES a hash rate and never
+        schedules a per-transition floor decision (H3): it only sets security_evaluation_required for
+        the settled-census evaluation. Duplicate suppression makes concurrent handlers safe.
 ```
 
 ### 0.10 Event-scheduled wake (F5)
@@ -248,9 +286,21 @@ PROCEDURE StartWake
     # ---- [SIMULATION SAMPLING] ----
     wake_latency <- [SIMULATION SAMPLING] wake_latency_model(MinerID)    # the ONLY wake draw (sampling summary item 3)
     # ---- deterministic protocol logic ----
-    SCHEDULE event WakeCompleteEvent(RoundContext, MinerID, target_assignment) AT now + wake_latency
+    # H5: a positive latency schedules a future event_time; a ZERO latency (a permitted future
+    #     experimental value) schedules at the SAME event_time but in delta_cycle + 1 at the
+    #     WakeComplete microphase -- NEVER inserting into a microphase already completed in the
+    #     current delta-cycle (delta-cycle rule §0.7-H2).
+    IF wake_latency > 0:
+      SCHEDULE event WakeCompleteEvent(RoundContext, MinerID, target_assignment)
+               AT event_time = now + wake_latency, delta_cycle = 0, microphase = WAKE_COMPLETE
+    ELSE:  # wake_latency = 0 (zero-latency wake, H5)
+      SCHEDULE event WakeCompleteEvent(RoundContext, MinerID, target_assignment)
+               AT event_time = now, delta_cycle = current_delta_cycle + 1, microphase = WAKE_COMPLETE
     RETURN wake_started                                                  # returns immediately (0.1)
   RETURNS: wake_started
+  NOTE: H5: zero wake latency is deterministic -- the WakeCompleteEvent fires at the SAME event_time
+        in the NEXT delta-cycle's WakeComplete microphase, so a zero-latency resume initiated after the
+        wake microphase never travels backward into a completed phase.
 
 PROCEDURE WakeCompleteEvent
   INPUTS: RoundContext, MinerID, target_assignment
@@ -491,7 +541,12 @@ PROCEDURE HashWorkEvent
        OR round_state not in {HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY}:   # E6/G8 hashing-capable states
       RETURN hash_work_noop
     ASSERT cursor in range(assignment)                          # supports I2 at submission time
-    ACCUMULATE t_hash for MinerID over the elapsed event time since its last hash boundary   # I5, I6
+    # H7: HashWorkEvent MUST NOT increment any t_<state> residency. The residency_ledger, owned solely
+    #     by ApplyMinerStateTransition, computes t_ACTIVE_HASHING = t_hash ONCE when the ACTIVE_HASHING
+    #     interval closes. This unit RECORDS work metadata ONLY -- it contributes NO duration term (I19).
+    RECORD hash_work_metadata(MinerID, AssignmentID, assignment_version, unit_start = last_unit_time,
+             unit_end = now, modeled_hash_evaluations += 1, cursor_progress = cursor,
+             work_event_id)                                      # no duration added to the energy ledger
     # ---- [SIMULATION SAMPLING] ----
     hit <- [SIMULATION SAMPLING] Bernoulli(target_hit_probability(D))    # one modeled position/chunk
     # ---- deterministic protocol logic ----
@@ -605,10 +660,14 @@ PROCEDURE ExhaustionAdjudicate
 
 ```
 PROCEDURE EnterLowPowerListen
-  INPUTS: RoundContext, MinerID, stop_reason,
+  INPUTS: RoundContext, MinerID, stop_reason, assignment_ref,                   # H8: explicit assignment version
           pause_cause_candidate_id = null, pause_cause_propagation_id = null    # F2: required for PATH B only
   PRECONDITIONS: stop_reason in {RANGE_EXHAUSTED, ASSIGNMENT_REVOKED, VALID_SOLUTION_VERIFIED,
                  ROUND_ACCEPTED, ROUND_ABORTED};               # I4: every entry records a reason
+                 # H8: assignment_ref is the EXACT immutable assignment VERSION being paused/exhausted/
+                 #     revoked/closed; it MUST be a live head (status in {CURRENT, PAUSED}), never a
+                 #     SUPERSEDED/CLOSED historical version. There is no undeclared free `assignment`.
+                 assignment_ref belongs to MinerID AND status(assignment_ref) in {CURRENT, PAUSED};
                  IF stop_reason = VALID_SOLUTION_VERIFIED THEN pause_cause_candidate_id != null
                    AND pause_cause_propagation_id != null      # F2: the pause cause is a specific candidate
   EFFECTS:
@@ -618,32 +677,32 @@ PROCEDURE EnterLowPowerListen
 
       CASE RANGE_EXHAUSTED:                                    # PATH A
         ASSERT from_state = EXHAUSTED_PENDING
-        ASSERT accepted_exhaustion(assignment) = TRUE          # accepted exhaustion accounting exists
-        ASSERT coverage_state(range) = searched AND custody_status(range) = completed
-        CLOSE the assignment
+        ASSERT accepted_exhaustion(assignment_ref) = TRUE      # accepted exhaustion accounting exists
+        ASSERT coverage_state(range(assignment_ref)) = searched AND custody_status(range(assignment_ref)) = completed
+        CLOSE assignment_ref
         # do NOT release or reassign any part of the completed range
 
       CASE ASSIGNMENT_REVOKED:
         ASSERT from_state = ACTIVE_HASHING
-        PRESERVE accepted searched prefix [range_start, accepted_frontier]
-        SET suffix <- accepted unsearched suffix [accepted_frontier + 1, range_end]
+        PRESERVE accepted searched prefix [range_start(assignment_ref), accepted_frontier(assignment_ref)]
+        SET suffix <- accepted unsearched suffix [accepted_frontier(assignment_ref) + 1, range_end(assignment_ref)]
         MARK suffix as inactive_unsearched / reassignable      # only the accepted unsearched suffix (C4)
-        CLOSE/SUPERSEDE the assignment
+        CLOSE/SUPERSEDE assignment_ref
 
       CASE VALID_SOLUTION_VERIFIED:                            # PATH B
         ASSERT from_state = ACTIVE_HASHING
         ASSERT the honoured early-stop certificate passed I11
-        PAUSE the assignment (status CURRENT -> PAUSED); retain actual_frontier AND accepted_frontier
+        PAUSE assignment_ref (status CURRENT -> PAUSED); retain actual_frontier AND accepted_frontier
         # F2: record the SPECIFIC candidate that caused this pause, so a later candidate-scoped
         #     failure resumes ONLY the miners paused by that candidate.
-        SET pause_cause_candidate_id(assignment)   <- pause_cause_candidate_id
-        SET pause_cause_propagation_id(assignment) <- pause_cause_propagation_id
-        SET paused_assignment_id(assignment)       <- AssignmentID(assignment)
-        SET retained_actual_frontier(assignment)   <- actual_frontier(assignment)
+        SET pause_cause_candidate_id(assignment_ref)   <- pause_cause_candidate_id
+        SET pause_cause_propagation_id(assignment_ref) <- pause_cause_propagation_id
+        SET paused_assignment_id(assignment_ref)       <- AssignmentID(assignment_ref)
+        SET retained_actual_frontier(assignment_ref)   <- actual_frontier(assignment_ref)
         # do NOT change coverage to searched; do NOT release the assignment
 
       CASE ROUND_ACCEPTED OR ROUND_ABORTED:
-        CLOSE the assignment because the round ended
+        CLOSE assignment_ref because the round ended
         # do NOT mark the range exhausted; do NOT reassign it under the closed TemplateID
 
     RECORD entry_stop_reason(MinerID) <- stop_reason           # I4: why the miner left ACTIVE_HASHING
@@ -651,9 +710,12 @@ PROCEDURE EnterLowPowerListen
     #     by the hook. For PATH A the source is EXHAUSTED_PENDING (already off H_active); for the
     #     other reasons the source is ACTIVE_HASHING (this is the H_active exit boundary).
     CALL ApplyMinerStateTransition(MinerID, from_state, LOW_POWER_LISTEN, now,
-                                   reason = stop_reason, assignment_ref = assignment,
+                                   reason = stop_reason, assignment_ref = assignment_ref,
                                    candidate_ref = pause_cause_candidate_id)     # T8 / T26 / T27 / T28 / T29
   RETURNS: listen_record(MinerID, stop_reason)
+  NOTE: H8: the exact immutable assignment VERSION is passed explicitly as assignment_ref (never an
+        undeclared free variable), so a SUPERSEDED/CLOSED historical version can never be paused or
+        closed by accident while immutable versions coexist in the ledger (I18a/I18b).
   NOTE: EXHAUSTED_PENDING is the source ONLY for RANGE_EXHAUSTED; the other four reasons enter
         LOW_POWER_LISTEN directly from ACTIVE_HASHING (or on round closure) and never pass
         through EXHAUSTED_PENDING (CR-B1/CR-B2, I4).
@@ -693,47 +755,133 @@ PROCEDURE AdversarialParticipationChangeEvent
                  adversarial-classified MinerID (the model's [SIMULATION SAMPLING] draw is WHEN/WHICH
                  adversarial miner changes participation -- see the sampling summary)
   EFFECTS:
-    # G3: the ONLY carrier of a modeled adversarial participation change. It changes miner_state ONLY
-    #     through the hook, so residency, transition energy, the H_active/H_honest/H_adversarial
-    #     recompute, I17, and the scheduled SecurityFloorEvaluate all happen exactly once (F6).
-    IF direction = exit AND miner_state(MinerID) = ACTIVE_HASHING:
-      # a modeled adversarial withdrawal leaves the active census via the legal departure edge (T11).
+    # G3/H6: the ONLY carrier of a modeled adversarial participation change. It changes miner_state
+    #     ONLY through the hook, so residency (single owner, H7), transition energy, the
+    #     H_active/H_honest/H_adversarial recompute, and I17 all happen exactly once (F6). It NEVER
+    #     adds/removes a miner from H_active directly. Because the census-changing boundary is a hook
+    #     transition, the hook sets security_evaluation_required[(now, current_delta_cycle)] and the
+    #     SINGLE FinalizeTimestampSecurityCensus for this settled timestamp evaluates the floor once (H3).
+    # H6: entry and exit take STATE-SPECIFIC legal paths; there is NO generic re-entry that fabricates a
+    #     second live head, and NO generic exit that leaves a live CURRENT head behind.
+
+    IF direction = exit:
+      # ---- EXIT: only the ACTIVE_HASHING census is affected; a miner not in H_active contributes 0. ----
+      IF miner_state(MinerID) != ACTIVE_HASHING:
+        RETURN no_census_change            # H6: not in the active census; no fabricated departure edge
+      SET X <- current_assignment(MinerID)                      # the EXACT CURRENT version (I18a: unique)
+      # H6: preserve accepted coverage; expose ONLY the accepted unsearched suffix (C4), never the prefix.
+      PRESERVE accepted searched prefix [range_start(X), accepted_frontier(X)]
+      SET suffix <- accepted unsearched suffix [accepted_frontier(X) + 1, range_end(X)]
+      MARK suffix as inactive_unsearched / reassignable          # only the accepted unsearched suffix (C4)
+      # H6/I9: record the withdrawal reason and provenance on the closed version, then CLOSE/REVOKE the
+      #        CURRENT head EXPLICITLY so NO live CURRENT head remains for MinerID (I18a/I18b).
+      RECORD withdrawal_reason(X) <- adversarial_withdrawal      # I9 reason
+      RECORD provenance(X): previous_assignment_reference, custody_status(range(X)) <- revoked_adversarial_exit
+      # H7/G9: cancel this version's pending hash-work units explicitly (they would self-cancel by the
+      #        stale guard, but the exit CANCELS them so no unit is charged after the census leaves H_active).
+      CANCEL pending HashWorkEvent units for (MinerID, AssignmentID(X), assignment_version(X))
+      CLOSE/SUPERSEDE X                                          # no live CURRENT head remains (I18a)
       CALL ApplyMinerStateTransition(MinerID, ACTIVE_HASHING, OFFLINE, now,
-             reason = adversarial_withdrawal, assignment_ref = current_assignment(MinerID),
-             candidate_ref = null)                              # T11
-      RELEASE the miner's assignment for reclamation (only the accepted unsearched suffix is reassignable, C4)
-    ELSE IF direction = enter AND miner_state(MinerID) in {OFFLINE, RESERVE, REGISTERED, LOW_POWER_LISTEN}:
-      # a modeled adversarial (re)entry activates through the NORMAL path; it reaches ACTIVE_HASHING
-      # only at its WakeCompleteEvent (F5) -- never a direct census add.
-      IF miner_state(MinerID) = OFFLINE:
-        CALL ApplyMinerStateTransition(MinerID, OFFLINE, REGISTERED, now, reason = adversarial_rejoin,
-               assignment_ref = null, candidate_ref = null)     # T17
-      CALL RangeAssign(RoundContext, MinerID, requested_size = modeled, lease_duration = default_lease_duration)
-    ELSE:
-      RETURN no_change                                          # already in the target participation state
+             reason = adversarial_withdrawal, assignment_ref = X, candidate_ref = null)   # T11 (F6)
+      RETURN participation_exit_record(MinerID, closed_version = X, reassignable_suffix = suffix)
+
+    ELSE:   # direction = enter
+      # ---- ENTRY: reach ACTIVE_HASHING ONLY at a future WakeCompleteEvent (F5); never a direct add. ----
+      SWITCH miner_state(MinerID):
+
+        CASE REGISTERED OR RESERVE:
+          # H6: no live head exists; create/bind a fresh PENDING and wake. RangeAssign (REGISTERED->WAKING
+          #     T3 / RESERVE->WAKING T4) builds a PENDING via CreatePendingAssignment and StartWake (F4/F5).
+          RETURN CALL RangeAssign(RoundContext, MinerID, requested_size = modeled,
+                                  lease_duration = default_lease_duration)
+
+        CASE OFFLINE:
+          # H6: rejoin the round through the hook FIRST (OFFLINE -> REGISTERED, T17), then create/bind a
+          #     fresh PENDING and wake -- never a direct census add.
+          CALL ApplyMinerStateTransition(MinerID, OFFLINE, REGISTERED, now, reason = adversarial_rejoin,
+                 assignment_ref = null, candidate_ref = null)    # T17 (F6)
+          RETURN CALL RangeAssign(RoundContext, MinerID, requested_size = modeled,
+                                  lease_duration = default_lease_duration)
+
+        CASE LOW_POWER_LISTEN:
+          # H6: the re-entry path DEPENDS on why the miner is idle (entry_stop_reason, I4).
+          IF entry_stop_reason(MinerID) = VALID_SOLUTION_VERIFIED:
+            # PATH-B pause: the miner's OWN assignment is still PAUSED (a live head, I18b). Resuming it
+            # MUST reuse that head via ResumeFromPause carrying ITS recorded pause-cause ids -- it MUST
+            # NOT call RangeAssign (that would mint a SECOND live head and break I18b).
+            SET paused <- paused_assignment(MinerID)
+            RETURN CALL ResumeFromPause(RoundContext, MinerID, trigger = adversarial_reactivation,
+                     pause_cause_candidate_id   = pause_cause_candidate_id(paused),      # G11: matched ids
+                     pause_cause_propagation_id = pause_cause_propagation_id(paused))     # T30
+          ELSE:
+            # entry_stop_reason in {RANGE_EXHAUSTED, ASSIGNMENT_REVOKED, ROUND_ACCEPTED, ROUND_ABORTED}:
+            # the prior assignment is CLOSED (NO live head, I18b), so a fresh eligible assignment is
+            # legal. The LEGAL re-entry edge from LOW_POWER_LISTEN is T10 (new-assignment wake ->
+            # WAKING), NOT RangeAssign (whose precondition is REGISTERED/RESERVE, T3/T4). Bind a fresh
+            # PENDING (a NEW ORIGINAL lineage, I18b) via the shared constructor and StartWake from
+            # LOW_POWER_LISTEN -- mirroring RangeAssign's body but with the correct legal source edge.
+            SELECT candidate_range from unassigned portion of nonce_domain    # fresh, never-assigned (I1)
+            fresh <- CALL CreatePendingAssignment(RoundContext, MinerID, candidate_range,
+                       assignment_origin = ORIGINAL, source_assignment = null, reason = null)   # F4
+            SET lease_start(fresh)  <- now
+            SET lease_expiry(fresh) <- now + default_lease_duration
+            RETURN CALL StartWake(RoundContext, MinerID, target_assignment = fresh,
+                                  from_state = LOW_POWER_LISTEN)                          # T10 (F5/F6)
+
+        DEFAULT:
+          # WAKING / ACTIVE_HASHING / EXHAUSTED_PENDING / DISQUALIFIED: already participating or in a
+          # transient/terminal state; no participation change is applied.
+          RETURN no_change
   RETURNS: participation_change_record
+  NOTE: H6: entry is state-specific -- REGISTERED/RESERVE and (post-closure) LOW_POWER_LISTEN create a
+        fresh PENDING and wake; OFFLINE rejoins via the hook first; a still-PAUSED LOW_POWER_LISTEN
+        resumes its OWN head via ResumeFromPause (never RangeAssign). Exit acts ONLY on ACTIVE_HASHING:
+        it preserves accepted coverage, exposes only the accepted unsearched suffix, records the I9
+        reason/provenance, cancels the version's pending hash units, closes the CURRENT head explicitly
+        (no live head remains), and departs via T11 -- all through the hook.
   NOTE: G3: the adversarial-participation SAMPLING is entirely in the SCHEDULING of these events (the
         model draws each miner's enter/exit times); the STATE CHANGE is deterministic and routes
         through the hook. ActiveHashRateUpdate never mutates the census (C7 preserved: floor breaches
-        are still recorded only by SecurityFloorEvaluate, which the hook schedules at the boundary).
+        are still recorded only by SecurityFloorEvaluate, invoked once per settled timestamp by
+        FinalizeTimestampSecurityCensus, H3).
 ```
 
 ## 9. Security-floor evaluation
 
 ```
+PROCEDURE FinalizeTimestampSecurityCensus
+  INPUTS: RoundContext, event_time, delta_cycle
+  PRECONDITIONS: microphase 5 (§0.7); runs EXACTLY ONCE per (event_time, delta_cycle), AFTER every
+                 state-changing event of that (event_time, delta_cycle) has settled (H3)
+  EFFECTS:
+    # H3: the SINGLE per-timestamp security evaluation. If no ACTIVE_HASHING boundary occurred this
+    #     (event_time, delta_cycle), there is nothing to evaluate.
+    IF NOT security_evaluation_required[(event_time, delta_cycle)]:
+      RETURN no_census_change
+    # read the FINAL settled census (the last recomputation by ApplyMinerStateTransition at this
+    # (event_time, delta_cycle)); intermediate same-time census values were recorded for AUDIT ONLY.
+    SET (H_active, H_honest, q_adv) <- final settled census at (event_time, delta_cycle)
+    CLEAR security_evaluation_required[(event_time, delta_cycle)]
+    # exactly ONE floor decision for the settled census, carrying the current round epoch (G10/H4).
+    RETURN CALL SecurityFloorEvaluate(RoundContext, event_RoundID = RoundID, event_TemplateID = TemplateID,
+                 event_state_version = state_version, (H_active, H_honest, q_adv), floor_state)
+  RETURNS: floor_result
+  NOTE: H3: the ONLY caller of SecurityFloorEvaluate. It runs ONCE per settled (event_time, delta_cycle),
+        so the FIRST of several same-time miner transitions never independently triggers recovery from an
+        intermediate census. Intermediate census values are retained for audit but never drive a
+        round-state transition.
+
 PROCEDURE SecurityFloorEvaluate
   INPUTS: RoundContext, event_RoundID, event_TemplateID, event_state_version,
           (H_active(t), H_honest(t), q_adv(t)), floor_state
-  PRECONDITIONS: this is a SCHEDULED evaluation (never called inline, G10); it carries the
-                 (RoundID, TemplateID, state_version) of the boundary that scheduled it
+  PRECONDITIONS: invoked ONLY by FinalizeTimestampSecurityCensus on a settled census (H3); never
+                 inline (G10); carries the (RoundID, TemplateID, state_version) of that evaluation
   EFFECTS:
-    # G10: TERMINAL-ROUND / STALE GUARD. Never transition a terminal round to SECURITY_RECOVERY, and
-    #      never act on a stale round/template/epoch.
-    IF round_state in {ROUND_ACCEPTED, ROUND_ABORTED}
-       OR event_RoundID != RoundID_current
+    # G10: TERMINAL/STALE GUARD. Never act on a stale round/template/epoch.
+    IF event_RoundID != RoundID_current
        OR event_TemplateID != TemplateID_committed
        OR event_state_version != state_version_current:
-      RETURN stale_noop                                         # G10: no breach recorded, no transition
+      RETURN terminal_stale_noop                               # no breach recorded, no transition
     breach <- FALSE
     # C7: this procedure ALONE records breaches and triggers recovery. RECORD_ONCE suppresses
     #     duplicate breach records for the same (event, threshold, t).
@@ -753,15 +901,27 @@ PROCEDURE SecurityFloorEvaluate
       IF q_adv(t) != NA AND q_adv(t) > floor_state.q_adv_threshold:
         RECORD_ONCE breach_event(adversarial_share, t)        # I16
         breach <- TRUE
-    IF breach AND round_state not in {ROUND_ACCEPTED, ROUND_ABORTED}:
-      # G8: SECURITY_RECOVERY may be entered from HASHING or SOLUTION_PROPAGATION and PRESERVES any
-      #     live propagation contexts; block arrivals/arbitration remain processable during recovery.
-      TRANSITION round_state -> SECURITY_RECOVERY
-  RETURNS: breach | stale_noop
-  NOTE: G10: SecurityFloorEvaluate is always SCHEDULED (per §0.7 microphase 5), never inlined, and
-        rejects stale/terminal evaluations. I17 holds exactly at every boundary. ActiveHashRateUpdate
-        computes the quantities only; this procedure is the SOLE owner of breach recording and
-        recovery. `q_adv = NA` is never numerically compared; recovery logs never overwrite breach
+    # H4: SECURITY_RECOVERY may be entered ONLY from a legal source state; from any other state the
+    #     final census is recorded as OBSERVATION-ONLY and NO round transition occurs.
+    IF breach AND round_state in {HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY}:
+      # G8: SR may be entered from HASHING or SOLUTION_PROPAGATION and PRESERVES any live propagation
+      #     contexts; block arrivals/arbitration remain processable during recovery.
+      TRANSITION round_state -> SECURITY_RECOVERY              # bumps state_version (G10)
+      RETURN breach
+    ELSE IF breach:
+      # illegal source: record the census/breach for audit but perform NO transition (H4).
+      RETURN (round_state = TEMPLATE_REFRESH        ? refresh_observation_only  :
+              round_state = ROUND_EXHAUSTED         ? exhausted_observation_only :
+              round_state in {ROUND_ACCEPTED, ROUND_ABORTED} ? terminal_stale_noop :
+              setup_observation_only)               # ROUND_INITIALISING / TEMPLATE_COMMITMENT / ASSIGNMENT
+    RETURN no_breach
+  RETURNS: breach | no_breach | refresh_observation_only | exhausted_observation_only |
+           setup_observation_only | terminal_stale_noop
+  NOTE: H3/H4: SecurityFloorEvaluate runs ONCE per settled timestamp (via FinalizeTimestampSecurityCensus)
+        and transitions to SECURITY_RECOVERY ONLY from {HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY};
+        from setup (ROUND_INITIALISING/TEMPLATE_COMMITMENT/ASSIGNMENT), TEMPLATE_REFRESH, ROUND_EXHAUSTED,
+        or a terminal round it records observation-only and performs NO illegal transition. I17 holds at
+        every boundary; `q_adv = NA` is never numerically compared; recovery logs never overwrite breach
         records (I16). Entering SECURITY_RECOVERY does NOT cancel live candidates (G8).
 ```
 
@@ -862,7 +1022,8 @@ PROCEDURE LeaseExpiry
     INVALIDATE assignment (holder's assignment no longer CURRENT)   # stale mining -> I2 reject
     IF miner_state(holder) = ACTIVE_HASHING:
       # the miner actually stopped: route it off ACTIVE_HASHING via the legal revocation edge (T27).
-      CALL EnterLowPowerListen(RoundContext, holder, stop_reason = ASSIGNMENT_REVOKED)
+      CALL EnterLowPowerListen(RoundContext, holder, stop_reason = ASSIGNMENT_REVOKED,
+                               assignment_ref = assignment)     # H8: the exact expiring version
     # C4: reassign ONLY the accepted unsearched suffix, never the searched prefix.
     IF accepted_frontier(range(assignment)) = range_end:
       RETURN released_nothing_to_reassign                          # range complete; nothing unsearched
@@ -1025,6 +1186,7 @@ PROCEDURE EarlyStopVerify
       # F2: record THIS candidate as the pause cause so a later candidate-scoped failure resumes
       #     ONLY the miners paused by this candidate.
       CALL EnterLowPowerListen(RoundContext, verifying_MinerID, stop_reason = VALID_SOLUTION_VERIFIED,
+                               assignment_ref = current_assignment(verifying_MinerID),   # H8: the verifier's OWN CURRENT version
                                pause_cause_candidate_id = CandidateID,
                                pause_cause_propagation_id = PropagationID)
       RETURN VERIFIED
@@ -1045,8 +1207,13 @@ PROCEDURE EarlyStopVerify
 PROCEDURE ResumeFromPause
   INPUTS: RoundContext, MinerID, trigger, pause_cause_candidate_id, pause_cause_propagation_id
   PRECONDITIONS: miner_state(MinerID) = LOW_POWER_LISTEN with entry_stop_reason = VALID_SOLUTION_VERIFIED;
-                 trigger in {REJECTED, BLOCK_UNAVAILABLE, PROPAGATION_TIMEOUT, NO_VALID_CANDIDATE};
-                 # F2/G11: resume ONLY because THIS miner's pause cause failed -- match BOTH ids.
+                 # candidate-failure triggers (F2/G11) PLUS the single non-failure trigger H6 permits:
+                 trigger in {REJECTED, BLOCK_UNAVAILABLE, PROPAGATION_TIMEOUT, NO_VALID_CANDIDATE,
+                             adversarial_reactivation};
+                 # F2/G11/H6: resume ONLY this miner's OWN paused head -- match BOTH ids. For a candidate
+                 #   failure the ids are the failed candidate's; for adversarial_reactivation the caller
+                 #   reads them FROM the miner's own PAUSED head, so the match is exact and NO second live
+                 #   head is ever minted (I18b) -- this is why H6 routes a PAUSED re-entry here, never RangeAssign.
                  pause_cause_candidate_id(paused_assignment(MinerID))   = pause_cause_candidate_id
                  AND pause_cause_propagation_id(paused_assignment(MinerID)) = pause_cause_propagation_id;
                  the miner's assignment is PAUSED (retained_actual_frontier retained), NOT searched/exhausted
@@ -1065,11 +1232,14 @@ PROCEDURE ResumeFromPause
     RETURN CALL StartWake(RoundContext, MinerID, target_assignment = paused_assignment,
                           from_state = LOW_POWER_LISTEN)                        # T30
   RETURNS: resume_started(MinerID, resumed_from = retained_actual_frontier)
-  NOTE: Resume applies ONLY to PATH B pauses whose pause_cause matches the FAILED candidate (F2). A
-        PATH A exhausted range (coverage_state = searched, custody_status = completed) is NOT
-        resumable. Resume is event-scheduled (F5); several miners resuming at the same instant wake
-        independently. If instead the full block is ACCEPTED, the round closes (ROUND_ACCEPTED) and
-        the paused assignment closes on round closure -- NOT by exhaustion.
+  NOTE: Resume applies ONLY to PATH B pauses, and ALWAYS to the miner's OWN paused head (matched on
+        BOTH ids, F2/G11): for a candidate-failure trigger the ids are the failed candidate's; for the
+        single non-failure trigger adversarial_reactivation (H6) the ids are read from the miner's own
+        PAUSED head, so no second live head is minted (I18b). A PATH A exhausted range (coverage_state
+        = searched, custody_status = completed) is NOT resumable. Resume is event-scheduled (F5);
+        several miners resuming at the same instant wake independently. If instead the full block is
+        ACCEPTED, the round closes (ROUND_ACCEPTED) and the paused assignment closes on round closure
+        -- NOT by exhaustion.
 ```
 
 ## 16b. Event-ordered solution propagation (C6) and finder self-validation (D4)
@@ -1143,6 +1313,7 @@ PROCEDURE ScheduleSolutionPropagation
                           outcome = outcome-at-arrival) AT now + block_delay
     # (5) the finder ceases hashing (PATH B), recording THIS candidate (BOTH ids) as its pause cause (F2/G11).
     CALL EnterLowPowerListen(RoundContext, finder, stop_reason = VALID_SOLUTION_VERIFIED,
+                             assignment_ref = version(cpc.snapshot.AssignmentID, cpc.snapshot.assignment_version),  # H8: exact discovery version (CURRENT for the finder now)
                              pause_cause_candidate_id = cpc.CandidateID,
                              pause_cause_propagation_id = cpc.PropagationID)
   RETURNS: cpc.CandidateID
@@ -1236,10 +1407,11 @@ PROCEDURE HandlePropagationFailure
       SCHEDULE event ResumeFromPause(RoundContext, M, trigger = failure_reason,
                                      pause_cause_candidate_id = CandidateID,
                                      pause_cause_propagation_id = PropagationID)   # G11: both ids on the resume event
-    # (3) G10: SCHEDULE the security-floor evaluation (never inline); it carries the round epoch and is
-    #     rejected by the terminal/stale guard if the round has since closed.
-    SCHEDULE event SecurityFloorEvaluate(RoundContext, event_RoundID = RoundID, event_TemplateID = TemplateID,
-                   event_state_version = state_version, latest (H_active, H_honest, q_adv), floor_state)   # microphase 5
+    # (3) H3: do NOT schedule an independent floor decision here. The candidate-scoped resumes above
+    #     re-activate miners in a later delta-cycle; each re-activation boundary sets
+    #     security_evaluation_required, and the SINGLE FinalizeTimestampSecurityCensus for that settled
+    #     timestamp performs the one floor decision (microphase 5, delta-cycle rule §0.7-H2).
+    SET security_evaluation_required[(now, current_delta_cycle)] <- true   # settled-census eval, not per-transition
     # (4) round-state rule (F3/G8): return to HASHING ONLY when propagation is FULLY quiescent AND the
     #     round is still in SOLUTION_PROPAGATION. During SECURITY_RECOVERY the round stays in recovery
     #     (live candidates are preserved, G8); a later floor-restored step returns it (round SM R13).
@@ -1251,8 +1423,9 @@ PROCEDURE HandlePropagationFailure
   NOTE: Candidate-scoped (F2/F3/G11 on BOTH ids). One candidate's failure NEVER cancels or resumes
         another candidate's events or paused miners. The round remains SOLUTION_PROPAGATION while any
         live candidate exists (F3), and SECURITY_RECOVERY may coexist with live candidates (G8).
-        The floor evaluation is SCHEDULED, not inlined (G10). No block is accepted and no round is
-        closed here. `propagation_quiescent` is defined in §0.6.
+        The floor evaluation is NOT scheduled per failure (H3); it is the single settled-census
+        evaluation via FinalizeTimestampSecurityCensus. No block is accepted and no round is closed
+        here. `propagation_quiescent` is defined in §0.6.
 ```
 
 ## 16e. Same-timestamp acceptance arbitration (D6)
@@ -1387,7 +1560,7 @@ PROCEDURE CloseRoundAssignments
         CASE ACTIVE_HASHING:
           # still hashing with NO prior stop reason: closure IS this miner's stop event, so the
           # round disposition legitimately becomes its entry_stop_reason (5th EnterLowPowerListen reason).
-          CALL EnterLowPowerListen(RoundContext, h, stop_reason = disposition)   # sets entry_stop_reason(h) <- disposition; closes X
+          CALL EnterLowPowerListen(RoundContext, h, stop_reason = disposition, assignment_ref = X)   # H8: exact version; sets entry_stop_reason(h) <- disposition; closes X
 
         CASE EXHAUSTED_PENDING:
           # PATH-A holder mid-completion: entry_stop_reason is already RANGE_EXHAUSTED. PRESERVE it.
@@ -1495,7 +1668,8 @@ PROCEDURE CloseTemplateAssignments
       SWITCH miner_state(h):
         CASE ACTIVE_HASHING:
           # the old-template assignment is revoked because the template changed (legal T27).
-          CALL EnterLowPowerListen(RoundContext, h, stop_reason = ASSIGNMENT_REVOKED)   # -> LOW_POWER_LISTEN
+          CALL EnterLowPowerListen(RoundContext, h, stop_reason = ASSIGNMENT_REVOKED,
+                                   assignment_ref = X)   # H8: exact old-template version; -> LOW_POWER_LISTEN
         CASE EXHAUSTED_PENDING:
           # PATH-A holder: finish the exhaustion drop (legal T8); entry_stop_reason RANGE_EXHAUSTED kept.
           CLOSE X

@@ -156,18 +156,28 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
      (R6) in a **single** step (the round is already in `SOLUTION_PROPAGATION`); acceptance of one
      candidate marks every OTHER live candidate `COMPETING`/`STALE`/`CANCELLED`, cancels their
      remaining events, and closes the round **exactly once** (F3).
-- **Active propagation set (F3).** `active_propagation_set` holds every live
-  `CandidatePropagationContext`. The round is `SOLUTION_PROPAGATION` **iff** the set is non-empty
-  (or a same-timestamp acceptance batch / a live candidate acceptance event remains). Failure of one
-  candidate removes ONLY that candidate; the round stays `SOLUTION_PROPAGATION` while any other
-  candidate is live. One candidate's failure never cancels another candidate's certificate-arrival,
-  block-arrival, acceptance-batch, or timeout events, and never resumes a miner paused by a
-  different live candidate (F2).
-- **Same-timestamp event priority (F8).** When events share a timestamp, they fire in the
-  deterministic order of `STAGE_01F_EVENT_PRIORITY_TABLE.md` (round closure before block arrival
-  before certificate arrival before discovery, etc.), with intra-type ties broken by
-  `(CandidateID, MinerID, AssignmentID, seq)` — never by iteration order. This makes the round-state
-  evolution reproducible across reruns.
+- **Active propagation set (F3, refined G6; NOT identified with the round-state, G8/H1).**
+  `active_propagation_set` holds EXACTLY the propagation-active contexts — those with
+  `status ∈ {PROPAGATING, PENDING_ACCEPTANCE}` (G6). `DISCOVERED` and `SELF_VALIDATED` contexts
+  exist but are NOT yet in the set; `FAILED`/`ACCEPTED`/`COMPETING`/`STALE`/`CANCELLED` contexts
+  have LEFT it. It is therefore NOT "every live context". **There is NO `iff` tying the round-state
+  to the set (H1):** a non-empty set does not force `SOLUTION_PROPAGATION` (the same live candidates
+  are preserved while the round is in `SECURITY_RECOVERY`, G8), and the round leaves
+  `SOLUTION_PROPAGATION` only when `propagation_quiescent` holds (set empty AND no pending
+  acceptance batch AND no live candidate acceptance event AND `block_accepted` false). Failure of
+  one candidate removes ONLY that candidate; the round stays `SOLUTION_PROPAGATION` while any other
+  candidate is propagation-active. One candidate's failure never cancels another candidate's
+  certificate-arrival, block-arrival, acceptance-batch, or timeout events, and never resumes a miner
+  paused by a different live candidate (F2).
+- **Same-timestamp event order (authoritative: `STAGE_01G_EVENT_MICROPHASE_SPEC.md`, extended by the
+  H2 delta-cycle rule).** When events share an `event_time`, they fire in the explicit microphase
+  order (terminal closure → template refresh → collect block arrivals → `AcceptanceBatchFinalize` →
+  the single settled-census `FinalizeTimestampSecurityCensus` → certificate/discovery/…), with a
+  same-`event_time` event created inside a handler placed in the current or next `delta_cycle` per
+  §0.7-H2 (never backward into a completed microphase), and intra-microphase ties broken by
+  `(CandidateID, MinerID, AssignmentID, seq)` — never by iteration order. The frozen Stage-1F
+  `STAGE_01F_EVENT_PRIORITY_TABLE.md` is **NOT** authoritative (superseded by the microphase model,
+  G5/H1). This makes the round-state evolution reproducible across reruns.
 - **Miner-state note (CR2).** While a round is in `SOLUTION_PROPAGATION`, certificate
   verification does **not** remove verifying miners from `ACTIVE_HASHING` or from `H_active(t)`:
   each miner remains in `ACTIVE_HASHING` and continues hashing until it has itself completed all
@@ -222,7 +232,12 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
   block, credits the solver (the `ACTIVE_HASHING` miner whose assignment contained the
   solution, per I2), and closes the round (scope §A.6). This is a terminal-accept round
   state.
-- **Entry condition.** From `SOLUTION_PROPAGATION` on a validated solution.
+- **Entry condition.** From `SOLUTION_PROPAGATION` **or `SECURITY_RECOVERY`** (G8/H1) on a validated
+  accepted candidate — the atomic result of `AcceptanceBatchFinalize → ValidBlockAccept` (R6). A
+  block arrival never closes the round directly; acceptance is causally downstream of arbitration
+  (G5). Recovery-state acceptance is legal because the round-state and the propagation set are not
+  identified (G8): a valid candidate that was preserved through `SECURITY_RECOVERY` can still be
+  accepted.
 - **Exit condition(s).** To `ROUND_INITIALISING` to begin the next round (carrying forward
   the preserved cross-round information of Section 4).
 

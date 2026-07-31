@@ -193,3 +193,45 @@ Catalogue" denotes the separate document defining I1..I17.
   `ScheduleNextHashWork`), non-blocking (G9). `ActiveHashRateUpdate` is compute-only;
   `AdversarialParticipationChangeEvent` carries each modeled adversarial entry/exit through the hook
   (G3). `SecurityFloorEvaluate` is always scheduled and terminal-guarded (G10).
+
+## Stage-1H terminology addendum (timestamp-causality lock)
+
+- **`delta_cycle` and the event total order (H2).** Each discrete event carries an envelope
+  `(event_time, delta_cycle, microphase, stable_tie_key, seq)`, ordered lexicographically, where
+  `stable_tie_key = (CandidateID, MinerID, AssignmentID)`. `delta_cycle` is a same-`event_time`
+  causal layer: a handler in microphase `m` of `delta_cycle k` may schedule a same-`event_time` event
+  into cycle `k` if its target microphase is later than `m`, else into cycle `k+1` — NEVER backward
+  into a completed microphase. The loop finishes all microphases of cycle `k` before any event of
+  cycle `k+1` at the same `event_time`. The authoritative same-`event_time` contract is
+  `STAGE_01G_EVENT_MICROPHASE_SPEC.md` **extended by this delta-cycle rule**; the frozen Stage-1F
+  `STAGE_01F_EVENT_PRIORITY_TABLE.md` is NOT authoritative.
+- **Single settled-census security evaluation (`FinalizeTimestampSecurityCensus`, H3).** A miner
+  transition never schedules its own floor decision; instead the hook sets
+  `security_evaluation_required[(event_time, delta_cycle)]`. Exactly ONE
+  `FinalizeTimestampSecurityCensus` runs in microphase 5 per settled `(event_time, delta_cycle)`,
+  reads the FINAL settled census, and calls `SecurityFloorEvaluate` at most once. Intermediate
+  same-time census values are retained for AUDIT ONLY and never drive a round-state transition.
+- **Legal `SECURITY_RECOVERY` sources (H4).** `SecurityFloorEvaluate` may transition to
+  `SECURITY_RECOVERY` ONLY from `{HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY}`. From setup
+  states (`ROUND_INITIALISING`/`TEMPLATE_COMMITMENT`/`ASSIGNMENT`), `TEMPLATE_REFRESH`,
+  `ROUND_EXHAUSTED`, or a terminal round it records an observation-only result and performs NO
+  transition.
+- **Zero-latency wake (H5).** A wake with `wake_latency = 0` schedules its `WakeCompleteEvent` at the
+  SAME `event_time` in `delta_cycle + 1` at the `WAKE_COMPLETE` microphase, so it never travels
+  backward into a completed phase; a positive latency schedules a future `event_time`. The `WAKING`
+  residency and its `P_wake·t_wake + E_transition` accounting path always exist (D2).
+- **State-specific adversarial entry/exit (H6).** Entry: `REGISTERED`/`RESERVE` → bind fresh `PENDING`
+  + `StartWake`; `OFFLINE` → hook `OFFLINE→REGISTERED` first, then bind + wake; a still-`PAUSED`
+  `LOW_POWER_LISTEN` head → resume its OWN head via `ResumeFromPause` (matched ids, never `RangeAssign`);
+  a post-closure `LOW_POWER_LISTEN` → fresh `ORIGINAL` head + `StartWake` (T10). Exit acts ONLY on
+  `ACTIVE_HASHING`: preserve accepted coverage, expose only the accepted unsearched suffix, record the
+  I9 reason/provenance, cancel the version's pending `HashWorkEvent`s, close the `CURRENT` head
+  explicitly (no live head remains), depart via T11 — all through the hook.
+- **Residency single owner (`residency_ledger`, I19/H7).** Every per-miner `t_<state>` (including
+  `t_ACTIVE_HASHING = t_hash`) is produced ONCE by the `residency_ledger` owned by
+  `ApplyMinerStateTransition`, opened/closed at the state boundaries. A `HashWorkEvent` records
+  hash-work METADATA only and adds ZERO duration, so no `ACTIVE_HASHING` interval is counted twice.
+- **Explicit `assignment_ref` (H8).** `EnterLowPowerListen` receives the EXACT immutable assignment
+  version being paused/exhausted/revoked/closed as `assignment_ref` (a live head in
+  `{CURRENT, PAUSED}`); there is no undeclared free `assignment`. Every caller passes the precise
+  version, so a `SUPERSEDED`/`CLOSED` historical version can never be paused or closed by accident.
