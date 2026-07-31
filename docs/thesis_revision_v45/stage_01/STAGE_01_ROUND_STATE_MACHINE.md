@@ -514,16 +514,66 @@ recovery-finalising `RoundAbort(reason = recovery_install_failed_aborted)`.
 irreversible `HASHING` transition and returns `assignment_phase_failed(malformed_assignment_set)` (round still
 `ASSIGNMENT`, reversible), which the continuation hook rolls back to `SECURITY_RECOVERY`.
 
-**T6 (redistribution-only vs reserve-dependent restoration).** The hook classifies the restoration: if the FINAL
-census satisfies the floor using ONLY currently `ACTIVE_HASHING` miners it is redistribution-only and installs
-synchronously (T3); otherwise it is reserve-dependent — the hook activates the required reserve(s) while the round
-STAYS `SECURITY_RECOVERY`, keeps the decision `APPLYING`, and RE-ARMS a strictly-later continuation Due event with a
-FRESH generation. Reserve-dependent RESTORED is applied ONLY once a later final census confirms the floor with the
-reserve `ACTIVE_HASHING` — a syntactically valid PENDING set is not restored hash rate.
+**T6 (redistribution-only vs reserve-dependent restoration; SUPERSEDED by U1).** Stage 1T classified a branch-C
+restoration as redistribution-only or reserve-dependent, keeping a reserve-dependent case as a re-armed `RESTORED`
+continuation. **Stage 1U supersedes that:** a reserve-dependent restoration is logically impossible as a `RESTORED`
+continuation (`RESTORED` requires `census.breach = false`, but a reserve-dependent case still shows a breach), so that
+ELSE branch is REMOVED. Branch C is now REDISTRIBUTION-ONLY; reserve activation while the floor is still breached is
+recovery WORK (§3.10 U1), never a `RESTORED` continuation — and reserve-dependent restoration is still applied only
+once a later no-breach final census exists (via the ordinary completion two-step), so a syntactically valid PENDING
+set is never treated as restored hash rate.
 
 **T7 (post-epilogue causality).** The continuation application runs strictly after the event-time epilogue; every
 `StartWake` / re-arm it seats is placed STRICTLY LATER through `PostEpilogueSchedulingContext`. `ProcessEventTime`
 asserts that no recovery-continuation application remains due at `t` before finalising `t`.
+
+**U1 (recovery WORK is separate from the RESTORED outcome).** The recovery OUTCOME (`RESTORED` / `UNRECOVERABLE`) is
+decided ONLY from a final census — `RESTORED` requires `census.breach = false` (`outcome_consistent_with_census` is
+NOT weakened). Reserve activation / redistribution attempted WHILE the floor is still breached is a recovery-WORK
+action (`RECOVERY_WORK_ACTION` in {`RESERVE_ACTIVATION_REQUIRED`, `RANGE_REDISTRIBUTION_REQUIRED`, `NONE`}), NOT a
+`RecoveryOutcome`, and is NEVER marked `APPLIED` as `RESTORED`. In the breach-before-deadline branch the epilogue
+classifies the work (`ClassifyRecoveryWork`) and seats ONE versioned `RecoveryWorkDueEvent` (`SeatRecoveryWork`); its
+POST-epilogue hook `ApplyRecoveryWorkAfterEpilogue` activates reserves / prepares coverage while the round STAYS
+`SECURITY_RECOVERY`; a LATER final census with NO breach mints `RESTORED`, breach+deadline mints `UNRECOVERABLE`, and
+breach-before-deadline continues recovery. The logically impossible reserve-dependent `RESTORED` continuation ELSE is
+REMOVED; the branch-C continuation is now REDISTRIBUTION-ONLY (`census.breach = false`), never reserve-dependent.
+
+**U2 (explicit scheduling-source context through the wake path).** `ReserveActivate`, `RangeReassign`, `RangeAssign`,
+`StartWake`, and `CommitRecoveryAssignmentPlan` take an explicit `scheduling_context` (`SchedulingSourceContext` in
+{`ORDINARY_DISPATCH(dispatch_envelope)`, `POST_EPILOGUE(pctx)`}). A post-epilogue install threads its
+`PostEpilogueSchedulingContext` all the way to `ScheduleEvent`, so a zero-latency post-epilogue wake targets
+`next_representable_simulation_time(source)` and every wake is STRICTLY LATER than the source time — never a `pctx`
+created and then a wake seated with only the ordinary dispatch envelope.
+
+**U3 (atomic re-arm).** A recovery-work seat / re-arm advances the active identity ONLY after `ScheduleEvent`
+succeeds: compute the candidate identity + target, validate `<= T`, schedule without mutating the active identity, and
+publish (identity, event ref, `status = ARMED`) only on success; a rejection advances nothing, publishes no false
+reference, reports no pending state, and records an explicit disposition (or takes the horizon-close path). No
+`APPLYING` decision is ever left without a live event, a controller (`pending_recovery_work`), or an explicit
+terminal/horizon disposition.
+
+**U4 (explicit due-fact consumption).** The continuation and recovery-work due facts carry a `CONTINUATION_DUE_STATUS`
+(`NOT_DUE`/`DUE`/`CONSUMED`/`SUPERSEDED`/`CANCELLED`). The DueEvent sets `DUE`; the post-epilogue hook ATOMICALLY
+consumes it (`CONSUMED` on apply/settle, `SUPERSEDED` on a stale-noop, `CANCELLED` on terminal closure) before
+returning; `ProcessEventTime`'s final assertion checks the EXPLICIT status, not a timestamp field.
+
+**U5 (named prepare/commit/rollback).** The opaque `INSTALL`/`UNDO` macros are replaced by
+`PrepareRecoveryAssignmentPlan` (compute-only; verifies I1/I3/I10/I18b before any mutation),
+`CommitRecoveryAssignmentPlan` (threads `scheduling_context`; returns `install_committed` /
+`install_failed_before_mutation` / `install_failed_after_mutation(reason, rollback_record)`), and
+`RollbackRecoveryAssignmentPlan` (cancels every plan event, closes every plan-created live head legally, restores the
+ledgers; `rollback_completed` / `rollback_failed`). A rollback that fails after mutation takes the declared
+`RECOVERY_INSTALL_FAILED_ABORTED` + `RoundAbort` (never a fabricated `UNRECOVERABLE`).
+
+**U6 (every CompleteAssignmentPhase caller handles its disposition).** `PrepareParticipantsForNewRound`,
+`TemplateRefresh`, and the recovery installation each capture `assignment_phase_completed |
+assignment_phase_failed(reason)`; a pre-`HASHING` failure rolls back the just-created assignments/wakes and takes the
+declared setup/refresh failure path — no caller returns success with the round left in `ASSIGNMENT`.
+
+**U7 (continuation-due census provenance).** A distinct census source `RECOVERY_CONTINUATION_DUE` is added;
+`RecoveryAssignmentContinuationDueEvent` uses it (not `RECOVERY_COMPLETION_DUE`), and `RecoveryWorkDueEvent` uses
+`RECOVERY_WORK_DUE`, so "completion is due", "continuation is due", "recovery work is due", and "deadline reached" are
+distinguishable census provenances.
 
 ### 3.11 What causes a template refresh
 
@@ -616,7 +666,7 @@ the notes and specified in `STAGE_01_MINER_STATE_MACHINE.md`.
 | R10 | `HASHING` | SecurityFloorViolation | Modeled `H_honest(t)` below the security floor, or invariant-risk detected | Trigger reserve activation | `SECURITY_RECOVERY` | Emits miner activation → `RESERVE → WAKING` (T4), `LOW_POWER_LISTEN → WAKING` (T10) |
 | R11 | `HASHING` | RefreshTrigger | A superseding immutable template is available | Prepare template replacement | `TEMPLATE_REFRESH` | Refresh is the only way mined content changes (§3.11) |
 | R12 | `HASHING` | FatalFault / RoundTimeout | Unrecoverable fault or round-level timeout | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.4) |
-| R13 | `SECURITY_RECOVERY` | FloorRestored | Activated reserves raise `H_honest(t)` to/above the floor | Re-partition/redistribute disjoint ranges (I1); if live candidates remain, resume propagation instead | `ASSIGNMENT` (→ `HASHING` at R4) **or `SOLUTION_PROPAGATION`** if `active_propagation_set` is non-empty (G8) **or directly `HASHING`** when no context and no redistribution | **EXECUTABLE via `CompleteSecurityRecovery` (pseudocode §10a/N2):** seated by the epilogue's floor-restored decision (I-02); branch A (live contexts) → `SOLUTION_PROPAGATION` preserving those candidates' events; branch B (no context, no assignment change) → `HASHING`; branch C (redistribution) is DEFERRED via a TWO-STEP continuation (T1) — `CompleteSecurityRecovery` mints the continuation identity (T2) and seats a SINGLE `RecoveryAssignmentContinuationDueEvent` at `next_representable_simulation_time(t)` (R1/S2) WITHOUT mutating `round_state`, returning `DEFERRED`; that Due event only RECORDS the continuation due + refreshes the census, and the POST-epilogue hook `ApplyRecoveryAssignmentContinuationAfterEpilogue` verifies the still-current `APPLYING` decision + its continuation binding (T2), transitions `SECURITY_RECOVERY → ASSIGNMENT`, installs the disjoint set under the T3 install-phase invariant, and reaches `HASHING`. Every recovery-success branch reaches a floor-applicable state through `TransitionRoundState`/`CompleteAssignmentPhase`, so the applicability-entry census is captured (M2). **R1/T7:** the application enqueues NOTHING at the drained application `event_time` — branch C's wakes fire at a strictly-later time. **S3/T1:** seating branch C is NOT applying RESTORED — the decision stays `APPLYING` and the episode stays active until the post-epilogue continuation hook reaches `HASHING`, and ONLY THEN is it `APPLIED` + the episode cleared; a failure BEFORE the transition stays `SECURITY_RECOVERY` (episode preserved), an IRREVERSIBLE install failure AFTER it takes a declared recovery-finalising `RoundAbort` (T4: `RECOVERY_INSTALL_FAILED_ABORTED` + `APPLY_FAILED_TERMINAL`, never a fabricated UNRECOVERABLE). **T6:** a reserve-dependent restoration is NOT installed synchronously — the hook activates the reserve while the round stays `SECURITY_RECOVERY` and re-arms a strictly-later continuation (fresh generation), applying RESTORED only once the reserve is `ACTIVE_HASHING`. Branches A/B/D mark `APPLIED` on their immediate SUCCESS (`APPLYING → APPLIED`); any failure yields `APPLY_FAILED`/`HORIZON_DEFERRED` and preserves the episode. No new template is fabricated (§3.6) |
+| R13 | `SECURITY_RECOVERY` | FloorRestored | Activated reserves raise `H_honest(t)` to/above the floor | Re-partition/redistribute disjoint ranges (I1); if live candidates remain, resume propagation instead | `ASSIGNMENT` (→ `HASHING` at R4) **or `SOLUTION_PROPAGATION`** if `active_propagation_set` is non-empty (G8) **or directly `HASHING`** when no context and no redistribution | **EXECUTABLE via `CompleteSecurityRecovery` (pseudocode §10a/N2):** seated by the epilogue's floor-restored decision (I-02); branch A (live contexts) → `SOLUTION_PROPAGATION` preserving those candidates' events; branch B (no context, no assignment change) → `HASHING`; branch C (redistribution) is DEFERRED via a TWO-STEP continuation (T1) — `CompleteSecurityRecovery` mints the continuation identity (T2) and seats a SINGLE `RecoveryAssignmentContinuationDueEvent` at `next_representable_simulation_time(t)` (R1/S2) WITHOUT mutating `round_state`, returning `DEFERRED`; that Due event only RECORDS the continuation due + refreshes the census, and the POST-epilogue hook `ApplyRecoveryAssignmentContinuationAfterEpilogue` verifies the still-current `APPLYING` decision + its continuation binding (T2), transitions `SECURITY_RECOVERY → ASSIGNMENT`, installs the disjoint set under the T3 install-phase invariant, and reaches `HASHING`. Every recovery-success branch reaches a floor-applicable state through `TransitionRoundState`/`CompleteAssignmentPhase`, so the applicability-entry census is captured (M2). **R1/T7:** the application enqueues NOTHING at the drained application `event_time` — branch C's wakes fire at a strictly-later time. **S3/T1:** seating branch C is NOT applying RESTORED — the decision stays `APPLYING` and the episode stays active until the post-epilogue continuation hook reaches `HASHING`, and ONLY THEN is it `APPLIED` + the episode cleared; a failure BEFORE the transition stays `SECURITY_RECOVERY` (episode preserved), an IRREVERSIBLE install failure AFTER it takes a declared recovery-finalising `RoundAbort` (T4: `RECOVERY_INSTALL_FAILED_ABORTED` + `APPLY_FAILED_TERMINAL`, never a fabricated UNRECOVERABLE). **U1 (supersedes the T6 reserve-dependent continuation):** branch C is REDISTRIBUTION-ONLY (`census.breach = false`), so the floor is already met by currently `ACTIVE_HASHING` miners; it NEVER depends on future reserve hash rate. Reserve activation while the floor is still breached is recovery WORK — a `RecoveryWorkDueEvent` + `ApplyRecoveryWorkAfterEpilogue` that keeps the round in `SECURITY_RECOVERY` and is NEVER marked `RESTORED`; `RESTORED` is minted only by a later no-breach final census (§3.10 U1). The install uses the named U5 `PrepareRecoveryAssignmentPlan`/`CommitRecoveryAssignmentPlan`/`RollbackRecoveryAssignmentPlan`. Branches A/B/D mark `APPLIED` on their immediate SUCCESS (`APPLYING → APPLIED`); any failure yields `APPLY_FAILED`/`HORIZON_DEFERRED` and preserves the episode. No new template is fabricated (§3.6) |
 | R14 | `SECURITY_RECOVERY` | FloorUnrecoverable | The FINAL census of the completion `event_time` still breaches the floor after the deadline | Abort round | `ROUND_ABORTED` | Terminal-abort (§3.10); **REACHABLE and EXECUTABLE (O3/P3/Q2):** the epilogue selects `UNRECOVERABLE` from the FINAL census (versioned, Q1) and seats a `RecoveryCompletionDueEvent`; `ApplyRecoveryCompletionAfterEpilogue` applies it — ONLY if still the latest census version and the final census still breaches — via `CompleteSecurityRecovery` **branch D (§10a) → `RoundAbort(reason = floor_unrecoverable)`**, closing ONLY this round (N1). At most one applied outcome per `RecoveryEpisodeID` (O4); a superseded decision never applies (Q1/Q3). **R4:** the decision passes `SCHEDULED → APPLYING → APPLIED` and is marked `APPLIED` ONLY after `RoundAbort` succeeds (`round_state = ROUND_ABORTED`); at the horizon the round is already terminal, so pending decisions are CANCELLED and `ApplyRecoveryCompletionAfterEpilogue` returns `terminal_recovery_noop` (no `APPLIED` after horizon closure) |
 | R15 | `ROUND_EXHAUSTED` | RefreshAvailable | A new immutable template can be committed; difficulty fixed (I12) | Prepare new `TemplateID` | `TEMPLATE_REFRESH` | Retains `RoundID`; new template only (§3.5) |
 | R16 | `ROUND_EXHAUSTED` | NoRefreshPossible | No new template can be produced | Abort round | `ROUND_ABORTED` | Terminal-abort |

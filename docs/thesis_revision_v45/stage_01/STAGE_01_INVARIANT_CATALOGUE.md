@@ -303,7 +303,14 @@ point, planned test stage, and consequence of violation.
   no event boundary within it, so no epilogue ever observes — or records a floor decision from — a
   transient `ASSIGNMENT`-with-active-episode state; every install exit ends in exactly one of `HASHING`
   + `APPLIED`, `SECURITY_RECOVERY` + `APPLY_FAILED` (rolled back), or `ROUND_ABORTED` +
-  `RECOVERY_INSTALL_FAILED_ABORTED`.
+  `RECOVERY_INSTALL_FAILED_ABORTED`. **U1 (recovery work is not an outcome; supersedes the T6 framing):** the
+  RESTORED / UNRECOVERABLE outcome is decided ONLY from a final census (`outcome_consistent_with_census`
+  is NOT weakened — a breached census can never justify RESTORED). Reserve activation / redistribution
+  attempted while the floor is still breached is a recovery-WORK action (`RecoveryWorkDueEvent` +
+  `ApplyRecoveryWorkAfterEpilogue`), NEVER a `RecoveryOutcome` and NEVER marked `APPLIED` as `RESTORED`;
+  the round stays `SECURITY_RECOVERY` and a LATER no-breach final census mints `RESTORED`. So a
+  still-breached census is never reported as a repaired/RESTORED floor, and the impossible reserve-dependent
+  `RESTORED` continuation is removed.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest
@@ -330,10 +337,12 @@ point, planned test stage, and consequence of violation.
   re-checks this identity at **every** `ACTIVE_HASHING` entry and exit boundary. Every
   adversarial-participation change is carried by a scheduled `AdversarialParticipationChangeEvent`
   (G3/H6) that mutates the census ONLY through this hook; `ActiveHashRateUpdate` is **compute-only**
-  (no sampling, no census mutation — G3). **Q4/R5:** the census maps `latest_security_census[event_time]` and
-  `security_census_dirty[event_time]` have ONE canonical atomic writer, `CommitSecurityCensus`, with **five**
-  named `census_source` values (R5): MINER_STATE_TRANSITION, APPLICABILITY_ENTRY, RECOVERY_DEADLINE,
-  RECOVERY_COMPLETION_DUE (the completion-due checkpoint, §10a), and POST_RECOVERY_APPLICATION (the single
+  (no sampling, no census mutation — G3). **Q4/R5/U7/U1:** the census maps `latest_security_census[event_time]` and
+  `security_census_dirty[event_time]` have ONE canonical atomic writer, `CommitSecurityCensus`, with **seven**
+  named `census_source` values (R5/U7/U1): MINER_STATE_TRANSITION, APPLICABILITY_ENTRY, RECOVERY_DEADLINE,
+  RECOVERY_COMPLETION_DUE (the completion-due checkpoint, §10a), RECOVERY_CONTINUATION_DUE (the branch-C
+  continuation-due checkpoint `RecoveryAssignmentContinuationDueEvent`, §10a, U7), RECOVERY_WORK_DUE (the
+  recovery-work checkpoint `RecoveryWorkDueEvent`, §9c, U1), and POST_RECOVERY_APPLICATION (the single
   post-application settlement `FinalizePostRecoveryApplicationState`, §10a/R2). Every producer (this hook and the
   capture procedures) CALLS `CommitSecurityCensus` rather than writing the maps directly — NO producer is itself a
   direct writer (R5) — and `dirty[t] = true ⇒ latest[t] exists` is structural. **R5:** the census-write order is

@@ -250,8 +250,12 @@ PROCEDURE ProcessEventTime
     #                                              event whose target_event_time = t — a zero-latency continuation
     #                                              is seated at next_representable_simulation_time(t) (§10a/R1).
     #   (3) ApplyRecoveryAssignmentContinuationAfterEpilogue(t) — T1: applies branch-C RESTORED (the deferred
-    #                                              continuation) AFTER the epilogue, mutually exclusive with (2) for
-    #                                              one episode at one event_time; it enqueues nothing at t (T7).
+    #                                              REDISTRIBUTION-ONLY continuation) AFTER the epilogue, mutually
+    #                                              exclusive with (2) for one episode at one event_time; enqueues nothing at t (T7).
+    #   (3b) ApplyRecoveryWorkAfterEpilogue(t) — U1: performs recovery WORK (reserve activation / redistribution) while
+    #                                              the floor is still breached; the round STAYS SECURITY_RECOVERY and
+    #                                              NOTHING is marked RESTORED. Mutually exclusive with (2)/(3) per episode
+    #                                              per event_time. Its wakes are seated STRICTLY LATER (U2/T7).
     #   (4) FinalizePostRecoveryApplicationState(t) — EXACTLY ONCE when the application re-dirtied t; a post-
     #                                              application SETTLEMENT, NOT a second security-floor decision. It
     #                                              archives the terminal/post-application census
@@ -261,12 +265,16 @@ PROCEDURE ProcessEventTime
     CALL FinalizeEventTimeSecurityCensus(RoundContext, t)        # R2/S6 step 1: the ONE (UNCONDITIONAL) security epilogue for t
     CALL ApplyRecoveryCompletionAfterEpilogue(RoundContext, t)    # R2 step 2 / Q2/R4/S3: post-quiescence recovery COMPLETION application
     CALL ApplyRecoveryAssignmentContinuationAfterEpilogue(RoundContext, t)   # T1: post-epilogue branch-C CONTINUATION application (mutually exclusive with the above)
+    CALL ApplyRecoveryWorkAfterEpilogue(RoundContext, t)          # U1: post-epilogue recovery WORK (reserve activation / redistribution); NEVER applies RESTORED
     CALL FinalizePostRecoveryApplicationState(RoundContext, t)    # R2 step 3: single post-application settlement (NOT a 2nd decision)
-    # (5) R1/R2/T7 FINALISATION ASSERTION. t may be finalised ONLY when it is quiescent, its census is settled, and
-    #     no recovery-continuation application remains due at t.
+    # (5) R1/R2/T7/U4 FINALISATION ASSERTION. t may be finalised ONLY when it is quiescent, its census is settled, and
+    #     no recovery-continuation / recovery-work application remains due at t (checked via the EXPLICIT due status, U4).
     ASSERT no ordinary event remains with event_time = t          # R1: the post-epilogue application enqueued NOTHING at t (T7: incl. StartWake/re-arm strictly later)
     ASSERT security_census_dirty[t] = false                       # R2: FinalizePostRecoveryApplicationState settled t (no dirty census left)
-    ASSERT no recovery-continuation application remains due at t   # T7: ApplyRecoveryAssignmentContinuationAfterEpilogue applied or re-armed strictly later; none left due at t
+    ASSERT no recovery_decisions[*].continuation_due_status = DUE with continuation_due_at_event_time = t
+                                                                  # U4/T7: every DUE continuation at t was explicitly CONSUMED/SUPERSEDED/CANCELLED (not inferred from a timestamp)
+    ASSERT no recovery_work[*].due_status = DUE with due_at_event_time = t
+                                                                  # U1/U4: every DUE recovery-work fact at t was explicitly consumed by ApplyRecoveryWorkAfterEpilogue
     ADD t to finalised_event_times                               # t is now closed to ordinary events (P1: T is ALWAYS finalised here)
     # any participation action the decision created was scheduled at a STRICTLY LATER event_time (I-02/R1),
     # so it cannot alter the census that this epilogue already finalised at t.
@@ -504,6 +512,7 @@ a queued microphase — it is the epilogue (I-01/I-02), so it has no mapping ent
 | `RecoveryDeadlineEvent` (P3: records the deadline FACT + refreshes the census; the epilogue decides, §9a) | `RECOVERY_DEADLINE` | 13b |
 | `RecoveryCompletionDueEvent` (Q2 step 1: records due + refreshes census; NO transition, §10a) | `RECOVERY_COMPLETION_DUE` | 13c |
 | `RecoveryAssignmentContinuationDueEvent` (T1 step 1: records the continuation DUE fact + refreshes the census; NO transition / NO assignment install / NO APPLIED, §10a) | `RECOVERY_ASSIGNMENT_CONTINUATION_DUE` | 13d |
+| `RecoveryWorkDueEvent` (U1 step 1: records the recovery-WORK DUE fact + refreshes the census; NO reserve activation / NO transition / NO APPLIED — the WORK is the post-epilogue hook, §9c) | `RECOVERY_WORK_DUE` | 13e |
 
 `RecoveryDeadlineEvent`, `RecoveryCompletionDueEvent`, and `RecoveryAssignmentContinuationDueEvent` are ordinary
 queued events (seated through `ScheduleEvent`, always at a deterministic `target_time <= T`, Q7/R1/T1). None
@@ -549,6 +558,7 @@ and dirties the census — it selects NO outcome and seats NO completion; the ev
 | `RecoveryDeadlineEvent` | `RecoveryDeadlineEvent` | `RECOVERY_DEADLINE` | `(RoundID, RecoveryEpisodeID)` | `event_time, delta_cycle, event_seq` | no (P3: records the deadline fact + refreshes the census; seats nothing) |
 | `RecoveryCompletionDueEvent` | `RecoveryCompletionDueEvent` | `RECOVERY_COMPLETION_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryDecisionID)` | `event_time, delta_cycle, event_seq` | no (Q2: records due + refreshes census; NO transition — the application is the post-epilogue hook) |
 | `RecoveryAssignmentContinuationDueEvent` | `RecoveryAssignmentContinuationDueEvent` | `RECOVERY_ASSIGNMENT_CONTINUATION_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryDecisionID, ContinuationGeneration)` | `event_time, delta_cycle, event_seq` | no (T1: records the continuation DUE fact + refreshes the census; NO transition / NO assignment / NO APPLIED — the branch-C rebuild is the post-epilogue hook `ApplyRecoveryAssignmentContinuationAfterEpilogue`). It carries the full recovery identity + `ContinuationGeneration`; it is seated via the S7 PostEpilogueSchedulingContext (strictly-later) |
+| `RecoveryWorkDueEvent` | `RecoveryWorkDueEvent` | `RECOVERY_WORK_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryWorkID, WorkGeneration)` | `event_time, delta_cycle, event_seq` | no (U1: records the recovery-WORK DUE fact + refreshes the census; NO reserve activation / NO transition / NO APPLIED — the WORK is the post-epilogue hook `ApplyRecoveryWorkAfterEpilogue`). It carries the full recovery identity + `WorkGeneration`; it is seated via the U3 atomic seat (published only after a successful enqueue) |
 | `RoundAbort` | `RoundAbort` | `TERMINAL_ABORT` (§21 item 1) | `(RoundID)` | `event_time, delta_cycle, event_seq` | no |
 
 Run-level hooks (NOT in the seating table, O1/Q2/R2): `CloseRoundAtHorizon` (§20b, invoked inside
@@ -631,11 +641,12 @@ STRUCTURE RoundContext registries (initialised by RoundInitialise, cleared on cl
                                  merely against the existence of a newer RecoveryDecisionID.
   recovery_decision_seq       : P5 — monotonic per-round counter advanced each time the epilogue MINTS a recovery
                                  decision. RecoveryDecisionID = (RecoveryEpisodeID, recovery_decision_seq).
-  recovery_decisions          : Q3/R4/S3/T1/T2 — map RecoveryDecisionID -> decision_record { episode, outcome,
+  recovery_decisions          : Q3/R4/S3/T1/T2/U4 — map RecoveryDecisionID -> decision_record { episode, outcome,
                                  bound_census_version (RecoveryCensusVersion), status, target_time, due_event_ref,
                                  due_at_event_time, due_dispatch_envelope, continuation_event_ref, continuation_generation,
                                  continuation_id, continuation_bound_census_version, continuation_due_at_event_time,
-                                 continuation_due_dispatch_envelope }. status in RECOVERY_DECISION_STATUS. This makes
+                                 continuation_due_dispatch_envelope, continuation_due_status (CONTINUATION_DUE_STATUS, U4),
+                                 continuation_status (ARMED after a successful re-arm enqueue, U3) }. status in RECOVERY_DECISION_STATUS. This makes
                                  each decision an EXPLICIT identity with an explicit lifecycle, NOT one ambiguous
                                  boolean. R4: after the initial CREATED, EVERY status transition is written by the SOLE
                                  mutator SetRecoveryDecisionStatus (§9). S3: continuation_event_ref is the seated
@@ -695,8 +706,46 @@ STRUCTURE RoundContext registries (initialised by RoundInitialise, cleared on cl
   #   The ASSIGNMENT branch is exercised ONLY inside the SYNCHRONOUS branch-C installation (no event boundary occurs
   #   within it), so the invariant holds at every event boundary. Every installation exit ends in exactly one of:
   #   HASHING + decision APPLIED; SECURITY_RECOVERY + decision APPLY_FAILED (rollback complete); ROUND_ABORTED +
-  #   recovery_episode_disposition = RECOVERY_INSTALL_FAILED_ABORTED (T3/T4/T5). A reserve-dependent restoration keeps
-  #   the round in SECURITY_RECOVERY (reserve PENDING/WAKING) until a later final census confirms the floor (T6).
+  #   recovery_episode_disposition = RECOVERY_INSTALL_FAILED_ABORTED (T3/T4/T5). Reserve-dependent restoration is NOT a
+  #   branch-C continuation (U1): it is recovery WORK — the round stays SECURITY_RECOVERY (reserve PENDING/WAKING)
+  #   until a later final census with NO breach mints RESTORED.
+  # --- U1 recovery-WORK registries (per-round; reset by RoundInitialise): work is DISTINCT from an outcome ---
+  # A recovery-WORK action (reserve activation / range redistribution attempted WHILE the floor is still breached)
+  #   is NEVER a RecoveryOutcome and is NEVER marked APPLIED as RESTORED. RESTORED / UNRECOVERABLE are decided ONLY
+  #   from a final census (outcome_consistent_with_census, unchanged/not weakened). Recovery work runs while the
+  #   round stays SECURITY_RECOVERY; a LATER final census with NO breach mints RESTORED, or breach+deadline mints
+  #   UNRECOVERABLE, or breach-before-deadline continues recovery.
+  # RECOVERY_WORK_ACTION in { RESERVE_ACTIVATION_REQUIRED, RANGE_REDISTRIBUTION_REQUIRED, NONE }   # U1
+  recovery_work_seq           : U1/U3 — monotonic per-round counter advanced each time the epilogue MINTS a recovery-work
+                                 action. RecoveryWorkID = (RecoveryEpisodeID, recovery_work_seq).
+  recovery_work               : U1/U3/U4 — map RecoveryWorkID -> work_record { episode, action (RECOVERY_WORK_ACTION),
+                                 bound_census_version (RecoveryCensusVersion), work_generation, work_id (RecoveryWorkID),
+                                 status (RECOVERY_WORK_STATUS), work_due_event_ref, due_at_event_time,
+                                 due_dispatch_envelope, due_status (CONTINUATION_DUE_STATUS) }. A work action is an
+                                 explicit identity with a lifecycle; it is NEVER a RecoveryDecisionID and is NEVER APPLIED.
+  pending_recovery_work       : U1 — map RecoveryEpisodeID -> the AT-MOST-ONE in-flight RecoveryWorkID (null otherwise),
+                                 so the epilogue never seats redundant work while one is armed/due (idempotent seating).
+  # RECOVERY_WORK_STATUS in { CREATED, ARMED, DUE, CONSUMED, SUPERSEDED, CANCELLED, SCHEDULE_FAILED }   # U3/U4
+  # RecoveryWorkID = (RecoveryEpisodeID, recovery_work_seq)   # U1: the versioned recovery-work identity
+  # --- U4 continuation-due status (the branch-C continuation due fact is EXPLICITLY consumed) ---
+  # CONTINUATION_DUE_STATUS in { NOT_DUE, DUE, CONSUMED, SUPERSEDED, CANCELLED }   # U4
+  #   The branch-C continuation record (recovery_decisions[decision_id]) and every recovery-work record carry a
+  #   continuation_due_status / due_status. RecoveryAssignmentContinuationDueEvent (and RecoveryWorkDueEvent) set it to
+  #   DUE; the post-epilogue hook ATOMICALLY consumes it (CONSUMED on apply/re-arm, SUPERSEDED on a stale-noop,
+  #   CANCELLED on terminal closure) BEFORE returning. ProcessEventTime's final assertion checks the EXPLICIT status,
+  #   never a timestamp field that merely equals t. (decision_record gains a `continuation_due_status` field.)
+  # --- U2 explicit scheduling-source context threaded through every post-epilogue wake path ---
+  # SchedulingSourceContext in { ORDINARY_DISPATCH(dispatch_envelope), POST_EPILOGUE(PostEpilogueSchedulingContext) }
+  #   ReserveActivate / RangeReassign / RangeAssign / StartWake / CommitRecoveryAssignmentPlan take an explicit
+  #   scheduling_context of this type; a POST_EPILOGUE caller threads its PostEpilogueSchedulingContext all the way to
+  #   ScheduleEvent, which enforces target_event_time > source_event_time (a zero-latency wake targets
+  #   next_representable_simulation_time(source_event_time); a positive-latency wake targets source_event_time +
+  #   latency). No procedure creates a pctx and then schedules using only the old ordinary dispatch envelope.
+  # --- U5 named recovery-assignment plan record (replaces the opaque INSTALL/UNDO macros) ---
+  # recovery_assignment_plan = { RecoveryInstallID, source_assignment_versions, accepted_unsearched_suffixes,
+  #   selected_reserve_miners, new_pending_assignment_specs (stable creation order), required_wake_operations,
+  #   rollback_metadata }. Produced compute-only by PrepareRecoveryAssignmentPlan (verifies I1/I3/I10/I18b BEFORE any
+  #   mutation); applied by CommitRecoveryAssignmentPlan; reverted by RollbackRecoveryAssignmentPlan.
   # Q7 recovery-timing CONFIG constants (declared, deterministic):
   #   recovery_deadline_window            : config; > 0. The delay from SECURITY_RECOVERY entry to the deadline event.
   #   configured_recovery_completion_delay: config; > 0 (or the next-representable simulation instant). The
@@ -716,12 +765,15 @@ STRUCTURE RoundContext registries (initialised by RoundInitialise, cleared on cl
   # These are keyed by event_time / TransitionEventID (both embed the monotonic run-level seq/event_time),
   # so they MUST persist across round boundaries; a per-round reset would un-finalise past timestamps or
   # drop replay-suppression state. RoundInitialise initialises them ONLY at run start and preserves them after.
-  # Q4/J1/R5 COHERENCE: security_census_dirty and latest_security_census are written by EXACTLY ONE procedure,
-  #   CommitSecurityCensus (§0.8a), with FIVE named sources (census_source, R5): MINER_STATE_TRANSITION
+  # Q4/J1/R5/U7 COHERENCE: security_census_dirty and latest_security_census are written by EXACTLY ONE procedure,
+  #   CommitSecurityCensus (§0.8a), with SEVEN named sources (census_source, R5/U7): MINER_STATE_TRANSITION
   #   (ApplyMinerStateTransition), APPLICABILITY_ENTRY (CaptureSecurityCensusOnApplicabilityEntry, K7),
   #   RECOVERY_DEADLINE (CaptureSecurityCensusOnRecoveryDeadline via RecoveryDeadlineEvent, §9a),
-  #   RECOVERY_COMPLETION_DUE (CaptureSecurityCensusOnRecoveryDeadline via RecoveryCompletionDueEvent, §10a), and
-  #   POST_RECOVERY_APPLICATION (FinalizePostRecoveryApplicationState, §10a). It writes the two maps TOGETHER
+  #   RECOVERY_COMPLETION_DUE (CaptureSecurityCensusOnRecoveryDeadline via RecoveryCompletionDueEvent, §10a),
+  #   RECOVERY_CONTINUATION_DUE (CaptureSecurityCensusOnRecoveryDeadline via RecoveryAssignmentContinuationDueEvent,
+  #   §10a, U7 — DISTINCT from the completion-due source so "continuation is due" is not conflated with "completion is
+  #   due"), RECOVERY_WORK_DUE (CaptureSecurityCensusOnRecoveryDeadline via RecoveryWorkDueEvent, §9c, U1 — the
+  #   recovery-WORK checkpoint), and POST_RECOVERY_APPLICATION (FinalizePostRecoveryApplicationState, §10a). It writes the two maps TOGETHER
   #   atomically. INVARIANT (J1): security_census_dirty[t] = true  =>  latest_security_census[t] exists — STRUCTURAL,
   #   since the two writes are the atomic body of the sole writer. The earlier "two writers"/"third writer" framing
   #   is superseded by "one writer, FIVE sources"; NO producer (ApplyMinerStateTransition or any capture procedure)
@@ -811,21 +863,23 @@ INVARIANT I18b: for each OPEN lineage_id, EXACTLY ONE live head exists in {PENDI
 
 ### 0.8a Central security-census writer (Q4)
 
-**(0.8a) One canonical atomic writer of the event-time security census (Q4; five sources + explicit write ordinal R5).**
+**(0.8a) One canonical atomic writer of the event-time security census (Q4; seven sources + explicit write ordinal R5/U1/U7).**
 The two maps `latest_security_census[event_time]` and `security_census_dirty[event_time]` are written by EXACTLY
 ONE procedure, `CommitSecurityCensus`. The earlier "exactly two writers" / "third writer" / "sole writer" framings
-are SUPERSEDED: there is ONE writer with **FIVE** named `census_source` values (R5) — MINER_STATE_TRANSITION,
-APPLICABILITY_ENTRY, RECOVERY_DEADLINE, RECOVERY_COMPLETION_DUE, POST_RECOVERY_APPLICATION. Every census producer
-computes its census and CALLS `CommitSecurityCensus`; none writes the maps directly. The census-write ORDER is the
-explicit per-run `security_census_write_seq_by_event_time` ordinal, owned SOLELY by this writer (R5).
+are SUPERSEDED: there is ONE writer with **SEVEN** named `census_source` values (R5/U7/U1) — MINER_STATE_TRANSITION,
+APPLICABILITY_ENTRY, RECOVERY_DEADLINE, RECOVERY_COMPLETION_DUE, RECOVERY_CONTINUATION_DUE (U7),
+RECOVERY_WORK_DUE (U1), POST_RECOVERY_APPLICATION. Every census producer computes its census and CALLS
+`CommitSecurityCensus`; none writes the maps directly. The census-write ORDER is the explicit per-run
+`security_census_write_seq_by_event_time` ordinal, owned SOLELY by this writer (R5).
 
 ```
 PROCEDURE CommitSecurityCensus                                   # Q4: the SOLE atomic writer of the two census maps
   INPUTS: RoundContext, event_time,
           census_provenance,        # (RoundID_at_census, TemplateID_at_census, state_version_at_census) — J8
           H_active, H_honest, H_adversarial, q_adv,
-          census_source             # R5: one of CENSUS_SOURCE = {MINER_STATE_TRANSITION, APPLICABILITY_ENTRY,
-                                    #     RECOVERY_DEADLINE, RECOVERY_COMPLETION_DUE, POST_RECOVERY_APPLICATION}
+          census_source             # R5/U7/U1: one of CENSUS_SOURCE = {MINER_STATE_TRANSITION, APPLICABILITY_ENTRY,
+                                    #     RECOVERY_DEADLINE, RECOVERY_COMPLETION_DUE, RECOVERY_CONTINUATION_DUE (U7),
+                                    #     RECOVERY_WORK_DUE (U1), POST_RECOVERY_APPLICATION}
   PRECONDITIONS: the caller has ALREADY computed a coherent census (H_active = H_honest + H_adversarial, I17);
                  called ONLY by the census sources below — nothing writes the two maps directly (R5: producers
                  CALL this writer; NO producer is itself a direct writer of security_census_dirty/latest_security_census)
@@ -850,13 +904,14 @@ PROCEDURE CommitSecurityCensus                                   # Q4: the SOLE 
   RETURNS: security_census_committed(event_time, census_source)
   INVARIANT (J1): after EVERY call, security_census_dirty[event_time] = true AND latest_security_census[event_time]
         EXISTS — guaranteed structurally because the two writes are the atomic body of the SOLE writer.
-  NOTE: Q4/R5: the SINGLE canonical atomic writer, and the SOLE owner of the census-write ordinal
-        (security_census_write_seq_by_event_time). Its FIVE sources (CENSUS_SOURCE) — ApplyMinerStateTransition
+  NOTE: Q4/R5/U7/U1: the SINGLE canonical atomic writer, and the SOLE owner of the census-write ordinal
+        (security_census_write_seq_by_event_time). Its SEVEN sources (CENSUS_SOURCE) — ApplyMinerStateTransition
         (MINER_STATE_TRANSITION, §0.9), CaptureSecurityCensusOnApplicabilityEntry (APPLICABILITY_ENTRY, §9),
         CaptureSecurityCensusOnRecoveryDeadline (RECOVERY_DEADLINE from RecoveryDeadlineEvent §9a;
-        RECOVERY_COMPLETION_DUE from RecoveryCompletionDueEvent §10a, R5), and FinalizePostRecoveryApplicationState
-        (POST_RECOVERY_APPLICATION, §10a, R2/R5) — CALL this rather than writing the maps directly. S5: the dirty
-        flag is CLEARED only by SettleSecurityCensusDirty (below), never directly.
+        RECOVERY_COMPLETION_DUE from RecoveryCompletionDueEvent §10a; RECOVERY_CONTINUATION_DUE from
+        RecoveryAssignmentContinuationDueEvent §10a, U7; RECOVERY_WORK_DUE from RecoveryWorkDueEvent §9c, U1), and
+        FinalizePostRecoveryApplicationState (POST_RECOVERY_APPLICATION, §10a, R2/R5) — CALL this rather than writing
+        the maps directly. S5: the dirty flag is CLEARED only by SettleSecurityCensusDirty (below), never directly.
 
 PROCEDURE SettleSecurityCensusDirty                             # S5: the SOLE clearer of security_census_dirty[event_time]
   INPUTS: RoundContext, event_time, settlement_kind   # settlement_kind in {PRIMARY_EPILOGUE, POST_RECOVERY_APPLICATION}
@@ -1002,14 +1057,22 @@ PROCEDURE ApplyMinerStateTransition
 
 ```
 PROCEDURE StartWake
-  INPUTS: RoundContext, MinerID, target_assignment, from_state, dispatch_envelope   # L1: explicit envelope
+  INPUTS: RoundContext, MinerID, target_assignment, from_state,
+          scheduling_context   # U2: SchedulingSourceContext in {ORDINARY_DISPATCH(dispatch_envelope), POST_EPILOGUE(pctx)}.
+                               #   A dispatched handler that threads a bare `dispatch_envelope = e` is read as
+                               #   scheduling_context = ORDINARY_DISPATCH(e); a post-epilogue install path passes
+                               #   POST_EPILOGUE(pctx) EXPLICITLY (never a bare ordinary envelope, U2).
   PRECONDITIONS: from_state = miner_state(MinerID) in {REGISTERED, RESERVE, EXHAUSTED_PENDING, LOW_POWER_LISTEN};
                  target_assignment is a bound PENDING (or PAUSED-resumed) assignment for MinerID;
-                 # L1: dispatch_envelope carries (event_time, delta_cycle, event_seq) from EXACTLY ONE of:
-                 #     (1) the dispatching queued-event envelope of the handler that called StartWake, or
-                 #     (2) a DriverEventEnvelope created THROUGH ScheduleEvent (§0.7f) -- never a manually
-                 #     stamped `next EQ.event_creation_seq`.
+                 # U2: scheduling_context is EXPLICIT. An ORDINARY_DISPATCH carries the dispatching queued-event
+                 #     envelope; a POST_EPILOGUE carries the PostEpilogueSchedulingContext of the post-epilogue hook
+                 #     that is installing this wake. An ordinary dispatched caller may pass
+                 #     scheduling_context = ORDINARY_DISPATCH(dispatch_envelope) (the default reading when a bare
+                 #     dispatch_envelope is threaded); a post-epilogue caller MUST pass POST_EPILOGUE(pctx). L1: the
+                 #     underlying dispatch_envelope (for the WAKING transition) is scheduling_context's envelope —
+                 #     ORDINARY_DISPATCH(e) -> e; POST_EPILOGUE(pctx) -> pctx.source_envelope — never a manual seq.
   EFFECTS:
+    SET dispatch_envelope <- (scheduling_context is ORDINARY_DISPATCH(e) ? e : scheduling_context.pctx.source_envelope)   # U2/L1
     # F5: NON-BLOCKING. Begin the wake and RETURN to the event loop immediately; do NOT run the
     #     wake latency inside this handler (that would serialise other miners).
     # L1: the WAKING transition carries the FULL dispatch envelope; ApplyMinerStateTransition never lacks
@@ -1020,22 +1083,32 @@ PROCEDURE StartWake
                                    candidate_id = null, propagation_id = null)   # F6
     # ---- [SIMULATION SAMPLING] ----
     wake_latency <- [SIMULATION SAMPLING] wake_latency_model(MinerID)    # the ONLY wake draw (sampling summary item 3)
-    # ---- L6: schedule WakeCompleteEvent THROUGH ScheduleEvent, which DERIVES delta_cycle. StartWake
-    #          supplies ONLY target_event_time + target_microphase; it NEVER writes delta_cycle.
+    # ---- U2/L6: schedule WakeCompleteEvent THROUGH ScheduleEvent, DERIVING delta_cycle. StartWake supplies ONLY
+    #          target_event_time + target_microphase (+ the POST_EPILOGUE context, if any); it NEVER writes delta_cycle.
+    IF scheduling_context is POST_EPILOGUE(pctx):
+      # U2/U3/gate 4: a post-epilogue wake targets STRICTLY LATER than the source event_time — a positive latency
+      #   targets source_event_time + wake_latency; a ZERO latency targets next_representable_simulation_time(source).
+      SET src <- pctx.source_event_time
+      SET target <- (wake_latency > 0 ? src + wake_latency : next_representable_simulation_time(src))
+      RETURN ScheduleEvent(EQ, RoundContext, WakeCompleteEvent,
+                           target_event_time = target, target_microphase = WAKE_COMPLETE,
+                           {MinerID, AssignmentID(target_assignment)},
+                           post_epilogue_context = pctx) AND wake_started   # U2/S7: pctx reaches ScheduleEvent; strictly later
     IF wake_latency > 0:
       CALL ScheduleEvent(EQ, RoundContext, WakeCompleteEvent,
                          target_event_time = now + wake_latency, target_microphase = WAKE_COMPLETE,
                          {MinerID, AssignmentID(target_assignment)})   # future event_time -> ScheduleEvent derives dc = 0
-    ELSE:  # wake_latency = 0 (zero-latency wake, H5)
+    ELSE:  # wake_latency = 0 (zero-latency wake, H5) — ORDINARY dispatch
       CALL ScheduleEvent(EQ, RoundContext, WakeCompleteEvent,
                          target_event_time = now, target_microphase = WAKE_COMPLETE,
                          {MinerID, AssignmentID(target_assignment)})   # same event_time -> ScheduleEvent derives the forward dc (H5)
     RETURN wake_started                                                  # returns immediately (0.1)
   RETURNS: wake_started
-  NOTE: L1: StartWake threads dispatch_envelope into the WAKING transition. L6/H5: WakeCompleteEvent is
-        scheduled via ScheduleEvent with ONLY (target_event_time, target_microphase); ScheduleEvent alone
-        derives delta_cycle (a future event_time -> 0; a zero-latency same-time wake -> the forward next
-        delta-cycle at WAKE_COMPLETE, never backward). No caller of ScheduleEvent writes delta_cycle.
+  NOTE: L1/U2: StartWake threads scheduling_context's dispatch_envelope into the WAKING transition and threads a
+        POST_EPILOGUE context (when present) all the way to ScheduleEvent — so a post-epilogue wake is enqueued
+        STRICTLY LATER than the source time (a zero-latency post-epilogue wake at next_representable_simulation_time(src),
+        never at src; gate 4). L6/H5: for an ORDINARY_DISPATCH wake, ScheduleEvent alone derives delta_cycle (a future
+        event_time -> 0; a zero-latency same-time wake -> the forward next delta-cycle). No caller writes delta_cycle.
 
 PROCEDURE WakeCompleteEvent
   INPUTS: RoundContext, MinerID, target_assignment, dispatch_envelope   # M1: this queued handler's own envelope
@@ -1241,6 +1314,9 @@ PROCEDURE RoundInitialise
     SET        recovery_install_in_progress <- false      # T3: no branch-C installation in progress at round start
     SET        recovery_install_seq        <- 0           # T3: deterministic RecoveryInstallID counter
     SET        active_recovery_install_decision <- null   # T3: no installation decision at round start
+    SET        recovery_work_seq           <- 0           # U1/U3: deterministic RecoveryWorkID counter
+    INITIALISE recovery_work               <- empty map   # U1: per-work-action record {action, status, due_status, ...}
+    INITIALISE pending_recovery_work       <- empty map   # U1: per-episode AT-MOST-ONE in-flight RecoveryWorkID
     INITIALISE residency_ledger          <- empty    # H7/I19: sole owner of per-miner t_<state> this round
     # Q5: PER-RUN state is NOT (re)created here — it comes from RunContext (RunInitialise, §1.0), preserved across
     #     rounds. RoundInitialise binds RunContext (EventQueueContext, RunHookContext, security_census maps,
@@ -1448,8 +1524,19 @@ PROCEDURE PrepareParticipantsForNewRound
           CONTINUE
     # K2: the intended assignment set is now established (all PENDING, waking). Perform the EXPLICIT
     #     ASSIGNMENT -> HASHING transition through the named procedure (never prose-only R4).
-    CALL CompleteAssignmentPhase(RoundContext, dispatch_envelope)  # K2: ASSIGNMENT -> HASHING (M1 envelope)
-  RETURNS: participant_set_prepared
+    # U6: CAPTURE and BRANCH on the T5 disposition — do NOT return participant_set_prepared while the round is still ASSIGNMENT.
+    SET disp <- CALL CompleteAssignmentPhase(RoundContext, dispatch_envelope)  # K2/T5: ASSIGNMENT -> HASHING (M1 envelope)
+    IF disp = assignment_phase_failed(reason):
+      # U6: a well-formedness failure is caught BEFORE the irreversible HASHING transition (round still ASSIGNMENT,
+      #   reversible). Roll back this round's just-created PENDING assignments + their wakes and take the declared
+      #   setup-failure path; NEVER return participant_set_prepared with the round left in ASSIGNMENT.
+      FOR EACH a in the PENDING assignments created by THIS PrepareParticipantsForNewRound (stable order by MinerID, then CandidateID):
+        IF a.wake_event_ref is still pending on EQ: CANCEL a.wake_event_ref on EQ
+        CLOSE a as CLOSED (status = CLOSED, custody_status = revoked, reason = participant_setup_failed)   # J7: no live head (I18b)
+      RECORD participant_setup_failed(reason)
+      RETURN participant_set_setup_failed(reason)                 # round stays ASSIGNMENT for a legal re-setup / abort; NOT success
+    RETURN participant_set_prepared
+  RETURNS: participant_set_prepared | participant_set_setup_failed
   NOTE: K1: EVERY LOW_POWER_LISTEN entry_stop_reason (VALID_SOLUTION_VERIFIED, ROUND_ACCEPTED,
         ROUND_ABORTED, RANGE_EXHAUSTED, ASSIGNMENT_REVOKED) has an explicit disposition; VALID_SOLUTION_
         VERIFIED never falls through. It binds fresh ORIGINAL/REASSIGNED PENDING to the NEW
@@ -1566,10 +1653,12 @@ PROCEDURE MinerRegister
 
 ```
 PROCEDURE RangeAssign
-  INPUTS: RoundContext, MinerID, requested_size, lease_duration, dispatch_envelope   # L1: threaded envelope
+  INPUTS: RoundContext, MinerID, requested_size, lease_duration,
+          scheduling_context   # U2: SchedulingSourceContext — ORDINARY_DISPATCH(dispatch_envelope) for a dispatched
+                               #   caller, or POST_EPILOGUE(pctx) when CommitRecoveryAssignmentPlan calls it (§10a)
   PRECONDITIONS: miner_state(MinerID) in {REGISTERED, RESERVE}; round_state = ASSIGNMENT or HASHING;
-                 # L1: dispatch_envelope is threaded from the dispatched caller (its own dispatching
-                 #     queued-event envelope), never manually stamped.
+                 # U2: scheduling_context is threaded to StartWake -> ScheduleEvent; a POST_EPILOGUE caller's wake is
+                 #     seated STRICTLY LATER. A dispatched caller equivalently passes ORDINARY_DISPATCH(dispatch_envelope).
   EFFECTS:
     SELECT candidate_range from unassigned portion of nonce_domain      # fresh, never-assigned -> ORIGINAL
     # F4: the shared constructor performs the I1 overlap guard, ledgers the version, and sets
@@ -1582,7 +1671,7 @@ PROCEDURE RangeAssign
     #           ACTIVE_HASHING (T5) and PENDING -> CURRENT happen later in WakeCompleteEvent.
     RETURN CALL StartWake(RoundContext, MinerID, target_assignment = assignment,
                           from_state = miner_state(MinerID),
-                          dispatch_envelope = dispatch_envelope)        # T3 (REGISTERED) or T4 (RESERVE); L1
+                          scheduling_context = scheduling_context)        # T3 (REGISTERED) or T4 (RESERVE); U2: threaded
   RETURNS: assignment (PENDING; becomes CURRENT at its scheduled WakeCompleteEvent)
   NOTE: A zero wake-latency experimental value is permitted later, but the WAKING state and its
         P_wake*t_wake + E_transition accounting path always exist (D2). StartWake returns to the
@@ -2157,14 +2246,23 @@ PROCEDURE SecurityFloorEvaluate
       ELSE IF census.breach AND census.deadline_reached: SET warranted <- UNRECOVERABLE
       ELSE:                                              SET warranted <- NONE
       IF warranted = NONE:
-        RETURN recovery_pending(census.RecoveryCensusVersion)                 # e.g. breach before deadline
+        # U1: a breach BEFORE the deadline is NOT a RecoveryOutcome. It is the trigger to attempt recovery WORK.
+        #   outcome_consistent_with_census(RESTORED) is NOT weakened (a breached census can never justify RESTORED).
+        #   Determine whether reserve-activation / redistribution WORK can be attempted; if so, seat ONE versioned
+        #   RecoveryWorkDueEvent (the post-epilogue recovery-work hook performs it). The round stays SECURITY_RECOVERY;
+        #   a LATER final census with NO breach mints RESTORED. Recovery WORK is NEVER an outcome and NEVER APPLIED.
+        SET work_action <- CALL ClassifyRecoveryWork(RoundContext, episode, census)   # U1: RECOVERY_WORK_ACTION
+        IF work_action != NONE:
+          RETURN CALL SeatRecoveryWork(RoundContext, episode, work_action, t, census.RecoveryCensusVersion)   # U1/U3
+        RETURN recovery_pending(census.RecoveryCensusVersion)                 # no work available; keep waiting (breach before deadline)
       # Seat a completion for the warranted outcome (SeatRecoveryCompletion; the ACTUAL application is deferred
       #   to ApplyRecoveryCompletionAfterEpilogue at the completion event_time, Q2).
       RETURN CALL SeatRecoveryCompletion(RoundContext, episode, warranted, t, census.RecoveryCensusVersion)   # P4/P5/Q2/Q3/Q7
     RETURN no_breach
   RETURNS: breach | breach_persists | recovery_pending | recovery_completion_seated | recovery_completion_not_seated |
            recovery_completion_already_pending | recovery_completion_horizon_deferred |
-           recovery_completion_already_finalised | no_breach | refresh_observation_only |
+           recovery_completion_already_finalised | recovery_work_seated | recovery_work_already_pending |
+           recovery_work_not_seated | recovery_work_horizon_deferred | no_breach | refresh_observation_only |
            exhausted_observation_only | setup_observation_only | stale_census_observation | terminal_stale_noop
   NOTE: J6/J8/I-05: round-state applicability is checked BEFORE any threshold evaluation. Terminal rounds return
         terminal_stale_noop first; setup/refresh/exhausted states record only an observation; a stale-context
@@ -2222,8 +2320,17 @@ PROCEDURE CancelActiveRecoveryEpisode                           # S4: terminal c
         CANCEL D.due_event_ref on EQ                            # cancel the queued RecoveryCompletionDueEvent
       IF D.continuation_event_ref != null AND D.continuation_event_ref is still pending on EQ:
         CANCEL D.continuation_event_ref on EQ                   # S3/S4/T1: cancel the queued RecoveryAssignmentContinuationDueEvent
+      IF D.continuation_due_status = DUE: SET recovery_decisions[decision_id].continuation_due_status <- CANCELLED   # U4: explicit terminal consumption
       CALL SetRecoveryDecisionStatus(RoundContext, decision_id, CANCELLED)   # S4/R6: cancel + keep the mirror consistent
     SET pending_recovery_decisions[episode] <- empty set
+    # U1/U4: cancel an in-flight recovery-WORK action too (its RecoveryWorkDueEvent + its DUE fact).
+    IF pending_recovery_work[episode] != null:
+      SET W <- recovery_work[pending_recovery_work[episode]]
+      IF W.work_due_event_ref != null AND W.work_due_event_ref is still pending on EQ:
+        CANCEL W.work_due_event_ref on EQ                       # U1: cancel the queued RecoveryWorkDueEvent
+      SET recovery_work[W.work_id].status <- CANCELLED
+      IF W.due_status = DUE: SET recovery_work[W.work_id].due_status <- CANCELLED   # U4: explicit terminal consumption
+      SET pending_recovery_work[episode] <- null
     # S4: record the episode disposition and CLEAR the active episode. Do NOT set recovery_outcome_finalised —
     #     no outcome was applied here (that is reserved for an actually-applied RESTORED/UNRECOVERABLE).
     SET recovery_episode_disposition[episode] <- TERMINAL_CANCELLED
@@ -2375,12 +2482,15 @@ PROCEDURE RecoveryDeadlineEvent                                  # O3/P3/§9a: r
         SeatRecoveryCompletion (§9), not here.
 
 PROCEDURE CaptureSecurityCensusOnRecoveryDeadline                # P3: coherent census producer at a recovery-timeline checkpoint
-  INPUTS: RoundContext, at,   # at = the event_time (dispatch_envelope.event_time of RecoveryDeadlineEvent or RecoveryCompletionDueEvent)
-          census_source = RECOVERY_DEADLINE   # R5: RECOVERY_DEADLINE (RecoveryDeadlineEvent, §9a) or
-                                              #     RECOVERY_COMPLETION_DUE (RecoveryCompletionDueEvent, §10a)
-  PRECONDITIONS: called by RecoveryDeadlineEvent (§9a, census_source = RECOVERY_DEADLINE) or
-                 RecoveryCompletionDueEvent (§10a, Q2, census_source = RECOVERY_COMPLETION_DUE) — the two
-                 recovery-timeline census checkpoints; round_state = SECURITY_RECOVERY (a floor-applicable state)
+  INPUTS: RoundContext, at,   # at = the event_time (dispatch_envelope.event_time of the recovery-timeline checkpoint event)
+          census_source = RECOVERY_DEADLINE   # R5/U7/U1: RECOVERY_DEADLINE (RecoveryDeadlineEvent, §9a),
+                                              #   RECOVERY_COMPLETION_DUE (RecoveryCompletionDueEvent, §10a),
+                                              #   RECOVERY_CONTINUATION_DUE (RecoveryAssignmentContinuationDueEvent, §10a, U7), or
+                                              #   RECOVERY_WORK_DUE (RecoveryWorkDueEvent, §9c, U1)
+  PRECONDITIONS: called by one of the FOUR recovery-timeline census checkpoints — RecoveryDeadlineEvent
+                 (§9a, RECOVERY_DEADLINE), RecoveryCompletionDueEvent (§10a, RECOVERY_COMPLETION_DUE),
+                 RecoveryAssignmentContinuationDueEvent (§10a, RECOVERY_CONTINUATION_DUE, U7), or RecoveryWorkDueEvent
+                 (§9c, RECOVERY_WORK_DUE, U1); round_state = SECURITY_RECOVERY (a floor-applicable state)
   EFFECTS:
     # Compute the census NOW from the ACTIVE_HASHING roster (like CaptureSecurityCensusOnApplicabilityEntry, K7)
     # and publish via the sole writer CommitSecurityCensus (Q4), so the epilogue decides once from the FINAL
@@ -2399,21 +2509,204 @@ PROCEDURE CaptureSecurityCensusOnRecoveryDeadline                # P3: coherent 
           H_active(at), H_honest(at), H_adversarial(at), q_adv(at),
           census_source = census_source)                               # Q4/R5: sole atomic writer; provenance-distinct source
     RETURN recovery_deadline_census_captured(at)
-  NOTE: Q4/P3/R5: a SOURCE of the sole writer CommitSecurityCensus (§0.8a), carrying census_source RECOVERY_DEADLINE
-        (from RecoveryDeadlineEvent) or RECOVERY_COMPLETION_DUE (from RecoveryCompletionDueEvent, R5), so the two
-        recovery-timeline checkpoints have DISTINCT census provenance. It guarantees the checkpoint timestamp has a
-        census for the epilogue to decide from, WITHOUT itself selecting an outcome; a same-timestamp
+  NOTE: Q4/P3/R5/U7/U1: a SOURCE of the sole writer CommitSecurityCensus (§0.8a), carrying census_source
+        RECOVERY_DEADLINE, RECOVERY_COMPLETION_DUE, RECOVERY_CONTINUATION_DUE (U7), or RECOVERY_WORK_DUE (U1), so the
+        FOUR recovery-timeline checkpoints have DISTINCT census provenance. It guarantees the checkpoint timestamp has
+        a census for the epilogue to decide from, WITHOUT itself selecting an outcome; a same-timestamp
         MINER_STATE_TRANSITION commit still overwrites it, so the epilogue sees the FINAL census.
+```
+
+## 9c. Recovery WORK — reserve activation / redistribution while the floor is still breached (U1/U3/U4/U5)
+
+```
+FUNCTION ClassifyRecoveryWork                                    # U1: compute-only — which recovery WORK (if any) to attempt
+  INPUTS: RoundContext, episode, census   # census = latest_recovery_census[episode] (breach = true, deadline not reached)
+  PRECONDITIONS: round_state = SECURITY_RECOVERY; census.breach = true AND census.deadline_reached = false (breach
+                 BEFORE the deadline). This FUNCTION selects a WORK action, NEVER a RecoveryOutcome. It is compute-only.
+  EFFECTS:
+    # U1: a WORK action is NOT an outcome. It is the recovery POLICY's classification of what could raise H_honest to
+    #   the floor at a LATER event_time. It NEVER mutates state and NEVER decides RESTORED/UNRECOVERABLE.
+    IF there is at least one miner in RESERVE that can be activated to add honest hash rate toward the deficit:
+      RETURN RESERVE_ACTIVATION_REQUIRED           # U1: activating reserves is the work
+    IF the honest ACTIVE_HASHING coverage can be redistributed to close the deficit WITHOUT new reserve hash rate:
+      RETURN RANGE_REDISTRIBUTION_REQUIRED         # U1: pure redistribution among already-active honest miners
+    RETURN NONE                                    # no recovery work is available this census (keep waiting)
+  RETURNS: RECOVERY_WORK_ACTION in { RESERVE_ACTIVATION_REQUIRED, RANGE_REDISTRIBUTION_REQUIRED, NONE }
+  NOTE: U1: separates the recovery-WORK classification (B) from the outcome decision (A). A RANGE_REDISTRIBUTION_REQUIRED
+        that does NOT depend on future reserve hash rate is the ONLY redistribution that could ALSO be applied as a
+        RESTORED continuation once a no-breach census exists (§10a); while the census still shows a breach, both
+        classifications are WORK, never RESTORED.
+
+PROCEDURE SeatRecoveryWork                                       # U1/U3: seat ONE versioned RecoveryWorkDueEvent (atomic, idempotent)
+  INPUTS: RoundContext, episode, work_action, t, census_version   # work_action in {RESERVE_ACTIVATION_REQUIRED, RANGE_REDISTRIBUTION_REQUIRED}
+  PRECONDITIONS: called by the epilogue (SecurityFloorEvaluate) in the breach-before-deadline branch;
+                 round_state = SECURITY_RECOVERY; episode = current_recovery_episode
+  EFFECTS:
+    # O4 apply-once: no work once an outcome is finalised.
+    IF recovery_outcome_finalised[episode] is set:
+      RETURN recovery_work_already_pending(NONE)          # nothing to seat (episode already finalised)
+    # U1 idempotent: at most ONE in-flight recovery-work action per episode. If one is armed/due and still bound to a
+    #   current census version, do not re-seat (the post-epilogue hook will run it / re-arm it).
+    IF pending_recovery_work[episode] != null:
+      SET W0 <- recovery_work[pending_recovery_work[episode]]
+      IF W0.status in {ARMED, DUE} AND W0.bound_census_version = census_version:
+        RETURN recovery_work_already_pending(W0.action)
+    # U3 ATOMIC SEAT. Compute identity + target BEFORE mutating; publish the active work identity ONLY after
+    #   ScheduleEvent succeeds. Never advance the work seq / publish a ref on a rejected enqueue.
+    SET candidate_seq <- recovery_work_seq + 1
+    SET work_id <- (episode, candidate_seq)                # RecoveryWorkID
+    SET t_due <- t + configured_recovery_completion_delay  # Q7-style deterministic delay (> 0)
+    IF t_due > run_horizon_T:                              # O2 horizon: never seat beyond T
+      RECORD recovery_work_horizon_deferred(episode, t_due)
+      RETURN recovery_work_horizon_deferred(episode)       # keep SECURITY_RECOVERY; CloseRoundAtHorizon governs
+    SET result <- CALL ScheduleEvent(EQ, RoundContext, RecoveryWorkDueEvent,
+                     target_event_time = t_due, target_microphase = RECOVERY_WORK_DUE,
+                     {RecoveryEpisodeID = episode, RecoveryWorkID = work_id, WorkGeneration = 1,
+                      RecoveryWorkAction = work_action, RecoveryCensusVersion = census_version,
+                      RoundID_at_work = RoundID_current, TemplateID_at_work = TemplateID_committed,
+                      state_version_at_work = state_version_current})   # U1/U3
+    IF result = scheduled(...):
+      # U3 PUBLISH only after success.
+      SET recovery_work_seq <- candidate_seq
+      SET recovery_work[work_id] <- work_record(episode = episode, action = work_action,
+            bound_census_version = census_version, work_generation = 1, work_id = work_id, status = ARMED,
+            work_due_event_ref = result.event_ref, due_at_event_time = null, due_dispatch_envelope = null,
+            due_status = NOT_DUE)
+      SET pending_recovery_work[episode] <- work_id
+      RETURN recovery_work_seated(work_id, work_action)
+    # U3 REJECTED: do NOT advance recovery_work_seq, do NOT publish a ref, do NOT report pending. Round stays SECURITY_RECOVERY.
+    RECORD recovery_work_schedule_rejected(episode, candidate_seq, result)
+    RETURN recovery_work_not_seated(result)
+  RETURNS: recovery_work_seated | recovery_work_not_seated | recovery_work_already_pending | recovery_work_horizon_deferred
+  NOTE: U1/U3: the SOLE seater / re-arm of a recovery-WORK action, implementing the U3 ATOMIC protocol — it computes a
+        candidate identity (candidate_seq / work_id) and target t_due, validates t_due <= T (else recovery_work_horizon_deferred
+        — no event enqueued), calls ScheduleEvent WITHOUT mutating the active work identity, and PUBLISHES (recovery_work_seq,
+        the work_record with status = ARMED, work_due_event_ref, pending_recovery_work) ONLY after a successful enqueue. On a
+        rejected enqueue it does NOT advance recovery_work_seq, publishes NO event reference, returns an explicit disposition
+        (recovery_work_not_seated), and NEVER reports a pending/reserve_pending state; the round stays SECURITY_RECOVERY (or
+        the horizon-close path governs). It is idempotent per episode (at most one in-flight RecoveryWorkID). A recovery-work
+        action is NEVER a RecoveryOutcome; it never marks a decision APPLIED. The WORK itself runs in the post-epilogue hook
+        ApplyRecoveryWorkAfterEpilogue (§9c). Because a recovery-work action is not an APPLYING decision, no APPLYING decision
+        is ever left without a live event, a controller (pending_recovery_work), or an explicit terminal/horizon disposition (U3).
+
+PROCEDURE RecoveryWorkDueEvent                                  # U1/U4: records the work DUE fact + refreshes census; NO work here
+  INPUTS: RoundContext, dispatch_envelope, RecoveryEpisodeID, RecoveryWorkID, WorkGeneration, RecoveryWorkAction,
+          RecoveryCensusVersion, RoundID_at_work, TemplateID_at_work, state_version_at_work
+  PRECONDITIONS: a dispatched queued handler seated by SeatRecoveryWork (or a U3 re-arm) at (t_due, RECOVERY_WORK_DUE);
+                 its dispatch_envelope is its own (§0.7f), envelope_namespace = ORDINARY_EVENT
+  EFFECTS:
+    SET episode <- RecoveryEpisodeID ; SET W <- recovery_work[RecoveryWorkID]
+    # U1/U3/U4 STALE + IDENTITY GUARD: meaningful only for the CURRENT episode/epoch, the ACTIVE work generation, and
+    #   an ARMED work action, with no outcome finalised. It records ONLY the due fact + refreshes the census; it
+    #   performs NO reserve activation, NO transition, and NO APPLIED (the WORK is the post-epilogue hook, §9c).
+    IF round_state != SECURITY_RECOVERY
+       OR RecoveryEpisodeID != current_recovery_episode
+       OR pending_recovery_work[episode] != RecoveryWorkID
+       OR W.status != ARMED
+       OR WorkGeneration != W.work_generation
+       OR recovery_outcome_finalised[episode] is set
+       OR RoundID_at_work != RoundID_current OR TemplateID_at_work != TemplateID_committed
+       OR state_version_at_work != state_version_current:
+      RETURN recovery_work_due_stale_noop(RecoveryWorkID)
+    # U4: RECORD that the work is DUE at THIS event_time; stash the dispatch_envelope for the post-epilogue hook.
+    SET recovery_work[RecoveryWorkID].status <- DUE
+    SET recovery_work[RecoveryWorkID].due_status <- DUE
+    SET recovery_work[RecoveryWorkID].due_at_event_time <- dispatch_envelope.event_time
+    SET recovery_work[RecoveryWorkID].due_dispatch_envelope <- dispatch_envelope
+    # U1: REFRESH a coherent census for THIS event_time (RECOVERY_WORK_DUE provenance) so the epilogue has the FINAL
+    #   census to (re)version and decide from — a same-time WakeCompleteEvent that restores the floor still overwrites it.
+    CALL CaptureSecurityCensusOnRecoveryDeadline(RoundContext, dispatch_envelope.event_time,
+                                                 census_source = RECOVERY_WORK_DUE)   # U1/R5
+    RETURN recovery_work_due(RecoveryWorkID, dispatch_envelope.event_time)
+  RETURNS: recovery_work_due | recovery_work_due_stale_noop
+  NOTE: U1/U4: step 1 of the recovery-work two-step. It NEVER activates a reserve and NEVER decides an outcome; it
+        records the due fact (due_status = DUE) and refreshes the census. The WORK is ApplyRecoveryWorkAfterEpilogue,
+        run AFTER this event_time's epilogue — so no recovery work runs during the ordinary-event drain.
+
+PROCEDURE ApplyRecoveryWorkAfterEpilogue                        # U1/U3/U4/U5: post-epilogue hook — performs recovery WORK; NEVER applies RESTORED
+  INPUTS: RoundContext, event_time t
+  PRECONDITIONS: invoked by ProcessEventTime AFTER FinalizeEventTimeSecurityCensus(t), ApplyRecoveryCompletionAfterEpilogue(t),
+                 and ApplyRecoveryAssignmentContinuationAfterEpilogue(t); NOT dispatched from the queue. It NEVER marks
+                 a decision APPLIED and NEVER sets recovery_outcome_finalised — recovery WORK is not an outcome (U1).
+  EFFECTS:
+    IF current_recovery_episode = null: RETURN nothing_due          # not in recovery (or an outcome cleared it)
+    SET episode <- current_recovery_episode
+    IF pending_recovery_work[episode] = null: RETURN nothing_due
+    SET work_id <- pending_recovery_work[episode] ; SET W <- recovery_work[work_id]
+    IF W.due_status != DUE OR W.due_at_event_time != t: RETURN nothing_applicable_due(t)
+    SET census <- latest_recovery_census[episode]
+    # U1/U4 FRESHNESS. Perform work ONLY while the census still shows a breach before the deadline and the bound
+    #   version is current; otherwise CONSUME the due fact as SUPERSEDED (the epilogue's own outcome decision governs).
+    IF round_state != SECURITY_RECOVERY
+       OR recovery_outcome_finalised[episode] is set
+       OR W.bound_census_version != census.RecoveryCensusVersion
+       OR NOT (census.breach = true AND census.deadline_reached = false):
+      SET recovery_work[work_id].due_status <- SUPERSEDED           # U4: consumed as superseded
+      SET recovery_work[work_id].status <- SUPERSEDED
+      SET pending_recovery_work[episode] <- null
+      RETURN recovery_work_superseded(work_id)
+    # ---- FRESH: perform the WORK. It runs WHILE the floor is still breached; it NEVER applies RESTORED. ----
+    SET pctx <- PostEpilogueSchedulingContext(source_event_time = t, source_envelope = W.due_dispatch_envelope,
+                  EventQueueContext = EQ, RunContext = RoundContext.RunContext)   # U2/T7: strictly-later scheduling
+    SET plan <- CALL PrepareRecoveryAssignmentPlan(RoundContext, episode, W.action, census)   # U5: compute-only; verifies I1/I3/I10/I18b
+    IF plan = plan_invalid(reason):
+      # U4: consume the due fact; keep the episode (a later epilogue re-classifies). No mutation occurred.
+      SET recovery_work[work_id].due_status <- CONSUMED
+      SET recovery_work[work_id].status <- CONSUMED
+      SET pending_recovery_work[episode] <- null
+      RECORD recovery_work_plan_invalid(work_id, reason)
+      RETURN recovery_work_plan_invalid(work_id)                    # round stays SECURITY_RECOVERY; no reserve activated
+    SET commit <- CALL CommitRecoveryAssignmentPlan(RoundContext, plan, scheduling_context = POST_EPILOGUE(pctx))   # U2/U5
+    IF commit = install_failed_before_mutation(reason):
+      SET recovery_work[work_id].due_status <- CONSUMED
+      SET recovery_work[work_id].status <- CONSUMED
+      SET pending_recovery_work[episode] <- null
+      RETURN recovery_work_commit_failed(work_id, reason)           # no mutation; round stays SECURITY_RECOVERY
+    IF commit = install_failed_after_mutation(reason, rollback_record):
+      SET rb <- CALL RollbackRecoveryAssignmentPlan(RoundContext, rollback_record)   # U5
+      IF rb = rollback_failed(rr):
+        # U5/T4: an irreversible partial mutation that cannot be rolled back — abort (never fabricate UNRECOVERABLE).
+        SET recovery_work[work_id].due_status <- CONSUMED ; SET recovery_work[work_id].status <- CONSUMED
+        SET pending_recovery_work[episode] <- null
+        SET recovery_episode_disposition[episode] <- RECOVERY_INSTALL_FAILED_ABORTED   # T4 (NOT recovery_outcome_finalised)
+        SET current_recovery_episode <- null
+        CALL RoundAbort(RoundContext, reason = recovery_install_failed_aborted,
+                        dispatch_envelope = W.due_dispatch_envelope, recovery_finalising = true)   # T4/S4
+        RETURN recovery_work_install_aborted(work_id)
+      # rollback succeeded: no live partial assignment remains; keep the episode.
+      SET recovery_work[work_id].due_status <- CONSUMED ; SET recovery_work[work_id].status <- CONSUMED
+      SET pending_recovery_work[episode] <- null
+      RETURN recovery_work_rolled_back(work_id)                     # round stays SECURITY_RECOVERY
+    # commit = install_committed: the reserve wake(s) / redistribution PENDING heads are seated STRICTLY LATER (U2).
+    #   The round STAYS SECURITY_RECOVERY; NOTHING is marked RESTORED (U1). A later WakeCompleteEvent raises H_honest,
+    #   and a later final census with NO breach mints RESTORED (via the ordinary completion two-step).
+    SET recovery_work[work_id].due_status <- CONSUMED              # U4: consumed on apply
+    SET recovery_work[work_id].status <- CONSUMED
+    SET pending_recovery_work[episode] <- null
+    RETURN recovery_work_applied(work_id, W.action)
+  RETURNS: recovery_work_applied | recovery_work_rolled_back | recovery_work_install_aborted | recovery_work_commit_failed |
+           recovery_work_plan_invalid | recovery_work_superseded | nothing_due | nothing_applicable_due
+  NOTE: U1/U4/U5: the ONLY place recovery WORK is performed. It runs POST-epilogue, activates reserves / redistributes
+        coverage via the named PrepareRecoveryAssignmentPlan / CommitRecoveryAssignmentPlan / RollbackRecoveryAssignmentPlan
+        procedures, threads the explicit POST_EPILOGUE scheduling_context to every nested ScheduleEvent (U2), and
+        EXPLICITLY consumes the due fact (CONSUMED / SUPERSEDED) before returning (U4). It NEVER marks an outcome and
+        NEVER sets recovery_outcome_finalised — the round stays SECURITY_RECOVERY and RESTORED is decided ONLY by a
+        later no-breach final census (U1). At most one of the completion / continuation / work hooks acts per episode
+        per event_time.
 ```
 
 ## 10. Reserve activation
 
 ```
 PROCEDURE ReserveActivate
-  INPUTS: RoundContext, deficit (rate to restore), dispatch_envelope   # L1: this entry point's own envelope
+  INPUTS: RoundContext, deficit (rate to restore),
+          scheduling_context   # U2: SchedulingSourceContext — ORDINARY_DISPATCH(dispatch_envelope) for a dispatched
+                               #   entry point, or POST_EPILOGUE(pctx) when CommitRecoveryAssignmentPlan activates a
+                               #   reserve from the post-epilogue recovery-work / continuation-install path (§9c/§10a).
   PRECONDITIONS: round_state = SECURITY_RECOVERY or ASSIGNMENT;
-                 # L1: ReserveActivate is a dispatched sim-driver entry point; ProcessEventTime supplies its
-                 #     dispatch_envelope (§0.7f), threaded to StartWake below. NO manual seq stamping.
+                 # U2: ReserveActivate threads its scheduling_context to StartWake -> ScheduleEvent, so a POST_EPILOGUE
+                 #     activation seats its WakeCompleteEvent STRICTLY LATER (never at the drained source time). A
+                 #     dispatched entry point equivalently passes ORDINARY_DISPATCH(dispatch_envelope). NO manual seq stamping.
   EFFECTS:
     SELECT reserve_miner from miners in RESERVE
     SELECT candidate_range from unsearched/reassignable portion of nonce_domain
@@ -2435,12 +2728,13 @@ PROCEDURE ReserveActivate
     #        CURRENT and the wake-failure release both occur in WakeCompleteEvent, so several reserve
     #        activations at the same instant wake independently.
     RETURN CALL StartWake(RoundContext, reserve_miner, target_assignment = assignment, from_state = RESERVE,
-                          dispatch_envelope = dispatch_envelope)   # T4; L1: threaded envelope
+                          scheduling_context = scheduling_context)   # T4/U2: thread the explicit scheduling_context to StartWake
   RETURNS: activation_started
   NOTE: PENDING -> CURRENT occurs ONLY at the scheduled WakeCompleteEvent on a successful wake
         (E4/F5); a failed wake yields OFFLINE and WakeCompleteEvent releases the reserved range as
         inactive_unsearched (custody_status = abandoned). Reserve provenance distinguishes ORIGINAL
-        from REASSIGNED (F4).
+        from REASSIGNED (F4). U2: ReserveActivate threads scheduling_context to StartWake, so a post-epilogue
+        activation's wake is seated STRICTLY LATER (never at the drained source time).
 ```
 
 ## 10a. Executable security-recovery completion — two-step contract (Q2/Q3; R13/R14; RecoveryOutcome O3; atomic apply R4; post-drain safety R1; single settlement R2; deferred branch-C atomicity S2/S3; terminal cleanup S4; continuation two-step T1; continuation version binding T2; installation-phase invariant T3; no fabricated UNRECOVERABLE T4; assignment-phase disposition T5; redistribution-only vs reserve-dependent T6; post-epilogue continuation causality T7)
@@ -2652,7 +2946,10 @@ PROCEDURE CompleteSecurityRecovery                              # INTERNAL branc
         RETURN recovery_branch_result(kind = SUCCESS, target = HASHING)
       RETURN recovery_branch_result(kind = FAILED, reason = transition_failed)
     ELSE:
-      # (C) R13/R1/S2/S3/T1: range redistribution or reserve assignment is required. It is DEFERRED to a two-step
+      # (C) R13/R1/S2/S3/T1/U1: RESTORED with range REDISTRIBUTION. It is reached ONLY for a RESTORED outcome
+      #     (census.breach = false), so the floor is already met by currently ACTIVE_HASHING miners — the continuation
+      #     is REDISTRIBUTION-ONLY and NEVER depends on future reserve hash rate (reserve activation while the floor is
+      #     still breached is recovery WORK, §9c, not a RESTORED continuation). It is DEFERRED to a two-step
       #     contract (T1): a SINGLE RecoveryAssignmentContinuationDueEvent seated at next_representable_simulation_time(t)
       #     — a STRICTLY LATER event_time (R1) — records the due fact + refreshes the census, and the POST-EPILOGUE
       #     hook ApplyRecoveryAssignmentContinuationAfterEpilogue applies branch C. S2: DO NOT MUTATE round_state
@@ -2704,17 +3001,19 @@ PROCEDURE CompleteSecurityRecovery                              # INTERNAL branc
 PROCEDURE RecoveryAssignmentContinuationDueEvent               # T1 step 1: records the continuation DUE + refreshes census; NO application
   INPUTS: RoundContext, dispatch_envelope, RecoveryEpisodeID, RecoveryDecisionID, ContinuationGeneration,
           RecoveryOutcome, RoundID_at_decision, TemplateID_at_decision, state_version_at_decision   # T2: carries the continuation generation
-  PRECONDITIONS: a dispatched queued handler seated by CompleteSecurityRecovery branch C (or a T6 reserve-dependent
-                 re-arm) at (t_cont, RECOVERY_ASSIGNMENT_CONTINUATION_DUE); its dispatch_envelope is its own (§0.7f),
-                 envelope_namespace = ORDINARY_EVENT (Q6/R3); RecoveryOutcome = RESTORED
+  PRECONDITIONS: a dispatched queued handler seated by CompleteSecurityRecovery branch C at (t_cont,
+                 RECOVERY_ASSIGNMENT_CONTINUATION_DUE); its dispatch_envelope is its own (§0.7f),
+                 envelope_namespace = ORDINARY_EVENT (Q6/R3); RecoveryOutcome = RESTORED. (U1: the continuation is a
+                 REDISTRIBUTION-ONLY RESTORED continuation — it never depends on future reserve hash rate; reserve
+                 activation while the floor is still breached is recovery WORK, §9c, not a continuation.)
   EFFECTS:
     SET episode <- RecoveryEpisodeID
     SET D <- recovery_decisions[RecoveryDecisionID]
-    # T1/T2 STALE + IDENTITY GUARD: meaningful only for the CURRENT episode/epoch, an APPLYING decision, and the
+    # T1/T2/U4 STALE + IDENTITY GUARD: meaningful only for the CURRENT episode/epoch, an APPLYING decision, and the
     #   ACTIVE continuation generation (ContinuationGeneration = D.continuation_generation). It records ONLY the due
-    #   fact + refreshes the census; it performs NO round-state transition, creates NO assignment, and does NOT mark
-    #   the decision APPLIED (T1 — no branch-C RESTORED result during the ordinary-event drain). The APPLICATION is
-    #   the post-epilogue hook (T1 step 2).
+    #   fact (continuation_due_status = DUE) + refreshes the census; it performs NO round-state transition, creates NO
+    #   assignment, and does NOT mark the decision APPLIED (T1 — no branch-C RESTORED result during the ordinary drain).
+    #   The APPLICATION is the post-epilogue hook (T1 step 2).
     IF round_state != SECURITY_RECOVERY
        OR current_recovery_episode != episode
        OR RecoveryDecisionID NOT in pending_recovery_decisions[episode]
@@ -2724,13 +3023,16 @@ PROCEDURE RecoveryAssignmentContinuationDueEvent               # T1 step 1: reco
        OR RoundID_at_decision != RoundID_current OR TemplateID_at_decision != TemplateID_committed
        OR state_version_at_decision != state_version_current:
       RETURN recovery_continuation_due_stale_noop(RecoveryDecisionID)
-    # T1: RECORD that the continuation is DUE at THIS event_time; stash the dispatch_envelope for the eventual apply.
+    # T1/U4: RECORD that the continuation is DUE at THIS event_time (continuation_due_status = DUE); stash the
+    #   dispatch_envelope for the post-epilogue apply, which will EXPLICITLY consume this due status.
+    SET recovery_decisions[RecoveryDecisionID].continuation_due_status <- DUE                      # U4
     SET recovery_decisions[RecoveryDecisionID].continuation_due_at_event_time <- dispatch_envelope.event_time
     SET recovery_decisions[RecoveryDecisionID].continuation_due_dispatch_envelope <- dispatch_envelope
-    # T1: REFRESH a coherent census for THIS event_time (via the sole writer CommitSecurityCensus, source
-    #   RECOVERY_COMPLETION_DUE), so the epilogue has the FINAL census to (re)version and decide from.
+    # T1/U7: REFRESH a coherent census for THIS event_time via the sole writer CommitSecurityCensus with the DISTINCT
+    #   source RECOVERY_CONTINUATION_DUE (U7 — "continuation is due" is not conflated with "completion is due"), so the
+    #   epilogue has the FINAL census to (re)version and decide from.
     CALL CaptureSecurityCensusOnRecoveryDeadline(RoundContext, dispatch_envelope.event_time,
-                                                 census_source = RECOVERY_COMPLETION_DUE)   # R5: recovery-timeline checkpoint
+                                                 census_source = RECOVERY_CONTINUATION_DUE)   # U7: distinct provenance
     RETURN recovery_continuation_due(RecoveryDecisionID, dispatch_envelope.event_time)
   RETURNS: recovery_continuation_due | recovery_continuation_due_stale_noop
   NOTE: T1: step 1 of the two-step continuation contract. It NEVER applies branch C; it records the due fact and
@@ -2742,105 +3044,219 @@ PROCEDURE ApplyRecoveryAssignmentContinuationAfterEpilogue     # T1 step 2 / pos
   INPUTS: RoundContext, event_time t
   PRECONDITIONS: invoked by ProcessEventTime AFTER FinalizeEventTimeSecurityCensus(t) AND
                  ApplyRecoveryCompletionAfterEpilogue(t) (the T1 canonical tail); NOT dispatched from the queue.
-                 T1 MUTUAL EXCLUSION: for one RecoveryEpisodeID at one event_time AT MOST ONE of
-                 ApplyRecoveryCompletionAfterEpilogue and this hook applies — a completion applied at t clears the
-                 episode, so this hook then finds no active episode (nothing_due).
+                 T1 MUTUAL EXCLUSION: for one RecoveryEpisodeID at one event_time AT MOST ONE of the completion /
+                 continuation / work hooks acts. U1: the continuation is REDISTRIBUTION-ONLY — its FINAL census shows
+                 NO breach, so the floor is already met by currently ACTIVE_HASHING miners and the install only
+                 re-partitions disjoint ranges; it NEVER depends on future reserve hash rate (reserve activation while
+                 the floor is still breached is recovery WORK, §9c, not a continuation).
   EFFECTS:
-    IF current_recovery_episode = null: RETURN nothing_due          # not in recovery (or a completion cleared it — T1 mutual exclusion)
+    IF current_recovery_episode = null: RETURN nothing_due          # not in recovery (or an outcome cleared it — mutual exclusion)
     SET episode <- current_recovery_episode
     IF latest_recovery_census[episode] does NOT EXIST: RETURN nothing_due
     SET census <- latest_recovery_census[episode]
-    # locate the decision whose continuation is DUE at t (stable order by decision_id).
+    # U4: locate the decision whose continuation due_status is DUE at t (stable order by decision_id).
     IF NO decision_id in pending_recovery_decisions[episode] WITH
+       recovery_decisions[decision_id].continuation_due_status = DUE AND
        recovery_decisions[decision_id].continuation_due_at_event_time = t:
       RETURN nothing_applicable_due(t)
     SET decision_id <- that decision_id ; SET D <- recovery_decisions[decision_id]
     # T2 FRESHNESS + VERSION BINDING. Apply branch C ONLY when the decision + its ACTIVE continuation remain current
-    #   AND the FINAL census at t still warrants RESTORED. The bound version is READ from the AUTHORITATIVE decision
-    #   record (continuation_bound_census_version, kept current by ReconcilePendingRecoveryDecisions, T2 rule B) and
-    #   COMPARED to latest_recovery_census[episode].RecoveryCensusVersion — the carried version is not silently ignored.
+    #   AND the FINAL census at t still warrants RESTORED (census.breach = false). The bound version is READ from the
+    #   AUTHORITATIVE record (continuation_bound_census_version, kept current by Reconcile rule B, T2) and COMPARED to
+    #   latest_recovery_census[episode].RecoveryCensusVersion — the carried version is not silently ignored.
     IF round_state != SECURITY_RECOVERY
        OR D.status != APPLYING
        OR D.continuation_bound_census_version != census.RecoveryCensusVersion
        OR NOT outcome_consistent_with_census(RESTORED, census):
-      RECORD recovery_continuation_apply_stale_noop(decision_id)   # superseded by Reconcile, or leave APPLYING for a later re-arm
+      # U4: EXPLICITLY consume the due fact as SUPERSEDED (superseded by Reconcile, or the census no longer warrants RESTORED).
+      SET recovery_decisions[decision_id].continuation_due_status <- SUPERSEDED
+      RECORD recovery_continuation_apply_stale_noop(decision_id)
       RETURN recovery_continuation_apply_stale(decision_id)
-    # ---- FRESH + WARRANTED: apply branch C. T6 classifies the restoration. ----
-    IF the FINAL census at t satisfies the floor using ONLY currently ACTIVE_HASHING miners:   # T6-A redistribution-only
-      # T3: BEGIN the installation phase — a SYNCHRONOUS sub-computation; NO event boundary occurs within it, so no
-      #     epilogue observes the transient ASSIGNMENT-with-active-episode state (the T3 invariant holds at every boundary).
-      TRANSITION round_state -> ASSIGNMENT                          # bumps state_version (G10)
-      SET recovery_install_in_progress <- true                      # T3
-      SET recovery_install_seq <- recovery_install_seq + 1 ; SET RecoveryInstallID <- (episode, recovery_install_seq)
-      SET active_recovery_install_decision <- decision_id           # T3
-      # INSTALL the disjoint assignment set (ReserveActivate/RangeReassign; I1 disjoint; NO new template). T7: any
-      #   StartWake seats its WakeCompleteEvent STRICTLY LATER through the post-epilogue context (never at t).
-      SET pctx <- PostEpilogueSchedulingContext(source_event_time = t, source_envelope = D.continuation_due_dispatch_envelope,
-                    EventQueueContext = EQ, RunContext = RoundContext.RunContext)   # T7
-      SET install_ok <- INSTALL the disjoint assignment set under (RoundID_current, TemplateID_committed) using pctx
-      IF NOT install_ok:                                            # T4/T5: IRREVERSIBLE post-mutation install failure
-        # T4: do NOT fabricate UNRECOVERABLE. Record RECOVERY_INSTALL_FAILED_ABORTED, mark the decision
-        #   APPLY_FAILED_TERMINAL, do NOT set recovery_outcome_finalised, close the round via the declared RoundAbort.
-        CALL SetRecoveryDecisionStatus(RoundContext, decision_id, APPLY_FAILED_TERMINAL)   # R6 mirror
-        REMOVE decision_id from pending_recovery_decisions[episode]
-        SET recovery_episode_disposition[episode] <- RECOVERY_INSTALL_FAILED_ABORTED       # T4 (NOT recovery_outcome_finalised)
+    # ---- FRESH + WARRANTED (census.breach = false): redistribution-only install via the named U5 plan procedures. ----
+    SET pctx <- PostEpilogueSchedulingContext(source_event_time = t, source_envelope = D.continuation_due_dispatch_envelope,
+                  EventQueueContext = EQ, RunContext = RoundContext.RunContext)   # U2/T7: strictly-later scheduling
+    # U5: compute-only plan (verifies I1/I3/I10/I18b BEFORE any mutation). No opaque INSTALL macro.
+    SET plan <- CALL PrepareRecoveryAssignmentPlan(RoundContext, episode, RANGE_REDISTRIBUTION_REQUIRED, census)
+    IF plan = plan_invalid(reason):
+      # U4/T5: NO mutation occurred (plan is compute-only). Consume the due fact, mark APPLY_FAILED, PRESERVE the episode.
+      SET recovery_decisions[decision_id].continuation_due_status <- CONSUMED
+      CALL SetRecoveryDecisionStatus(RoundContext, decision_id, APPLY_FAILED)   # R6
+      REMOVE decision_id from pending_recovery_decisions[episode]
+      RECORD recovery_continuation_plan_invalid(decision_id, reason)
+      RETURN recovery_continuation_failed(decision_id)              # round stays SECURITY_RECOVERY (episode preserved)
+    # T3: BEGIN the installation phase — a SYNCHRONOUS sub-computation; NO event boundary occurs within it, so no
+    #     epilogue observes the transient ASSIGNMENT-with-active-episode state (the T3 invariant holds at every boundary).
+    TRANSITION round_state -> ASSIGNMENT                            # bumps state_version (G10)
+    SET recovery_install_in_progress <- true                        # T3
+    SET recovery_install_seq <- recovery_install_seq + 1 ; SET RecoveryInstallID <- (episode, recovery_install_seq)
+    SET active_recovery_install_decision <- decision_id             # T3
+    SET commit <- CALL CommitRecoveryAssignmentPlan(RoundContext, plan, scheduling_context = POST_EPILOGUE(pctx))   # U2/U5
+    IF commit = install_failed_before_mutation(reason):
+      # reversible: no assignment was created. Roll BACK the state transition; consume the due fact; PRESERVE the episode.
+      TRANSITION round_state -> SECURITY_RECOVERY
+      SET recovery_install_in_progress <- false ; SET active_recovery_install_decision <- null
+      SET recovery_decisions[decision_id].continuation_due_status <- CONSUMED
+      CALL SetRecoveryDecisionStatus(RoundContext, decision_id, APPLY_FAILED)   # R6
+      REMOVE decision_id from pending_recovery_decisions[episode]
+      RETURN recovery_continuation_failed(decision_id)
+    IF commit = install_failed_after_mutation(reason, rollback_record):
+      SET rb <- CALL RollbackRecoveryAssignmentPlan(RoundContext, rollback_record)   # U5
+      IF rb = rollback_completed:                                   # no live partial assignment remains (U5)
+        TRANSITION round_state -> SECURITY_RECOVERY                 # rollback complete
         SET recovery_install_in_progress <- false ; SET active_recovery_install_decision <- null
-        SET current_recovery_episode <- null                                               # cleared exactly once
-        CALL RoundAbort(RoundContext, reason = recovery_install_failed_aborted,
-                        dispatch_envelope = D.continuation_due_dispatch_envelope, recovery_finalising = true)   # T4/S4 declared abort
-        RETURN recovery_continuation_install_aborted(decision_id)
-      SET disp <- CALL CompleteAssignmentPhase(RoundContext, D.continuation_due_dispatch_envelope)   # T5: explicit disposition
-      IF disp = assignment_phase_completed:                         # round now HASHING; the FINAL census confirms the floor (redistribution-only)
-        # T3 exit (i): HASHING + decision APPLIED. This is the moment branch-C RESTORED is actually applied.
-        CALL SetRecoveryDecisionStatus(RoundContext, decision_id, APPLIED)     # R4/R6
-        SET recovery_outcome_finalised[episode] <- RESTORED                    # set ONLY on an actually-applied outcome (T4)
+        SET recovery_decisions[decision_id].continuation_due_status <- CONSUMED
+        CALL SetRecoveryDecisionStatus(RoundContext, decision_id, APPLY_FAILED)   # R6
         REMOVE decision_id from pending_recovery_decisions[episode]
+        RETURN recovery_continuation_failed(decision_id)            # episode preserved
+      # rb = rollback_failed: an irreversible partial mutation — T4 abort (never fabricate UNRECOVERABLE).
+      SET recovery_decisions[decision_id].continuation_due_status <- CANCELLED
+      CALL SetRecoveryDecisionStatus(RoundContext, decision_id, APPLY_FAILED_TERMINAL)   # R6
+      REMOVE decision_id from pending_recovery_decisions[episode]
+      SET recovery_episode_disposition[episode] <- RECOVERY_INSTALL_FAILED_ABORTED       # T4 (NOT recovery_outcome_finalised)
+      SET recovery_install_in_progress <- false ; SET active_recovery_install_decision <- null
+      SET current_recovery_episode <- null
+      CALL RoundAbort(RoundContext, reason = recovery_install_failed_aborted,
+                      dispatch_envelope = D.continuation_due_dispatch_envelope, recovery_finalising = true)   # T4/S4
+      RETURN recovery_continuation_install_aborted(decision_id)
+    # commit = install_committed: run CompleteAssignmentPhase (T5 explicit disposition).
+    SET disp <- CALL CompleteAssignmentPhase(RoundContext, D.continuation_due_dispatch_envelope)   # T5
+    IF disp = assignment_phase_completed:                           # round now HASHING; the FINAL census confirms the floor
+      # T3 exit (i): HASHING + decision APPLIED. This is the moment branch-C RESTORED is actually applied.
+      SET recovery_decisions[decision_id].continuation_due_status <- CONSUMED           # U4
+      CALL SetRecoveryDecisionStatus(RoundContext, decision_id, APPLIED)     # R4/R6
+      SET recovery_outcome_finalised[episode] <- RESTORED                    # set ONLY on an actually-applied outcome (T4)
+      REMOVE decision_id from pending_recovery_decisions[episode]
+      SET recovery_install_in_progress <- false ; SET active_recovery_install_decision <- null
+      SET current_recovery_episode <- null
+      RETURN recovery_continuation_applied(decision_id, RESTORED)
+    ELSE:  # assignment_phase_failed -> REVERSIBLE (round still ASSIGNMENT). T3 exit (ii): roll the committed plan back.
+      SET rb <- CALL RollbackRecoveryAssignmentPlan(RoundContext, plan.rollback_metadata)   # U5: undo the committed install
+      IF rb = rollback_failed(rr):
+        # irreversible — T4 abort (never fabricate UNRECOVERABLE).
+        SET recovery_decisions[decision_id].continuation_due_status <- CANCELLED
+        CALL SetRecoveryDecisionStatus(RoundContext, decision_id, APPLY_FAILED_TERMINAL)
+        REMOVE decision_id from pending_recovery_decisions[episode]
+        SET recovery_episode_disposition[episode] <- RECOVERY_INSTALL_FAILED_ABORTED
         SET recovery_install_in_progress <- false ; SET active_recovery_install_decision <- null
         SET current_recovery_episode <- null
-        RETURN recovery_continuation_applied(decision_id, RESTORED)
-      ELSE:  # assignment_phase_failed -> REVERSIBLE (round still ASSIGNMENT). T3 exit (ii): roll back.
-        # T5: roll back to SECURITY_RECOVERY, UNDO any partial PENDING assignment created by the install, mark the
-        #   decision APPLY_FAILED, PRESERVE the episode (a later epilogue may re-seat if still warranted).
-        UNDO the partial install (close any PENDING assignment created here; cancel any wake it seated)
-        TRANSITION round_state -> SECURITY_RECOVERY                 # bumps state_version (G10); rollback complete
-        SET recovery_install_in_progress <- false ; SET active_recovery_install_decision <- null
-        CALL SetRecoveryDecisionStatus(RoundContext, decision_id, APPLY_FAILED)   # R6 mirror
-        REMOVE decision_id from pending_recovery_decisions[episode]
-        RETURN recovery_continuation_failed(decision_id)
-    ELSE:  # T6-B reserve-dependent: the floor depends on PENDING/WAKING reserves NOT yet ACTIVE_HASHING
-      # T6: do NOT finalise RESTORED and do NOT enter the installation phase. Activate the required reserve(s) while
-      #   the round STAYS SECURITY_RECOVERY (ReserveActivate's StartWake seats its WakeCompleteEvent STRICTLY LATER
-      #   through the post-epilogue context, T7), keep the decision APPLYING, and RE-ARM a strictly-later
-      #   RecoveryAssignmentContinuationDueEvent (a FRESH continuation generation) so a subsequent post-epilogue
-      #   application re-checks. RESTORED is applied ONLY when a later FINAL census confirms the floor with the reserve
-      #   ACTIVE_HASHING (then the redistribution-only predicate above holds). Reserve-dependent RESTORED is NEVER
-      #   applied while reserves are PENDING/WAKING (T6/gate 9): a syntactically valid PENDING set is not restored hash rate.
-      SET pctx <- PostEpilogueSchedulingContext(source_event_time = t, source_envelope = D.continuation_due_dispatch_envelope,
-                    EventQueueContext = EQ, RunContext = RoundContext.RunContext)   # T7
-      CALL ReserveActivate(RoundContext, deficit, D.continuation_due_dispatch_envelope)   # StartWake -> WakeCompleteEvent STRICTLY LATER (T7)
-      SET t_rearm <- next_representable_simulation_time(t)          # T7: strictly later than t
-      SET recovery_decisions[decision_id].continuation_generation <- D.continuation_generation + 1
-      SET recovery_decisions[decision_id].continuation_id <- (decision_id, recovery_decisions[decision_id].continuation_generation)   # T2: fresh ACTIVE continuation
-      SET r <- CALL ScheduleEvent(EQ, RoundContext, RecoveryAssignmentContinuationDueEvent,
-                     target_event_time = t_rearm, target_microphase = RECOVERY_ASSIGNMENT_CONTINUATION_DUE,
-                     {RecoveryEpisodeID = episode, RecoveryDecisionID = decision_id,
-                      ContinuationGeneration = recovery_decisions[decision_id].continuation_generation, RecoveryOutcome = RESTORED,
-                      RoundID_at_decision = RoundID_current, TemplateID_at_decision = TemplateID_committed,
-                      state_version_at_decision = state_version_current},
-                     post_epilogue_context = pctx)                  # T6/T7: strictly-later re-arm of the ACTIVE continuation
-      IF r = scheduled(...): SET recovery_decisions[decision_id].continuation_event_ref <- r.event_ref
-      RETURN recovery_continuation_reserve_pending(decision_id)     # decision stays APPLYING; episode active; round SECURITY_RECOVERY
+        CALL RoundAbort(RoundContext, reason = recovery_install_failed_aborted,
+                        dispatch_envelope = D.continuation_due_dispatch_envelope, recovery_finalising = true)
+        RETURN recovery_continuation_install_aborted(decision_id)
+      TRANSITION round_state -> SECURITY_RECOVERY                   # rollback complete; no live partial assignment (U5)
+      SET recovery_install_in_progress <- false ; SET active_recovery_install_decision <- null
+      SET recovery_decisions[decision_id].continuation_due_status <- CONSUMED           # U4
+      CALL SetRecoveryDecisionStatus(RoundContext, decision_id, APPLY_FAILED)   # R6
+      REMOVE decision_id from pending_recovery_decisions[episode]
+      RETURN recovery_continuation_failed(decision_id)
   RETURNS: recovery_continuation_applied | recovery_continuation_failed | recovery_continuation_install_aborted |
-           recovery_continuation_reserve_pending | recovery_continuation_apply_stale | nothing_due | nothing_applicable_due
-  NOTE: T1..T7: the ONLY place branch-C RESTORED is APPLIED, run POST-epilogue so NO RESTORED result is recorded
-        during the ordinary-event drain (T1). It reads the AUTHORITATIVE continuation version and re-checks the final
-        census (T2), begins an explicit installation phase covered by the T3 invariant, uses CompleteAssignmentPhase's
-        disposition (T5), NEVER fabricates UNRECOVERABLE on install failure (T4: RECOVERY_INSTALL_FAILED_ABORTED),
-        distinguishes redistribution-only from reserve-dependent restoration and never applies reserve-dependent
-        RESTORED before active-hash restoration (T6/gate 9), and schedules every StartWake / re-arm STRICTLY LATER
-        through PostEpilogueSchedulingContext (T7). Every installation exit ends in exactly one of: HASHING + decision
-        APPLIED; SECURITY_RECOVERY + APPLY_FAILED (rollback complete); ROUND_ABORTED + RECOVERY_INSTALL_FAILED_ABORTED
-        (T3). Mutually exclusive with ApplyRecoveryCompletionAfterEpilogue per episode per event_time (T1).
+           recovery_continuation_apply_stale | nothing_due | nothing_applicable_due
+  NOTE: T1..T7 + U1/U4/U5: the ONLY place branch-C RESTORED is APPLIED, run POST-epilogue so NO RESTORED result is
+        recorded during the ordinary-event drain (T1). U1: the continuation is REDISTRIBUTION-ONLY (census.breach =
+        false) — it never depends on future reserve hash rate (reserve activation while breached is recovery WORK, §9c;
+        the impossible reserve-dependent RESTORED ELSE is REMOVED). It reads the AUTHORITATIVE continuation version and
+        re-checks the final census (T2), uses the named PrepareRecoveryAssignmentPlan / CommitRecoveryAssignmentPlan /
+        RollbackRecoveryAssignmentPlan (U5, no opaque INSTALL/UNDO macro), EXPLICITLY consumes the continuation due fact
+        (CONSUMED / SUPERSEDED / CANCELLED, U4) before returning, uses CompleteAssignmentPhase's explicit disposition
+        (T5), never fabricates UNRECOVERABLE on an irreversible install failure (T4: RECOVERY_INSTALL_FAILED_ABORTED),
+        and schedules every nested wake STRICTLY LATER through the POST_EPILOGUE scheduling_context (U2/T7). Every
+        installation exit ends in exactly one of: HASHING + decision APPLIED; SECURITY_RECOVERY + APPLY_FAILED (rollback
+        complete, episode preserved); ROUND_ABORTED + RECOVERY_INSTALL_FAILED_ABORTED (T3/T4). Mutually exclusive with
+        ApplyRecoveryCompletionAfterEpilogue and ApplyRecoveryWorkAfterEpilogue per episode per event_time (T1/U1).
+
+PROCEDURE PrepareRecoveryAssignmentPlan                         # U5: COMPUTE-ONLY — build a deterministic recovery-assignment plan; NO mutation
+  INPUTS: RoundContext, episode, work_action, census   # work_action in {RESERVE_ACTIVATION_REQUIRED, RANGE_REDISTRIBUTION_REQUIRED}
+  PRECONDITIONS: round_state = SECURITY_RECOVERY (recovery work, §9c) OR round_state = ASSIGNMENT (a redistribution-only
+                 continuation install, §10a). It performs NO state mutation, creates NO assignment, and seats NO event.
+  EFFECTS:
+    # U5: build the deterministic plan and VERIFY the structural invariants BEFORE any caller mutates. Nothing here is
+    #   committed — the plan is a value the caller passes to CommitRecoveryAssignmentPlan (or discards).
+    SET recovery_install_seq_preview <- recovery_install_seq + 1
+    SET plan.RecoveryInstallID              <- (episode, recovery_install_seq_preview)   # matches the id the caller mints
+    SET plan.source_assignment_versions     <- the immutable (AssignmentID, assignment_version) of every source range (I9)
+    SET plan.accepted_unsearched_suffixes   <- the accepted_searched / active_unsearched suffixes to redistribute (I8a)
+    SET plan.selected_reserve_miners        <- (work_action = RESERVE_ACTIVATION_REQUIRED ? the deterministic reserve set : empty)
+    SET plan.new_pending_assignment_specs   <- the new PENDING assignment specs, in a STABLE creation order (by MinerID, then CandidateID)
+    SET plan.required_wake_operations       <- the StartWake operations implied by the specs (empty for pure redistribution among ACTIVE miners)
+    SET plan.rollback_metadata              <- an EMPTY rollback record keyed by plan.RecoveryInstallID (filled by Commit)
+    # U5: VERIFY I1 (no overlap among valid active assignments), I3 (RoundID/TemplateID match), I10 (reserve activation
+    #   adds no overlap), I18b (unique live head per lineage) over the PROPOSED specs — BEFORE any mutation.
+    IF the proposed specs would violate I1 OR I3 OR I10 OR I18b:
+      RETURN plan_invalid(reason = overlap_or_lineage_or_epoch_violation)   # U5: caller mutates NOTHING (TV168)
+    RETURN plan_ready(plan)
+  RETURNS: plan_ready(plan) | plan_invalid(reason)
+  NOTE: U5: replaces the opaque `INSTALL the disjoint assignment set` macro's PLANNING half. It is COMPUTE-ONLY and
+        verifies I1/I3/I10/I18b before any mutation, so a detected overlap creates NO assignment, NO state transition,
+        and NO wake event (TV168). Determinism: the specs are in a stable creation order so event_creation_seq is reproducible.
+
+PROCEDURE CommitRecoveryAssignmentPlan                          # U5: apply a prepared plan; thread the explicit scheduling_context
+  INPUTS: RoundContext, plan, scheduling_context   # scheduling_context in SchedulingSourceContext (U2): POST_EPILOGUE(pctx) here
+  PRECONDITIONS: plan produced by PrepareRecoveryAssignmentPlan (I1/I3/I10/I18b already verified compute-only). The
+                 caller has entered the installation phase (round_state = ASSIGNMENT for a continuation; SECURITY_RECOVERY
+                 for recovery work that only activates reserves). A POST_EPILOGUE scheduling_context is threaded to every
+                 nested ScheduleEvent (U2), so every wake targets a STRICTLY LATER event_time.
+  EFFECTS:
+    # U5: RE-VERIFY the invariants against the CURRENT state (a concurrent same-time commit may have changed it); if a
+    #   violation is detected BEFORE any assignment is created, fail cleanly with NO mutation.
+    IF the plan's specs now violate I1 OR I3 OR I10 OR I18b:
+      RETURN install_failed_before_mutation(reason = revalidation_failed)   # U5: nothing created
+    SET created_assignments <- empty ; SET created_events <- empty
+    FOR EACH spec in plan.new_pending_assignment_specs (STABLE creation order):
+      # U2: thread scheduling_context to every constructor / wake so a POST_EPILOGUE caller's wakes are seated
+      #     STRICTLY LATER (never at the drained source time). A RESERVE spec goes through ReserveActivate (which
+      #     bundles CreatePendingAssignment + StartWake, threading scheduling_context, U2); a REDISTRIBUTION spec goes
+      #     through RangeReassign / RangeAssign then StartWake.
+      IF spec.kind = RESERVE_ACTIVATION:
+        SET r <- CALL ReserveActivate(RoundContext, spec.deficit, scheduling_context = scheduling_context)   # U2: threads to StartWake -> ScheduleEvent
+        IF r = activation_started:
+          ADD spec.reserve_assignment to created_assignments ; ADD spec.wake_event_ref to created_events
+          CONTINUE
+        SET reason <- r ; SET a <- creation_failed(reason)
+      ELSE:  # REDISTRIBUTION spec (RangeReassign / RangeAssign among already-assignable ranges)
+        SET a <- CALL <the spec's constructor: RangeReassign / RangeAssign>(RoundContext, spec,
+                       scheduling_context = scheduling_context)   # U2
+      IF a = creation_failed(reason):
+        # U5: a failure AFTER at least one assignment/wake was created is an IRREVERSIBLE partial mutation -> return the
+        #   rollback record so the caller can RollbackRecoveryAssignmentPlan; a failure before any creation is reversible.
+        IF created_assignments is empty AND created_events is empty:
+          RETURN install_failed_before_mutation(reason)
+        SET plan.rollback_metadata <- rollback_record(RecoveryInstallID = plan.RecoveryInstallID,
+              created_assignments = created_assignments, created_events = created_events)
+        RETURN install_failed_after_mutation(reason, plan.rollback_metadata)
+      ADD a to created_assignments
+      FOR EACH wake in required wake operations of spec:
+        SET w <- CALL StartWake(RoundContext, wake.MinerID, target_assignment = a, from_state = wake.from_state,
+                                scheduling_context = scheduling_context)   # U2: StartWake threads it to ScheduleEvent
+        ADD w.scheduled_event_ref to created_events
+    SET plan.rollback_metadata <- rollback_record(RecoveryInstallID = plan.RecoveryInstallID,
+          created_assignments = created_assignments, created_events = created_events)   # for a later CompleteAssignmentPhase-fail rollback
+    RETURN install_committed
+  RETURNS: install_committed | install_failed_before_mutation(reason) | install_failed_after_mutation(reason, rollback_record)
+  NOTE: U5/U2: replaces the opaque `INSTALL` macro's MUTATION half. It creates assignments in a STABLE order, threads the
+        explicit scheduling_context (a POST_EPILOGUE caller's wakes are seated STRICTLY LATER through ScheduleEvent), and
+        distinguishes a reversible pre-mutation failure from an irreversible post-mutation one (returning a rollback record).
+
+PROCEDURE RollbackRecoveryAssignmentPlan                        # U5: explicitly revert a partially/fully committed plan
+  INPUTS: RoundContext, rollback_record   # { RecoveryInstallID, created_assignments, created_events }
+  PRECONDITIONS: called by ApplyRecoveryAssignmentContinuationAfterEpilogue / ApplyRecoveryWorkAfterEpilogue on an
+                 install_failed_after_mutation or a post-commit CompleteAssignmentPhase failure. It must leave NO live
+                 partial assignment.
+  EFFECTS:
+    # U5: cancel every event the plan created, then close/remove every plan-created PENDING head LEGALLY, and restore
+    #   the coverage/custody ledgers. Order: events first (so no wake can activate a head being closed), then heads.
+    FOR EACH event_ref in rollback_record.created_events (stable order):
+      IF event_ref is still pending on EQ: CANCEL event_ref on EQ
+    FOR EACH a in rollback_record.created_assignments (stable order):
+      IF a is not a live head anymore: CONTINUE                    # already superseded/closed — idempotent
+      CLOSE a as CLOSED (status = CLOSED, custody_status = revoked, reason = recovery_install_rolled_back)   # J7: legal close, no live head (I18b)
+      RESTORE the coverage-state / custody ledgers to their pre-plan values for a's range (I8a/I8b)
+    IF any plan-created PENDING head remains live OR any created event remains pending on EQ:
+      RETURN rollback_failed(reason = residual_partial_assignment)  # U5/T4: caller aborts the round (never fabricate UNRECOVERABLE)
+    RETURN rollback_completed
+  RETURNS: rollback_completed | rollback_failed(reason)
+  NOTE: U5: replaces the opaque `UNDO the partial install` macro. It cancels every plan event, closes every plan-created
+        live head legally (I18b), and restores the coverage/custody ledgers — leaving NO live partial assignment. If a
+        residual partial assignment cannot be removed, it returns rollback_failed and the caller takes the declared
+        RECOVERY_INSTALL_FAILED_ABORTED / RoundAbort path (T4) — it NEVER fabricates an UNRECOVERABLE outcome.
 
 PROCEDURE FinalizePostRecoveryApplicationState                  # R2: the ONE post-application SETTLEMENT at t (NOT a 2nd floor decision)
   INPUTS: RoundContext, event_time t
@@ -3030,7 +3446,9 @@ PROCEDURE LeaseExpiry
 
 ```
 PROCEDURE RangeReassign
-  INPUTS: RoundContext, unsearched_suffix, reason, from_miner, dispatch_envelope   # L1: threaded envelope
+  INPUTS: RoundContext, unsearched_suffix, reason, from_miner,
+          scheduling_context   # U2: SchedulingSourceContext — ORDINARY_DISPATCH(dispatch_envelope) for a dispatched
+                               #   caller, or POST_EPILOGUE(pctx) when CommitRecoveryAssignmentPlan calls it (§9c/§10a)
   PRECONDITIONS: # C4: the caller passes the EXACT accepted unsearched suffix, not a full range:
                  unsearched_suffix = [accepted_frontier(source) + 1, range_end(source)]
                    OR (no accepted positions exist AND unsearched_suffix = whole source range);
@@ -3062,7 +3480,7 @@ PROCEDURE RangeReassign
     # F5/D2: to_miner activation passes through WAKING via the NON-BLOCKING StartWake (T3/T4 -> T5).
     CALL StartWake(RoundContext, to_miner, target_assignment = assignment,
                    from_state = miner_state(to_miner),
-                   dispatch_envelope = dispatch_envelope)   # L1: threaded envelope
+                   scheduling_context = scheduling_context)   # U2: threaded scheduling_context to StartWake -> ScheduleEvent
     # CR4/C3: coverage uses I8a with ACCEPTED coverage; custody/provenance is tracked SEPARATELY as I8b.
     UPDATE assignment_ledger so the coverage partition still holds (I8a):
         accepted_searched + active_unsearched + inactive_unsearched = assigned_domain
@@ -3634,7 +4052,7 @@ PROCEDURE CloseRoundAssignments
     # acceptance batch registry so no stale batch finalizes after closure; S4: including the recovery-timeline events).
     CANCEL all pending wake / resume / certificate-arrival / BlockAcceptancePoint / HashWorkEvent /
            AdversarialParticipationChangeEvent / RecoveryDeadlineEvent / RecoveryCompletionDueEvent /
-           RecoveryAssignmentContinuationDueEvent events for RoundID   # S4/T1: recovery-timeline events cancelled at closure
+           RecoveryAssignmentContinuationDueEvent / RecoveryWorkDueEvent events for RoundID   # S4/T1/U1: recovery-timeline events cancelled at closure
     CLEAR active_propagation_set                                # no live candidate survives closure
     CLEAR acceptance_batch_registry                             # no pending batch survives closure
     # S4 TERMINAL RECOVERY CLEANUP. If a recovery episode is STILL ACTIVE and this closure is NOT the
@@ -3808,8 +4226,19 @@ PROCEDURE TemplateRefresh
     #     + R4 + K7 applicability-entry census capture) the ONLY path into HASHING, here and in
     #     PrepareParticipantsForNewRound. Miners reach ACTIVE_HASHING at their own later WakeCompleteEvents.
     ASSERT round_state = ASSIGNMENT
-    CALL CompleteAssignmentPhase(RoundContext, dispatch_envelope)   # L2/M2: SOLE ASSIGNMENT -> HASHING owner (R4 + K7 via helper)
-  RETURNS: new_TemplateID
+    # U6: CAPTURE and BRANCH on the T5 disposition — do NOT return a successful new_TemplateID while the round is still ASSIGNMENT.
+    SET disp <- CALL CompleteAssignmentPhase(RoundContext, dispatch_envelope)   # L2/M2/T5: SOLE ASSIGNMENT -> HASHING owner
+    IF disp = assignment_phase_failed(reason):
+      # U6: a well-formedness failure is caught BEFORE the irreversible HASHING transition (round still ASSIGNMENT,
+      #   reversible). Roll back the refresh's just-created PENDING assignments + wakes and take the declared
+      #   refresh-failure / abort path; NEVER return a successful new-template disposition with the round in ASSIGNMENT.
+      FOR EACH a in the PENDING assignments created by THIS TemplateRefresh (stable order by MinerID, then CandidateID):
+        IF a.wake_event_ref is still pending on EQ: CANCEL a.wake_event_ref on EQ
+        CLOSE a as CLOSED (status = CLOSED, custody_status = revoked, reason = template_refresh_failed)   # J7: no live head (I18b)
+      RECORD template_refresh_failed(reason)
+      RETURN template_refresh_failed(reason)                       # round stays ASSIGNMENT for a legal re-setup / abort; NOT a new template
+    RETURN new_TemplateID
+  RETURNS: new_TemplateID | template_refresh_failed
   NOTE: Refresh NEVER bypasses TEMPLATE_COMMITMENT (TemplateCommit runs only from it, D8/E8) and
         NEVER reassigns a completed old range -- old assignments are CLOSED via CloseTemplateAssignments
         and NEW ORIGINAL assignments are created over the new domain (C5). Only eligible REGISTERED /

@@ -740,3 +740,47 @@ Catalogue" denotes the separate document defining I1..I19.
   before finalising `t`.
 - **Historical freeze.** Stage-1A–1S lettered artifacts are unchanged; Stage-1T supersessions are recorded in
   `STAGE_01T_SUPERSESSION_REGISTER.md`.
+
+## Stage-1U terminology addendum (reserve-recovery & continuation-liveness lock)
+
+- **Recovery OUTCOME vs recovery WORK (U1).** A *recovery outcome* is `RESTORED` or `UNRECOVERABLE`, decided ONLY
+  from a final census (`outcome_consistent_with_census` unchanged — `RESTORED` requires `census.breach = false`). A
+  *recovery-work action* (`RECOVERY_WORK_ACTION` in {`RESERVE_ACTIVATION_REQUIRED`, `RANGE_REDISTRIBUTION_REQUIRED`,
+  `NONE`}) is the reserve activation / redistribution attempted WHILE the floor is still breached; it is NEVER a
+  `RecoveryOutcome` and is NEVER marked `APPLIED` as `RESTORED`.
+- **`ClassifyRecoveryWork` / `SeatRecoveryWork` / `RecoveryWorkDueEvent` / `ApplyRecoveryWorkAfterEpilogue` (U1).** The
+  breach-before-deadline epilogue classifies the work (`ClassifyRecoveryWork`, compute-only) and seats ONE versioned
+  `RecoveryWorkDueEvent` (`SeatRecoveryWork`, atomic + idempotent, microphase `RECOVERY_WORK_DUE`); the queued Due event
+  records the work-due fact + refreshes the census (NO activation); the POST-epilogue hook
+  `ApplyRecoveryWorkAfterEpilogue` performs the work while the round STAYS `SECURITY_RECOVERY` and marks NOTHING
+  `RESTORED`. `RecoveryWorkID = (RecoveryEpisodeID, recovery_work_seq)`; `pending_recovery_work[episode]` is the
+  at-most-one in-flight controller.
+- **`SchedulingSourceContext` (U2).** `{ORDINARY_DISPATCH(dispatch_envelope), POST_EPILOGUE(PostEpilogueSchedulingContext)}`.
+  `ReserveActivate` / `RangeReassign` / `RangeAssign` / `StartWake` / `CommitRecoveryAssignmentPlan` take an explicit
+  `scheduling_context`; a `POST_EPILOGUE` caller threads the `pctx` all the way to `ScheduleEvent`, so a zero-latency
+  post-epilogue wake targets `next_representable_simulation_time(source)` and is STRICTLY LATER than the source time.
+- **Atomic re-arm (U3).** A recovery-work seat / re-arm advances the active identity ONLY after `ScheduleEvent`
+  succeeds (compute candidate identity + target, validate `<= T`, schedule without mutating the active identity,
+  publish `status = ARMED` + event ref only on success); a rejection advances nothing, publishes no false reference,
+  reports no pending state, and records an explicit disposition. No `APPLYING` decision is stranded without a live
+  event, a controller, or an explicit terminal/horizon disposition.
+- **`CONTINUATION_DUE_STATUS` (U4).** `{NOT_DUE, DUE, CONSUMED, SUPERSEDED, CANCELLED}` on the continuation record and
+  every recovery-work record. The DueEvent sets `DUE`; the post-epilogue hook ATOMICALLY consumes it (`CONSUMED` on
+  apply/settle, `SUPERSEDED` on stale-noop, `CANCELLED` on terminal closure) before returning; `ProcessEventTime`
+  asserts on the EXPLICIT status, not on a timestamp field.
+- **`PrepareRecoveryAssignmentPlan` / `CommitRecoveryAssignmentPlan` / `RollbackRecoveryAssignmentPlan` (U5).** The named
+  procedures that replace the opaque `INSTALL` / `UNDO` macros. Prepare is compute-only and verifies I1/I3/I10/I18b
+  BEFORE any mutation; Commit threads the `scheduling_context`, creates assignments in stable order, and returns
+  `install_committed` / `install_failed_before_mutation` / `install_failed_after_mutation(reason, rollback_record)`;
+  Rollback cancels every plan event, closes every plan-created live head legally (I18b), restores the coverage/custody
+  ledgers, and returns `rollback_completed` / `rollback_failed` (a failed rollback takes the T4 abort, never a fabricated
+  UNRECOVERABLE).
+- **CompleteAssignmentPhase disposition at every caller (U6).** `PrepareParticipantsForNewRound`, `TemplateRefresh`, and
+  the recovery installation each capture and branch on `assignment_phase_completed | assignment_phase_failed(reason)`; a
+  pre-`HASHING` failure rolls back and takes the declared setup/refresh failure path — no caller returns success with
+  the round still `ASSIGNMENT`.
+- **`RECOVERY_CONTINUATION_DUE` / `RECOVERY_WORK_DUE` census sources (U7/U1).** Distinct census provenances so
+  "completion is due", "continuation is due", "recovery work is due", and "deadline reached" are distinguishable;
+  `RecoveryAssignmentContinuationDueEvent` uses `RECOVERY_CONTINUATION_DUE` (not `RECOVERY_COMPLETION_DUE`).
+- **Historical freeze.** Stage-1A–1T lettered artifacts are unchanged; Stage-1U supersessions are recorded in
+  `STAGE_01U_SUPERSESSION_REGISTER.md`.
