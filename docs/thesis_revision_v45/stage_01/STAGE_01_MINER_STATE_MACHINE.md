@@ -209,14 +209,19 @@ solver identity for a valid solution.
   into `P_hash·t_hash` and not double-counted (CR2).
 - **Active-hash-rate contribution.** Yes — the miner's rate is added to `H_active(t)` (and
   to `H_honest(t)` or `H_adversarial(t)` per attribution).
-- **May hold/act on a new range.** Yes. It holds its current range and may accept a
-  reassignment (self-transition T6) that replaces it with another disjoint range consistent
-  with I1 (for example on lease expiry/renewal or a template refresh that preserves the
-  miner's active status).
+- **May hold/act on a new range.** It holds its current range and may have its lease
+  **renewed in place** — a **non-state-changing administrative operation on the SAME range**
+  (E5): the range does not change, `AssignmentID`/`assignment_version`/provenance are updated,
+  the status stays `CURRENT`, and **no wake cycle** is required. It does **NOT** self-reassign
+  to a DIFFERENT range: acquiring a different range is a **reassignment** that closes this
+  assignment and activates the new holder through `WAKING` — there is **no** `ACTIVE_HASHING →
+  ACTIVE_HASHING` shortcut (the former T6 is removed, E5). A changed-range replacement is
+  **NEVER** called a renewal (E5).
 - **Reward eligibility.** NOT SPECIFIED AT STAGE 1 (incentive semantics deferred to Stage 5). The only record kept at Stage 1 is that a valid solution this miner submits may be recorded as having a solver identity, which by I2/I3 requires an accepted solution inside the signer's valid current assignment matching the current RoundID and TemplateID.
 - **Permitted incoming transitions.** From `WAKING` on ramp completion (T5) — whether a
   first activation or a **resume** of a paused (PATH B) assignment from its retained
-  `actual_frontier`; self-loop from `ACTIVE_HASHING` on range reassignment (T6).
+  `actual_frontier`. (The former `ACTIVE_HASHING → ACTIVE_HASHING` self-loop, T6, is
+  **removed** — E5; a different range is acquired only by another holder through `WAKING`.)
 - **Permitted outgoing transitions.** There are **two completely separate stop paths that
   never merge** (CR-B1):
   - **PATH A — local range exhaustion** (own assigned range fully searched, no valid
@@ -233,8 +238,10 @@ solver identity for a valid solution.
     reassignment), on round acceptance (T28, `stop_reason = ROUND_ACCEPTED`), and on round
     abort (T29, `stop_reason = ROUND_ABORTED`); neither round-closure reason marks the range
     exhausted.
-  - Self-loop to `ACTIVE_HASHING` (T6, reassignment); to `OFFLINE` (T11); to `DISQUALIFIED`
-    (T18).
+  - To `OFFLINE` (T11); to `DISQUALIFIED` (T18). (The former `ACTIVE_HASHING → ACTIVE_HASHING`
+    self-loop, T6, is **removed** — E5; a changed range is acquired only by another holder
+    through `WAKING`, and same-range lease renewal is an in-state administrative operation, not
+    a transition.)
 - **Transition guards.** Range exhaustion (T7, PATH A) requires that the entire assigned
   range has been searched with no valid solution encountered in the actual evaluated
   sequence (honest: `actual_exhaustion = true`; adversarial: accepted reported exhaustion
@@ -243,8 +250,12 @@ solver identity for a valid solution.
   that **all** early-stop-certificate validation steps have passed
   (`STAGE_01_EARLY_STOP_CERTIFICATE.md`, Section 3) while the miner remained in
   `ACTIVE_HASHING`; a failed or partially verified certificate produces **no** transition
-  (CR2). Reassignment (T6) requires the new range be disjoint from all other valid active
-  assignments (I1) and bound to the current or refreshed `TemplateID`.
+  (CR2). **Lease renewal** (in-state, E5) requires that the range is UNCHANGED and not
+  `completed`; it mints a fresh `AssignmentID`/`assignment_version` and extends the lease
+  window while the status stays `CURRENT`; it is **not** a state transition and charges **no**
+  wake energy. Acquiring a DIFFERENT range is a reassignment to another holder through
+  `WAKING`, disjoint per I1 and bound to the current or refreshed `TemplateID` — never an
+  `ACTIVE_HASHING → ACTIVE_HASHING` self-loop (the former T6 is removed, E5).
 - **Transition side effects.** On range exhaustion (T7, PATH A), freeze the final progress
   commitment; on ACCEPTED exhaustion the range is closed (`coverage_state = searched`,
   `custody_status = completed`) and is NOT released or reassigned. On the verified valid-solution stop
@@ -252,11 +263,14 @@ solver identity for a valid solution.
   position as searched, and record `stop_reason = VALID_SOLUTION_VERIFIED`; the paused
   assignment may later resume (T30 → T5) if the full block is rejected, unavailable, or times
   out. On revocation (T27), return only the unsearched suffix to the assignable pool. On
-  reassignment (T6), atomically release the old lease and bind the new one.
+  **lease renewal** (in-state, E5), update `AssignmentID`/`assignment_version` and the lease
+  window on the SAME range, preserve `actual_frontier`/accepted coverage/provenance, and keep
+  the status `CURRENT` — no old lease is released and no new range is bound (no wake cycle).
 - **Timeout behaviour.** Range lease `lease_expiry` bounds residency on a given range; on
-  expiry the range is reclaimed for reassignment (round-level) and the miner either renews
-  (T6) or is reassigned; unresponsiveness past the lease/heartbeat bound routes to `OFFLINE`
-  (T11).
+  expiry the miner either has its lease **renewed in place** (in-state, E5; same range, stays
+  `CURRENT`) or, if not renewed, its assignment is invalidated and only the accepted unsearched
+  suffix is reassigned to another holder through `WAKING` (see `LeaseExpiry`, E9);
+  unresponsiveness past the lease/heartbeat bound routes to `OFFLINE` (T11).
 - **Failure behaviour.** Emitting an unverified early-stop claim, a solution outside the
   assigned range (I2 violation), or a solution bound to a stale `RoundID`/`TemplateID` (I3
   violation) is a protocol violation → `DISQUALIFIED` (T18). Crash or heartbeat loss →
@@ -470,7 +484,7 @@ verified valid-solution stop, assignment PAUSED) and the revocation/closure reas
 | T3 | `REGISTERED` | AssignmentOffer (WakeForAssignment) | Committed `TemplateID` exists; offered range disjoint per I1 | Bind pending assignment; begin spin-up | `WAKING` | Switch residency `P_registered → P_wake`; entry `E_transition` | No census change (not yet hashing) | Overlapping/invalid range (I1): offer rejected, miner remains `REGISTERED` |
 | T4 | `RESERVE` | ReserveActivation | Round activation event (typically from `SECURITY_RECOVERY`); offered range disjoint per I1 | Bind pending assignment; begin spin-up | `WAKING` | Switch residency `P_reserve → P_wake`; entry `E_transition` | No census change yet; activation is toward raising `H_active(t)` | Invalid range (I1) or no activation event: guard fails, miner remains `RESERVE` |
 | T5 | `WAKING` | RampComplete | Ramp complete AND bound assignment validated disjoint per I1 and bound to current `TemplateID` | Activate range lease; start `t_hash` accrual (a **resumed** paused PATH-B assignment continues from its retained `actual_frontier`) | `ACTIVE_HASHING` | End `P_wake`; exit `E_transition`; begin `P_hash` residency | Census +rate: add miner rate to `H_active(t)` (and `H_honest(t)`/`H_adversarial(t)` by attribution) | Validation failure → wake abort to `OFFLINE` (T12); range released |
-| T6 | `ACTIVE_HASHING` | RangeReassignment | New range disjoint from all valid active assignments (I1); bound to current or refreshed `TemplateID` (I3); difficulty unchanged (I12) | Atomically release old lease; bind new lease | `ACTIVE_HASHING` | Continue `P_hash`; one-shot `E_coordination` for reassignment; no wake term | Census unchanged in magnitude; audit log records lease change | Overlap (I1) or stale template (I3): reassignment rejected; miner keeps current range |
+| T6 | *(retired — E5)* | — | — | **REMOVED:** the former `ACTIVE_HASHING → ACTIVE_HASHING` range-reassignment shortcut is deleted. Acquiring a DIFFERENT range now always closes the current assignment and activates the new holder through `WAKING` (T3/T4/T9/T10 → T5). Same-range **lease renewal** is a non-state-changing in-state administrative operation (E5): the range is unchanged, `AssignmentID`/`assignment_version`/provenance are updated, the status stays `CURRENT`, and no wake energy is charged — it is NOT a state transition. | *(no transition)* | — | — | — |
 | T7 | `ACTIVE_HASHING` | RangeExhausted (PATH A) | Entire assigned range searched with no valid solution encountered in the actual evaluated sequence (honest: `actual_frontier = range_end`, `actual_positions_evaluated = range_size`, `actual_exhaustion = true`; adversarial: accepted reported exhaustion under the modeled audit abstraction); governed by I4/I8a and the actual-vs-reported progress model, not I11 | Freeze final progress commitment; on ACCEPTED exhaustion mark `coverage_state = searched`, `custody_status = completed`; `stop_reason = RANGE_EXHAUSTED`; do NOT release or reassign the completed range | `EXHAUSTED_PENDING` | Continue `P_hash` residency (short `EXHAUSTED_PENDING` transient; no idle saving credited); entry `E_transition` | Census −rate: remove miner rate from `H_active(t)` | Fabricated/false exhaustion detected by the modeled audit (adversarial path) → exhaustion NOT recorded, range not closed; attributable violation → `DISQUALIFIED` (T18) |
 | T8 | `EXHAUSTED_PENDING` | ExhaustionConfirmed (PATH A) | Valid exhaustion confirmation for the range (I4) | Confirm/finalise the accepted exhaustion (coverage_state/custody already set at T7); record confirmed exhaustion and `stop_reason = RANGE_EXHAUSTED` in audit log; do NOT release or reassign the completed range | `LOW_POWER_LISTEN` | End `P_hash` transient; begin `P_listen` residency; one-shot `E_coordination` | No census change (already removed at T7) | No confirmation before deadline → reassign (T9) or `OFFLINE` (T13); NEVER auto-drop here (I4) |
 | T9 | `EXHAUSTED_PENDING` | RedeployOffer | An **unsearched suffix** became available for a permitted reassignment reason ({lease_expiry, abandonment, revocation, departure, conflict, security_recovery}) and is offered to this available miner, disjoint per I1, on the committed `TemplateID`; the miner's own completed range stays `custody_status = completed` and is NOT reassigned (exhaustion is never a reassignment reason) | Bind the offered unsearched suffix as a new assignment; begin spin-up | `WAKING` | Switch residency `P_hash → P_wake`; entry `E_transition` | No census change yet (toward re-raising `H_active(t)`) | Invalid range (I1): offer rejected; miner remains `EXHAUSTED_PENDING` |
@@ -517,6 +531,12 @@ enforcement explicit:
 - **Any direct `LOW_POWER_LISTEN → ACTIVE_HASHING` or `RESERVE → ACTIVE_HASHING`.**
   Resumption of hashing MUST pass through `WAKING` so that wake energy `P_wake,i * t_wake,i`
   and `E_transition,i` are charged; skipping the wake state would misstate the energy model.
+- **Any `ACTIVE_HASHING → ACTIVE_HASHING` changed-range self-loop (the removed T6, E5).**
+  A miner may NOT swap its assignment to a DIFFERENT range while staying in `ACTIVE_HASHING`.
+  Acquiring a different range closes the current assignment and activates the new holder
+  through `WAKING`. The ONLY same-holder, same-range operation is an in-state **lease
+  renewal** (E5), which changes no state and charges no wake energy; a changed-range
+  replacement is never called a renewal.
 - **Any `ACTIVE_HASHING → EXHAUSTED_PENDING` without ACCEPTED exhaustion adjudication.**
   Entering `EXHAUSTED_PENDING` is a PATH-A range-exhaustion transition governed by **I4, I8a,
   and ExhaustionAdjudicate** (accepted coverage), never by an early-stop certificate or I11. A
@@ -529,7 +549,8 @@ enforcement explicit:
 ### 3.2 Invariant enforcement summary
 
 - **I1** (no two valid active assignments overlap) is checked at every range-binding guard:
-  T3, T4, T6, T9, T10, and the T5 validation.
+  T3, T4, T9, T10, and the T5 validation (the former T6 self-loop is removed, E5; a same-range
+  lease renewal binds no new range and needs no I1 re-check).
 - **I2** (accepted solution ∈ signer's valid current assignment) and **I3** (accepted
   solution matches current `RoundID`+`TemplateID`) gate reward eligibility, which only
   `ACTIVE_HASHING` can satisfy; their violation routes to `DISQUALIFIED` (T18).

@@ -16,8 +16,7 @@ Every entry into `LOW_POWER_LISTEN` records exactly one `stop_reason` ∈
 | Direction | Transition | Other endpoint | Reason / note |
 |-----------|-----------|----------------|---------------|
 | In | T5 | `WAKING` | RampComplete or PATH-B resume (start/continue `t_hash`) |
-| In | T6 | `ACTIVE_HASHING` (self) | RangeReassignment onto a new disjoint range |
-| Out | T6 | `ACTIVE_HASHING` (self) | reassignment self-loop |
+| — | ~~T6~~ | *(removed — E5)* | The `ACTIVE_HASHING → ACTIVE_HASHING` changed-range self-loop is **removed** (Stage 1E, E5). Acquiring a different range now closes the assignment and activates the new holder through `WAKING`; same-range lease renewal is a non-state-changing in-state operation, not a transition. |
 | Out | **T7** | `EXHAUSTED_PENDING` | **PATH A**, `RANGE_EXHAUSTED` |
 | Out | **T26** | `LOW_POWER_LISTEN` | **PATH B**, `VALID_SOLUTION_VERIFIED` (direct; assignment PAUSED) |
 | Out | T27 | `LOW_POWER_LISTEN` | `ASSIGNMENT_REVOKED` (direct) |

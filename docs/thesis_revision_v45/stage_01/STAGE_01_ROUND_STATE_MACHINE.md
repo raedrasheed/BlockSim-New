@@ -125,6 +125,23 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
   checked to lie within the signer's valid current assignment (I2) and to match the current
   `RoundID`+`TemplateID` (I3), using target validation as the acceptance predicate
   (scope §A.5).
+- **Entry timing (E6).** The round enters `SOLUTION_PROPAGATION` at the **first valid
+  found-solution event** — i.e. at propagation START (`HASHING → SOLUTION_PROPAGATION`, R5),
+  **NOT** after block acceptance. There is exactly one canonical model for the entry:
+  1. the round enters `SOLUTION_PROPAGATION` when the first candidate solution satisfying the
+     fixed target is found (`ScheduleSolutionPropagation` performs `HASHING →
+     SOLUTION_PROPAGATION`);
+  2. while the round is in `SOLUTION_PROPAGATION`, miners that have **not yet verified** a
+     certificate **continue hashing** (they remain in `ACTIVE_HASHING` and in `H_active(t)`),
+     and `ActiveHashing` is permitted in `{HASHING, SOLUTION_PROPAGATION, SECURITY_RECOVERY}`;
+  3. **further candidate solutions may still be found and scheduled** during
+     `SOLUTION_PROPAGATION`;
+  4. a rejected/unavailable/timed-out full block returns the round `SOLUTION_PROPAGATION →
+     HASHING` (R7), or `SOLUTION_PROPAGATION → SECURITY_RECOVERY` (R8) on a coincident floor
+     breach — via the single `HandlePropagationFailure` handler;
+  5. accepted same-timestamp arbitration transitions `SOLUTION_PROPAGATION → ROUND_ACCEPTED`
+     (R6) in a **single** step (the round is already in `SOLUTION_PROPAGATION`, so acceptance
+     performs no `HASHING → SOLUTION_PROPAGATION` transition of its own).
 - **Miner-state note (CR2).** While a round is in `SOLUTION_PROPAGATION`, certificate
   verification does **not** remove verifying miners from `ACTIVE_HASHING` or from `H_active(t)`:
   each miner remains in `ACTIVE_HASHING` and continues hashing until it has itself completed all
@@ -201,8 +218,11 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
   content) changes.
 - **Entry condition.** From `ROUND_EXHAUSTED` (exhausted template), or from `HASHING` on a
   refresh trigger (for example a superseding template becomes available).
-- **Exit condition(s).** To `TEMPLATE_COMMITMENT` (commit the new template) or directly to
-  `ASSIGNMENT` when re-partitioning of the new template's nonce domain is required.
+- **Exit condition(s).** To `TEMPLATE_COMMITMENT` **only** — a template refresh ALWAYS commits
+  the new immutable template through `TEMPLATE_COMMITMENT` (R17) before any re-partitioning; it
+  NEVER goes directly to `ASSIGNMENT`. Re-partitioning of the new template's nonce domain
+  happens on the subsequent `TEMPLATE_COMMITMENT → ASSIGNMENT` step (R18), not by bypassing
+  `TEMPLATE_COMMITMENT` (D8/E8).
 
 ### 2.10 `ROUND_ABORTED`
 
@@ -312,7 +332,8 @@ A template refresh (`TEMPLATE_REFRESH`) is caused by (a) exhaustion of the commi
 template's search space (`ROUND_EXHAUSTED → TEMPLATE_REFRESH`), or (b) a refresh trigger
 during `HASHING` (for example a superseding immutable template becomes available). Refresh
 produces a new `TemplateID` (difficulty fixed, I12) and returns the round to
-`TEMPLATE_COMMITMENT`/`ASSIGNMENT`. Refresh is the ONLY sanctioned way the mined content
+`TEMPLATE_COMMITMENT` (R17), which then proceeds to `ASSIGNMENT` (R18) — refresh NEVER
+bypasses `TEMPLATE_COMMITMENT` (D8/E8). Refresh is the ONLY sanctioned way the mined content
 changes (scope §A.7).
 
 ### 3.12 What information is preserved between rounds
