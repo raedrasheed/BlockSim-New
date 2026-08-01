@@ -331,6 +331,19 @@ point, planned test stage, and consequence of violation.
   applied/created result. **W8 (bounded state-compatible retry):** a `SetupRetryEvent` is seated only when rollback left
   every eligible participant re-enlistable (never routed to `OFFLINE`), the retry generation is within
   `maximum_setup_retries`, and the target is within horizon; it is idempotent on `SetupRetryID`, else the round aborts.
+  **X1/X2 (recovery + setup rollback are complete, version-exact state transactions):** `RollbackRecoveryAssignmentPlan`
+  and the setup rollbacks depart every still-`WAKING` miner to `OFFLINE` via the legal `T12` edge using the EXACT
+  assignment version (`rollback_record` items / `setup_txn.assignment_by_miner`, never `assignment_ref = null`) and a
+  complete rollback envelope; they cannot report `rollback_completed` while any affected miner is `WAKING` without a live
+  `WakeCompleteEvent`. **X3/X4:** template-refresh initiation (`TemplateRefresh`) is split from the post-commit
+  assignment retry (`ContinueTemplateRefreshAssignmentSetup`); a retry never repeats the old-template closure or
+  `TemplateCommit`, `SetupRetryEvent` guards are kind-specific (both require `ASSIGNMENT`), and an over-budget retry
+  aborts rather than stranding the round. **X5:** `CommitRecoveryAssignmentPlan` returns `install_committed(rollback_record)`
+  explicitly. **X6:** `assignment_creation_failed` is reachable without violating a `CreatePendingAssignment`
+  precondition (runtime predicates live in the guard, not the preconditions). **X7:** every rollback/wake-failure close
+  uses canonical `custody_status`/`revocation_reason`/`termination_reason` values plus a non-enum `closure_detail`.
+  **X8:** each rollback `WAKING -> OFFLINE` closes `WAKING` residency at the rollback time and charges transition energy
+  exactly once (F6/T12), so no `WAKING` residency survives to horizon `T`.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest

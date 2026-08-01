@@ -853,3 +853,52 @@ Catalogue" denotes the separate document defining I1..I19.
   `maximum_setup_retries`; otherwise `RoundAbort`.
 - **Historical freeze.** Stage-1A–1V lettered artifacts are unchanged; Stage-1W supersessions are recorded in
   `STAGE_01W_SUPERSESSION_REGISTER.md`.
+
+## Stage-1X terminology addendum (recovery-rollback & retry-contract lock)
+
+- **`rollback_record` / `rollback_item` (X1/X5).** `CommitRecoveryAssignmentPlan` builds and RETURNS an explicit
+  `install_committed(rollback_record)`, where `rollback_record = { RecoveryInstallID, items:[rollback_item] }` and each
+  `rollback_item = { MinerID, AssignmentID, assignment_version, WakeEventRef, pre_wake_state,
+  rollback_envelope, coverage_custody_before_image, kind, provenance }` is captured BEFORE its plan-bound constructor
+  mutates state. There is no pass-by-reference `plan.rollback_metadata`; the record is the sole rollback contract.
+- **Recovery-plan rollback as a complete state transaction (X1/X8).** `RollbackRecoveryAssignmentPlan(RoundContext,
+  rollback_record)` cancels every `WakeEventRef`, departs each still-`WAKING` miner to `OFFLINE` via the legal `T12`
+  edge — with `assignment_ref = assignment_version_ref(item.AssignmentID, item.assignment_version)` (never null) and
+  `transition_envelope = item.rollback_envelope` — closes each head canonically, restores the coverage/custody ledgers
+  from `coverage_custody_before_image`, and verifies no event pending / no head live / no miner `WAKING` before
+  returning `rollback_completed(rolled_to_offline, rolled_back_items)`; otherwise `rollback_failed(reason)`. It never
+  returns `rollback_completed` while a miner is `WAKING` with no live event. Each `T12` closes the WAKING residency at
+  the rollback `event_time`, charges the transition energy once, opens `OFFLINE`, adds no `H_active`, and updates the
+  census only via `CommitSecurityCensus` when `ACTIVE_HASHING` membership changes.
+- **`assignment_by_miner` (X2).** A field of `participant_setup_txn` / `refresh_setup_txn`,
+  `assignment_by_miner : MinerID -> (AssignmentID, assignment_version)`, populated after `assignment_created` and before
+  `StartWake`. Setup rollbacks (`RollbackParticipantSetup` / `RollbackTemplateRefreshSetup`) iterate it and pass the
+  EXACT `assignment_version_ref(aid, ver)` to `T12` (never null when the miner holds a setup-created `PENDING` head).
+- **`ContinueTemplateRefreshAssignmentSetup` (X3).** A procedure that owns ONLY eligible-miner selection/creation,
+  `StartWake`, `CompleteAssignmentPhase`, rollback, and bounded retry-or-abort for a template refresh.
+  `TemplateRefresh` performs closure + candidate construction + `TemplateCommit` and then CALLs it; a
+  `SetupRetryEvent(TEMPLATE_REFRESH_SETUP)` also calls it and NEVER re-enters `TemplateRefresh`, so a retry never repeats
+  `CloseTemplateAssignments`, candidate construction, or `TemplateCommit`.
+- **`TemplateRefreshSetupID` / `template_refresh_setup_committed` (X3).** An idempotent marker keyed to the committed
+  new `TemplateID`; `template_refresh_setup_committed[new_TemplateID] = true` records that closure + construction +
+  commit already occurred, so re-entry via `ContinueTemplateRefreshAssignmentSetup` resumes only assignment seating.
+- **Kind-specific `SetupRetryEvent` guard (X4).** `PARTICIPANT_SETUP` requires `phase = ASSIGNMENT` and a committed
+  eligible `TemplateID`, then calls `PrepareParticipantsForNewRound`; `TEMPLATE_REFRESH_SETUP` requires `phase =
+  ASSIGNMENT`, the committed `TemplateID` equal to the refresh setup's, and the closure/commit markers, then calls
+  `ContinueTemplateRefreshAssignmentSetup`. `ROUND_INITIALISING` / `TEMPLATE_COMMITMENT` are rejected; an over-budget
+  retry is a `RoundAbort` (not merely `setup_retry_exhausted`) unless already terminal; the phase is never left in
+  `ASSIGNMENT` with no controller.
+- **Reachable `assignment_creation_failed` (X6).** `CreatePendingAssignment` PRECONDITIONS constrain only type/shape
+  (`assignment_origin in { ORIGINAL, REASSIGNED }`); the runtime-varying predicates (I1 overlap, `custody != completed`,
+  `coverage != searched`, source/provenance, `RoundID`/`TemplateID` validity) are evaluated in the guard and yield
+  `assignment_creation_failed(reason)`, so the failure disposition is legally reachable.
+- **Canonical closure fields + `closure_detail` (X7).** Every Stage-1X head closure sets `status`, `custody_status`,
+  `termination_reason`, and `revocation_reason` from the canonical enums only, and records the non-enum free descriptor
+  in `closure_detail`. Fixed uses: participant setup rollback (`termination_reason = cancellation`,
+  `revocation_reason = assignment_revoked`, `closure_detail = participant_setup_rolled_back`); template refresh setup
+  rollback (`closure_detail = template_refresh_setup_rolled_back`); recovery-plan rollback
+  (`closure_detail = recovery_install_rolled_back`); range/reserve wake failure (`termination_reason = wake_failure`,
+  `closure_detail = range_assign_wake_failed` / `range_reassign_wake_failed` / `reserve_activation_wake_failed`). No
+  string outside the canonical enums appears in `termination_reason`, `custody_status`, or `revocation_reason`.
+- **Historical freeze.** Stage-1A–1W lettered artifacts are unchanged; Stage-1X supersessions are recorded in
+  `STAGE_01X_SUPERSESSION_REGISTER.md`.

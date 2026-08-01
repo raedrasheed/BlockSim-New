@@ -560,7 +560,7 @@ and dirties the census — it selects NO outcome and seats NO completion; the ev
 | `RecoveryCompletionDueEvent` | `RecoveryCompletionDueEvent` | `RECOVERY_COMPLETION_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryDecisionID)` | `event_time, delta_cycle, event_seq` | no (Q2: records due + refreshes census; NO transition — the application is the post-epilogue hook) |
 | `RecoveryAssignmentContinuationDueEvent` | `RecoveryAssignmentContinuationDueEvent` | `RECOVERY_ASSIGNMENT_CONTINUATION_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryDecisionID, ContinuationGeneration)` | `event_time, delta_cycle, event_seq` | no (T1: records the continuation DUE fact + refreshes the census; NO transition / NO assignment / NO APPLIED — the branch-C rebuild is the post-epilogue hook `ApplyRecoveryAssignmentContinuationAfterEpilogue`). It carries the full recovery identity + `ContinuationGeneration`; it is seated via the S7 PostEpilogueSchedulingContext (strictly-later) |
 | `RecoveryWorkDueEvent` | `RecoveryWorkDueEvent` | `RECOVERY_WORK_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryWorkID, WorkGeneration)` | `event_time, delta_cycle, event_seq` | no (U1: records the recovery-WORK DUE fact + refreshes the census; NO reserve activation / NO transition / NO APPLIED — the WORK is the post-epilogue hook `ApplyRecoveryWorkAfterEpilogue`). It carries the full recovery identity + `WorkGeneration`; it is seated via the U3 atomic seat (published only after a successful enqueue) |
-| `SetupRetryEvent` | `SetupRetryEvent` | `ROUND_SETUP` | `(RoundID, setup_kind)` | `event_time, delta_cycle, event_seq` | no (V8: re-invokes PrepareParticipantsForNewRound / TemplateRefresh at a strictly-later event_time after a rolled-back setup; stale-guarded on RoundID) |
+| `SetupRetryEvent` | `SetupRetryEvent` | `ROUND_SETUP` | `(RoundID, setup_kind, SetupRetryID, setup_retry_generation)` | `event_time, delta_cycle, event_seq` | no (V8/X3/X4: at a strictly-later event_time after a rolled-back setup, re-invokes the KIND-SPECIFIC target — `PrepareParticipantsForNewRound` for `PARTICIPANT_SETUP`, `ContinueTemplateRefreshAssignmentSetup` (NEVER `TemplateRefresh`, so no re-close / re-commit) for `TEMPLATE_REFRESH_SETUP`; both require `round_state = ASSIGNMENT`; stale-guarded on RoundID, idempotent on `SetupRetryID`, and bounded — an over-budget or state-incompatible retry is a declared `RoundAbort`) |
 | `RoundAbort` | `RoundAbort` | `TERMINAL_ABORT` (§21 item 1) | `(RoundID)` | `event_time, delta_cycle, event_seq` | no |
 
 Run-level hooks (NOT in the seating table, O1/Q2/R2): `CloseRoundAtHorizon` (§20b, invoked inside
@@ -767,12 +767,39 @@ STRUCTURE RoundContext registries (initialised by RoundInitialise, cleared on cl
   #   latency). No procedure creates a pctx and then schedules using only the old ordinary dispatch envelope.
   # --- U5 named recovery-assignment plan record (replaces the opaque INSTALL/UNDO macros) ---
   # recovery_assignment_plan = { RecoveryInstallID, source_assignment_versions, accepted_unsearched_suffixes,
-  #   selected_reserve_miners, new_pending_assignment_specs (stable creation order), rollback_metadata }. Each spec
+  #   selected_reserve_miners, new_pending_assignment_specs (stable creation order) }. Each spec
   #   (W5) carries { kind, MinerID, range, origin, source_assignment, reassignment_reason }. Produced compute-only by
   #   PrepareRecoveryAssignmentPlan (verifies I1/I3/I10/I18b BEFORE any mutation); applied by CommitRecoveryAssignmentPlan
   #   via the plan-bound constructors ReserveActivateFromPlan / RangeReassignFromPlan / RangeAssignFromPlan (W5), each of
   #   which performs the spec's SINGLE implied wake and returns the ACTUAL WakeEventRef (W4: no separate wake loop);
   #   reverted by RollbackRecoveryAssignmentPlan.
+  # --- X1/X5 recovery-plan rollback record (a COMPLETE state transaction; returned EXPLICITLY, never pass-by-reference) ---
+  # rollback_record = { RecoveryInstallID, items : [rollback_item] }.  CommitRecoveryAssignmentPlan builds it and returns
+  #   it EXPLICITLY in EVERY disposition — install_committed(rollback_record) (X5) as well as
+  #   install_failed_after_mutation(reason, rollback_record). The obsolete plan.rollback_metadata pass-by-reference field
+  #   is WITHDRAWN. Each rollback_item captures, for one committed plan item, EVERYTHING needed to reverse it (X1):
+  #   rollback_item = { MinerID, AssignmentID, assignment_version, WakeEventRef, pre_wake_state, rollback_envelope,
+  #                     coverage_custody_before_image, kind, provenance }.
+  #     - pre_wake_state                : the miner's state read BEFORE the constructor's WAKING transition (REGISTERED /
+  #                                       RESERVE / LOW_POWER_LISTEN) — for audit; the legal rollback edge is WAKING -> OFFLINE (T12).
+  #     - rollback_envelope             : a COMPLETE transition envelope { envelope_namespace, event_time, delta_cycle,
+  #                                       event_seq, hook_id } for the T12 departure (never a placeholder).
+  #     - coverage_custody_before_image : the exact I8a/I8b ledger snapshot for the item's range, restored on rollback.
+  #     - assignment_version            : the immutable version, so the T12 release + close identify the EXACT head (X2).
+  # RollbackRecoveryAssignmentPlan consumes items to cancel each WakeEventRef, depart each still-WAKING miner to OFFLINE
+  #   via T12 with the EXACT assignment_ref, close each head legally (X7 canonical fields), restore each before-image, and
+  #   return rollback_completed(rolled_to_offline, rolled_back_items) | rollback_failed(reason) (X1).
+  # --- X2 setup-transaction assignment binding + X3 template-refresh setup identity ---
+  # setup_transaction (participant_setup_txn / refresh_setup_txn) additionally carries (X2):
+  #   assignment_by_miner : map MinerID -> (AssignmentID, assignment_version), populated immediately AFTER
+  #                         assignment_created and BEFORE StartWake, so RollbackParticipantSetup /
+  #                         RollbackTemplateRefreshSetup pass the EXACT assignment version to the WAKING -> OFFLINE (T12)
+  #                         departure (never assignment_ref = null when the miner holds a setup-created PENDING head).
+  # TemplateRefreshSetupID : X3 — an idempotent identity keyed to the committed new TemplateID, marking that the
+  #                         old-template closure + candidate-template construction + TemplateCommit ran EXACTLY ONCE.
+  #                         template_refresh_setup_committed[TemplateID] records the markers; a TEMPLATE_REFRESH_SETUP
+  #                         retry resumes ONLY the post-TemplateCommit assignment phase (ContinueTemplateRefreshAssignmentSetup),
+  #                         never repeating CloseTemplateAssignments / candidate-template construction / TemplateCommit.
   # Q7 recovery-timing CONFIG constants (declared, deterministic):
   #   recovery_deadline_window            : config; > 0. The delay from SECURITY_RECOVERY entry to the deadline event.
   #   configured_recovery_completion_delay: config; > 0 (or the next-representable simulation instant). The
@@ -870,6 +897,13 @@ STRUCTURE Assignment (immutable version object)   # F7: renewal makes a NEW vers
                                 It is the declared reason a version reached CLOSED; there is NO undefined
                                 "INVALID" assignment state (K6). For lease expiry: status = CLOSED,
                                 custody_status = expired, termination_reason = lease_expiry.
+  closure_detail              : X7 — a NON-ENUM audit string carrying the fine-grained closure provenance (e.g.
+                                participant_setup_rolled_back, template_refresh_setup_rolled_back, recovery_install_rolled_back,
+                                range_assign_wake_failed, range_reassign_wake_failed, reserve_activation_wake_failed). It is
+                                the ONLY field that may hold such free text: NO string outside the canonical enums is ever
+                                stored in custody_status, revocation_reason, or termination_reason (X7). Every rollback /
+                                wake-failure close sets termination_reason + custody_status + revocation_reason (where
+                                applicable) from the canonical enums AND records the specific cause in closure_detail.
   actual_frontier, reported_frontier, accepted_frontier
   provenance                  : I9 reassignment/lineage records
   lease_start, lease_expiry
@@ -1237,20 +1271,25 @@ PROCEDURE WakeCompleteEvent
 ```
 PROCEDURE CreatePendingAssignment
   INPUTS: RoundContext, MinerID, range, assignment_origin, source_assignment, reason
-  PRECONDITIONS: assignment_origin in {ORIGINAL, REASSIGNED};        # G2: RENEWED removed from this constructor
-                 range disjoint from all valid active assignments (I1);
-                 custody_status(range) != completed AND coverage_state(range) != searched
+  PRECONDITIONS: assignment_origin in {ORIGINAL, REASSIGNED}   # X6/G2: TYPE/SHAPE prerequisite ONLY (RENEWED is not
+                 #   constructed here). The runtime-VARYING protocol-validity predicates — I1 disjointness;
+                 #   custody_status(range) != completed; coverage_state(range) != searched; REASSIGNED source/provenance
+                 #   validity; current RoundID/TemplateID validity — are DELIBERATELY NOT preconditions: they are
+                 #   evaluated in the executable guard below and a violation returns assignment_creation_failed. So a
+                 #   conforming caller can exercise EITHER result (assignment_created / assignment_creation_failed)
+                 #   without ever violating a precondition (X6; TV206).
   EFFECTS:
-    # W7: EXPLICIT CONSTRUCTOR RESULT. This constructor either creates the PENDING head and returns
+    # W7/X6: EXPLICIT CONSTRUCTOR RESULT. This constructor either creates the PENDING head and returns
     #     assignment_created(assignment), or creates NOTHING and returns assignment_creation_failed(reason). The
-    #     preconditions above are RE-CHECKED here as an executable guard (a concurrent same-time mutation may have
-    #     invalidated them), and a violation is a DECLARED failure — never an uncaught assertion and never a partially
-    #     built object. Every caller MUST branch on this result BEFORE reading AssignmentID, setting lease fields, or
-    #     adding the object to any transaction record.
+    #     runtime-varying protocol-validity predicates are evaluated HERE (not as preconditions), so a violation — even
+    #     one that arose after a caller's own pre-check (e.g. a concurrent same-time mutation made the range overlap) — is
+    #     a DECLARED failure, never an uncaught assertion and never a partially built object. Every caller MUST branch on
+    #     this result BEFORE reading AssignmentID, setting lease fields, or adding the object to any transaction record.
     IF range is NOT disjoint from all valid active assignments (I1)
        OR custody_status(range) = completed OR coverage_state(range) = searched
+       OR RoundID(RoundContext) != RoundID_current OR (a committed TemplateID is required AND TemplateID_committed is absent)   # X6: epoch validity
        OR (assignment_origin = REASSIGNED AND (source_assignment = null OR reason is NOT a permitted reassignment reason)):
-      RETURN assignment_creation_failed(reason = overlap_or_custody_or_provenance_violation)   # W7: nothing created
+      RETURN assignment_creation_failed(reason = overlap_or_custody_or_provenance_or_epoch_violation)   # W7/X6: nothing created
     # F4/G2: the SINGLE PENDING constructor used by RangeAssign, ReserveActivate, RangeReassign,
     #        TemplateRefresh. It sets provenance CORRECTLY from assignment_origin -- a reassignable
     #        suffix is NEVER labelled ORIGINAL. RENEWAL is NOT handled here: RenewAssignment (F7/G2) is
@@ -1389,6 +1428,7 @@ PROCEDURE RoundInitialise
     INITIALISE recovery_work               <- empty map   # U1: per-work-action record {action, status, due_status, ...}
     INITIALISE pending_recovery_work       <- empty map   # U1: per-episode AT-MOST-ONE in-flight RecoveryWorkID
     INITIALISE setup_retry_generation      <- empty map   # W8: per (RoundID, setup_kind) bounded retry counter (absent = 0 retries so far)
+    INITIALISE template_refresh_setup_committed <- empty map   # X3: per new-TemplateID marker that closure + TemplateCommit ran exactly once
     INITIALISE residency_ledger          <- empty    # H7/I19: sole owner of per-miner t_<state> this round
     # Q5: PER-RUN state is NOT (re)created here — it comes from RunContext (RunInitialise, §1.0), preserved across
     #     rounds. RoundInitialise binds RunContext (EventQueueContext, RunHookContext, security_census maps,
@@ -1531,7 +1571,7 @@ PROCEDURE PrepareParticipantsForNewRound
     #   dispatch_envelope: { envelope_namespace, event_time, delta_cycle, event_seq, hook_id }) — so an
     #   assignment_phase_failed can be ROLLED BACK executably with a COMPLETE transition_envelope (no placeholder).
     SET participant_setup_txn <- setup_transaction(rollback_envelope = dispatch_envelope,
-          wakes = empty, created_assignments = empty, prior_states = empty)   # W1/V8
+          wakes = empty, created_assignments = empty, prior_states = empty, assignment_by_miner = empty)   # W1/V8/X2
     SET participant_setup_error <- null   # V3/V8/W7: set when a CreatePendingAssignment or StartWake fails; checked after the loop
     # J5/K1: enumerate eligible miners in STABLE MinerID order (G7) and give each a legal new-round path.
     FOR EACH MinerID m IN SORT(eligible miners BY MinerID ascending):
@@ -1580,6 +1620,7 @@ PROCEDURE PrepareParticipantsForNewRound
       SET a <- cr.assignment                                              # W7: cr = assignment_created(a) — safe to read now
       SET lease_start(a) <- now; SET lease_expiry(a) <- now + default_lease_duration
       RECORD participant_setup_txn.prior_states[m] <- spec.from ; ADD AssignmentID(a) to participant_setup_txn.created_assignments   # V8
+      SET participant_setup_txn.assignment_by_miner[m] <- (AssignmentID(a), assignment_version(a))   # X2: EXACT version, populated BEFORE StartWake
       SET wr <- CALL StartWake(RoundContext, m, target_assignment = a, from_state = spec.from,
                      scheduling_context = ORDINARY_DISPATCH(dispatch_envelope))   # V2/V3: explicit context; structured result
       IF wr = wake_seated(waid, wref, wtt, ws): ADD wref to participant_setup_txn.wakes   # V8: capture ACTUAL WakeEventRef
@@ -1634,8 +1675,9 @@ PROCEDURE PrepareParticipantsForNewRound
         Determinism: stable MinerID order (G7); every StartWake/CreatePendingAssignment routes through the single
         ScheduleEvent enqueue interface (J9/K8).
 
-PROCEDURE RollbackParticipantSetup                              # W1/W2/V8: executable rollback of a failed participant setup
-  INPUTS: RoundContext, setup_txn   # W1: { rollback_envelope, wakes: [WakeEventRef], created_assignments: [AssignmentID], prior_states: {MinerID -> state} }
+PROCEDURE RollbackParticipantSetup                              # W1/W2/V8/X2/X7: executable rollback of a failed participant setup
+  INPUTS: RoundContext, setup_txn   # W1/X2: { rollback_envelope, wakes: [WakeEventRef], created_assignments: [AssignmentID],
+                                    #   prior_states: {MinerID -> state}, assignment_by_miner: {MinerID -> (AssignmentID, assignment_version)} }
   PRECONDITIONS: called by PrepareParticipantsForNewRound on a CreatePendingAssignment/StartWake failure or an
                  assignment_phase_failed, BEFORE the irreversible HASHING transition (round still ASSIGNMENT). It must
                  leave NO live partial assignment. W1: setup_txn.rollback_envelope is the caller's COMPLETE dispatch
@@ -1645,56 +1687,62 @@ PROCEDURE RollbackParticipantSetup                              # W1/W2/V8: exec
     # W2: cancel captured wakes FIRST (so none can activate a head being closed).
     FOR EACH wref in setup_txn.wakes (stable order):
       IF wref is still pending on EQ: CANCEL wref on EQ
-    # W2: a participant left WAKING is departed to OFFLINE via the LEGAL T12 edge (the ONLY legal WAKING departure
-    #   besides T5/T21) using the txn's COMPLETE rollback_envelope (W1) — NEVER an illegal WAKING->REGISTERED/RESERVE/
-    #   LOW_POWER_LISTEN edge and NEVER a placeholder/ambient envelope. T12 releases the bound range and charges no census.
-    FOR EACH MinerID m in setup_txn.prior_states:
+    # X2/W2: a participant left WAKING is departed to OFFLINE via the LEGAL T12 edge (the ONLY legal WAKING departure
+    #   besides T5/T21) using the txn's COMPLETE rollback_envelope (W1) AND the EXACT assignment version recorded in
+    #   setup_txn.assignment_by_miner[m] — NEVER assignment_ref = null when the miner holds a setup-created PENDING head,
+    #   and NEVER an illegal WAKING->prior edge. The transition audit, close, and restoration identify the SAME version.
+    FOR EACH (MinerID m, (aid, ver)) in setup_txn.assignment_by_miner (stable order by MinerID):
       IF miner_state(m) = WAKING:
         SET tr <- CALL ApplyMinerStateTransition(m, WAKING, OFFLINE,
-               transition_envelope = setup_txn.rollback_envelope, reason = participant_setup_rolled_back,   # W1: complete envelope; T12
-               assignment_ref = null, candidate_id = null, propagation_id = null)   # F6
+               transition_envelope = setup_txn.rollback_envelope, reason = cancellation,          # W1: complete envelope; X7 canonical; T12
+               assignment_ref = assignment_version_ref(aid, ver),                                 # X2: EXACT version, never null
+               candidate_id = null, propagation_id = null)   # F6
         IF tr is transition_applied(teid): SET rolled_to_offline <- true    # W2/W8: a WAKING participant was legally departed
-    # close every created head legally and restore the ledgers.
-    FOR EACH aid in setup_txn.created_assignments (stable order):
-      IF aid is a live head:
-        CLOSE aid as CLOSED (status = CLOSED, custody_status = revoked, reason = participant_setup_rolled_back)   # J7/I18b
+    # X7: close every created head legally with CANONICAL closure fields (identifying the exact version); restore ledgers.
+    FOR EACH (MinerID m, (aid, ver)) in setup_txn.assignment_by_miner (stable order by MinerID):
+      IF aid (version ver) is a live head:
+        CLOSE aid (version ver) as CLOSED (status = CLOSED, custody_status = revoked, termination_reason = cancellation,
+              revocation_reason = assignment_revoked, closure_detail = participant_setup_rolled_back)   # X7 canonical (J7/I18b)
       RESTORE the coverage-state / custody ledgers for aid's range (I8a/I8b)
-    IF any setup_txn.created_assignments entry remains a live head OR any setup_txn.wakes entry remains pending on EQ
-       OR any m in setup_txn.prior_states remains WAKING:
+    IF any aid in setup_txn.assignment_by_miner remains a live head OR any setup_txn.wakes entry remains pending on EQ
+       OR any m in setup_txn.assignment_by_miner remains WAKING:
       RETURN rollback_failed(reason = residual_partial_setup)
     RETURN rollback_completed(rolled_to_offline)   # W2/W8: report whether a retry is state-incompatible
   RETURNS: rollback_completed(rolled_to_offline) | rollback_failed(reason)
-  NOTE: W1/W2/V8: the NAMED executable rollback for participant setup. It cancels the CAPTURED WakeEventRefs, departs
-        any WAKING participant to OFFLINE via the LEGAL T12 edge with the txn's COMPLETE rollback_envelope (never an
-        illegal WAKING->prior edge and never a placeholder envelope), closes every created PENDING head legally, and
-        restores the ledgers — leaving NO live partial assignment and NO participant WAKING. It reports rolled_to_offline
-        so the caller can refuse a state-incompatible retry (W8). A residual it cannot clear returns rollback_failed.
+  NOTE: W1/W2/V8/X2/X7: the NAMED executable rollback for participant setup. It cancels the CAPTURED WakeEventRefs,
+        departs any WAKING participant to OFFLINE via the LEGAL T12 edge with the txn's COMPLETE rollback_envelope and the
+        EXACT assignment version from assignment_by_miner (never null, never an illegal edge), closes every created head
+        legally with canonical closure fields (X7), and restores the ledgers — leaving NO live partial assignment and NO
+        participant WAKING. It reports rolled_to_offline so the caller can refuse a state-incompatible retry (W8).
 
-PROCEDURE RollbackTemplateRefreshSetup                          # W1/W2/V8: executable rollback of a failed template-refresh setup
-  INPUTS: RoundContext, setup_txn   # W1: same shape as RollbackParticipantSetup's setup_txn (with rollback_envelope)
-  PRECONDITIONS: called by TemplateRefresh on a CreatePendingAssignment/StartWake failure or an assignment_phase_failed
-                 BEFORE the irreversible HASHING transition. W1: setup_txn.rollback_envelope is complete.
+PROCEDURE RollbackTemplateRefreshSetup                          # W1/W2/V8/X2/X7: executable rollback of a failed template-refresh setup
+  INPUTS: RoundContext, setup_txn   # W1/X2: same shape as RollbackParticipantSetup's setup_txn (with rollback_envelope AND assignment_by_miner)
+  PRECONDITIONS: called by ContinueTemplateRefreshAssignmentSetup on a CreatePendingAssignment/StartWake failure or an
+                 assignment_phase_failed BEFORE the irreversible HASHING transition. W1: setup_txn.rollback_envelope is complete.
   EFFECTS:
-    # W1/W2: identical rollback discipline as RollbackParticipantSetup, for the refresh's just-created assignments/wakes.
+    # W1/W2/X2/X7: identical rollback discipline as RollbackParticipantSetup, for the refresh's just-created assignments/wakes.
     SET rolled_to_offline <- false   # W2
     FOR EACH wref in setup_txn.wakes (stable order):
       IF wref is still pending on EQ: CANCEL wref on EQ
-    FOR EACH MinerID m in setup_txn.prior_states:
+    # X2: depart each still-WAKING miner via T12 using the EXACT version from assignment_by_miner and the complete envelope.
+    FOR EACH (MinerID m, (aid, ver)) in setup_txn.assignment_by_miner (stable order by MinerID):
       IF miner_state(m) = WAKING:
         SET tr <- CALL ApplyMinerStateTransition(m, WAKING, OFFLINE,
-               transition_envelope = setup_txn.rollback_envelope, reason = template_refresh_rolled_back,   # W1: complete envelope; T12
-               assignment_ref = null, candidate_id = null, propagation_id = null)   # F6
+               transition_envelope = setup_txn.rollback_envelope, reason = cancellation,          # W1: complete envelope; X7 canonical; T12
+               assignment_ref = assignment_version_ref(aid, ver),                                 # X2: EXACT version, never null
+               candidate_id = null, propagation_id = null)   # F6
         IF tr is transition_applied(teid): SET rolled_to_offline <- true
-    FOR EACH aid in setup_txn.created_assignments (stable order):
-      IF aid is a live head:
-        CLOSE aid as CLOSED (status = CLOSED, custody_status = revoked, reason = template_refresh_rolled_back)   # J7/I18b
+    FOR EACH (MinerID m, (aid, ver)) in setup_txn.assignment_by_miner (stable order by MinerID):
+      IF aid (version ver) is a live head:
+        CLOSE aid (version ver) as CLOSED (status = CLOSED, custody_status = revoked, termination_reason = cancellation,
+              revocation_reason = assignment_revoked, closure_detail = template_refresh_setup_rolled_back)   # X7 canonical (J7/I18b)
       RESTORE the coverage-state / custody ledgers for aid's range (I8a/I8b)
-    IF any created head remains live OR any wake remains pending OR any m remains WAKING:
+    IF any aid in setup_txn.assignment_by_miner remains a live head OR any wake remains pending OR any m remains WAKING:
       RETURN rollback_failed(reason = residual_partial_setup)
     RETURN rollback_completed(rolled_to_offline)   # W2/W8
   RETURNS: rollback_completed(rolled_to_offline) | rollback_failed(reason)
-  NOTE: W1/W2/V8: the NAMED executable rollback for template-refresh setup — same legal-edge (T12) + complete-envelope
-        discipline as RollbackParticipantSetup, reporting rolled_to_offline for the W8 retry decision.
+  NOTE: W1/W2/V8/X2/X7: the NAMED executable rollback for template-refresh setup — same legal-edge (T12) + complete-envelope
+        + exact-version + canonical-closure discipline as RollbackParticipantSetup, reporting rolled_to_offline for the W8 retry decision.
 
 PROCEDURE SetupRetryEvent                                       # W8: a bounded, idempotent, state-compatible retry of a rolled-back setup
   INPUTS: RoundContext, dispatch_envelope, RoundID, setup_kind, SetupRetryID, setup_retry_generation, reason
@@ -1702,31 +1750,51 @@ PROCEDURE SetupRetryEvent                                       # W8: a bounded,
   PRECONDITIONS: a dispatched queued handler seated by PrepareParticipantsForNewRound / TemplateRefresh after a
                  rolled-back setup; its dispatch_envelope is its own (§0.7f). Stale-guarded on RoundID.
   EFFECTS:
-    # W8 STALE GUARD: the round must still be the same and in a state where the setup's preconditions can hold.
-    IF RoundID != RoundID_current OR round_state NOT in {ASSIGNMENT, ROUND_INITIALISING, TEMPLATE_COMMITMENT}:
+    # X4 STALE GUARD: the round must still be the SAME round.
+    IF RoundID != RoundID_current:
       RETURN setup_retry_stale_noop(SetupRetryID)          # the round moved on; retry is a no-op
+    IF round_state in {ROUND_ACCEPTED, ROUND_ABORTED}:
+      RETURN setup_retry_terminal_stale_noop(SetupRetryID) # X4: already terminal; nothing to retry, no controller needed
+    # X4 KIND-SPECIFIC ROUND-STATE GUARD (the shared multi-state guard is WITHDRAWN): BOTH target procedures require
+    #   ASSIGNMENT, so ROUND_INITIALISING / TEMPLATE_COMMITMENT are NOT accepted. A retry dispatched in a non-terminal,
+    #   non-ASSIGNMENT state is rejected with a declared abort — the target procedure is NEVER called illegally.
+    IF round_state != ASSIGNMENT:
+      RETURN CALL RoundAbort(RoundContext, reason = setup_retry_wrong_round_state(setup_kind, round_state),
+                             dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # X4
     # W8 IDEMPOTENCE: a replay of an already-applied SetupRetryID runs the setup at most ONCE.
     IF SetupRetryID in applied_setup_retry_ids:
       RETURN setup_retry_duplicate_suppressed(SetupRetryID)
-    # W8 BOUND: never run a retry beyond the budget.
+    # X4 BOUND: retry-budget exhaustion cannot strand the round — do NOT merely return exhausted; ABORT with a declared
+    #   reason (the terminal case was already handled above).
     IF setup_retry_generation > maximum_setup_retries:
-      RETURN setup_retry_exhausted(SetupRetryID)
-    # W8 STATE COMPATIBILITY: every eligible participant of RoundID must be in a state the setup can legally re-enlist
-    #   ({REGISTERED, RESERVE, LOW_POWER_LISTEN}); if a prior rollback stranded a participant OFFLINE, ABORT rather than
-    #   retry (do NOT claim a retry path from an incompatible state).
+      RETURN CALL RoundAbort(RoundContext, reason = setup_retry_budget_exhausted(setup_kind),
+                             dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # X4
+    # W8 STATE COMPATIBILITY: every eligible participant of RoundID must be re-enlistable ({REGISTERED, RESERVE,
+    #   LOW_POWER_LISTEN}); if a prior rollback stranded one OFFLINE, ABORT rather than retry from an incompatible state.
     IF NOT (every eligible participant of RoundID is in miner_state {REGISTERED, RESERVE, LOW_POWER_LISTEN}):
       RETURN CALL RoundAbort(RoundContext, reason = setup_retry_state_incompatible(setup_kind),
                              dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # W8
     ADD SetupRetryID to applied_setup_retry_ids            # W8: register the idempotent marker BEFORE re-invoking
+    # X3/X4 KIND-SPECIFIC target procedure:
     IF setup_kind = PARTICIPANT_SETUP:
-      RETURN CALL PrepareParticipantsForNewRound(RoundContext, dispatch_envelope)   # W8: re-run the setup (its own liveness path governs)
-    RETURN CALL TemplateRefresh(RoundContext, dispatch_envelope = dispatch_envelope)   # W8: re-run the refresh
-  RETURNS: setup_retry_stale_noop | setup_retry_duplicate_suppressed | setup_retry_exhausted | round_aborted |
-           (the re-run setup's disposition)
-  NOTE: W8: the retry is STATE-COMPATIBLE (aborts if any eligible participant is OFFLINE), IDEMPOTENT (SetupRetryID +
-        applied_setup_retry_ids suppress a duplicate), and BOUNDED (setup_retry_generation <= maximum_setup_retries).
-        It re-invokes the setup at a strictly-later event_time, so the round is never stranded in ASSIGNMENT with no
-        controller. A round that has moved on no-ops; an incompatible or exhausted retry ABORTS rather than limping on.
+      ASSERT a committed eligible TemplateID exists for RoundContext                       # X4: PARTICIPANT_SETUP precondition
+      RETURN CALL PrepareParticipantsForNewRound(RoundContext, dispatch_envelope)          # X4: re-run participant setup
+    # setup_kind = TEMPLATE_REFRESH_SETUP: X3/X4 — resume ONLY the post-TemplateCommit assignment phase. The committed
+    #   TemplateID must equal the refresh setup's TemplateID and its old-template-closure / new-template-commitment
+    #   markers must already exist; the retry NEVER re-enters TemplateRefresh (no re-close / no re-commit).
+    ASSERT TemplateID_committed = the refresh setup's TemplateID
+           AND template_refresh_setup_committed[TemplateID_committed] EXISTS                # X3/X4: markers present exactly once
+    RETURN CALL ContinueTemplateRefreshAssignmentSetup(RoundContext, dispatch_envelope, TemplateID = TemplateID_committed,
+                     SetupRetryID = SetupRetryID, setup_retry_generation = setup_retry_generation)   # X3/X4
+  RETURNS: setup_retry_stale_noop | setup_retry_terminal_stale_noop | setup_retry_duplicate_suppressed | round_aborted |
+           (the re-run target procedure's disposition)
+  NOTE: X3/X4/W8: KIND-SPECIFIC guards — both targets require ASSIGNMENT (ROUND_INITIALISING/TEMPLATE_COMMITMENT are
+        rejected); PARTICIPANT_SETUP calls PrepareParticipantsForNewRound, TEMPLATE_REFRESH_SETUP calls
+        ContinueTemplateRefreshAssignmentSetup (NEVER TemplateRefresh — no re-close / re-commit). The retry is IDEMPOTENT
+        (SetupRetryID + applied_setup_retry_ids), BOUNDED (an over-budget retry ABORTS, never merely "exhausted"), and
+        STATE-COMPATIBLE (an OFFLINE-stranded participant ABORTS). Every dispatch ends in exactly one of: the target's
+        disposition (setup succeeded / a later bounded retry live / round aborted); round terminal; or a stale terminal
+        no-op — NEVER leaving ASSIGNMENT with no controller.
 ```
 
 ## 2a-bis. Round-state transition helper — automatic applicability-entry census (M2)
@@ -1887,7 +1955,8 @@ PROCEDURE RangeAssignFromPlan                                   # W5: plan-bound
     #   and cancelled any seated event; ROLL BACK the un-activated head legally and restore the ledgers.
     IF wr = wake_transition_failed_after_seat(reason2, wref):
       IF wref is still pending on EQ: CANCEL wref on EQ                # idempotent; StartWake already cancelled
-    CLOSE assignment as CLOSED (status = CLOSED, custody_status = revoked, reason = range_assign_wake_failed)   # J7/I18b: no live head
+    CLOSE assignment as CLOSED (status = CLOSED, custody_status = revoked, termination_reason = wake_failure,
+          revocation_reason = assignment_revoked, closure_detail = range_assign_wake_failed)   # X7 canonical (J7/I18b): no live head
     RESTORE the coverage-state / custody ledgers for range (I8a/I8b)
     ASSERT miner_state(MinerID) = fs                                  # V3/gate 4: the miner is not left WAKING
     RETURN range_assign_wake_failed(reason = wr, AssignmentID = AssignmentID(assignment))   # V3/V9
@@ -2955,9 +3024,10 @@ PROCEDURE ApplyRecoveryWorkAfterEpilogue                        # U1/U3/U4/U5: p
       SET pending_recovery_work[episode] <- null
       RETURN recovery_work_commit_failed(work_id, reason)           # no mutation; round stays SECURITY_RECOVERY
     IF commit = install_failed_after_mutation(reason, rollback_record):
-      SET rb <- CALL RollbackRecoveryAssignmentPlan(RoundContext, rollback_record)   # U5
+      SET rb <- CALL RollbackRecoveryAssignmentPlan(RoundContext, rollback_record)   # U5/X1: structured rollback result
       IF rb = rollback_failed(rr):
-        # U5/T4: an irreversible partial mutation that cannot be rolled back — abort (never fabricate UNRECOVERABLE).
+        # U5/T4/X1: an irreversible partial mutation (rollback could not establish a coherent state — e.g. a WAKING
+        #   miner could not be legally departed) — abort (never fabricate UNRECOVERABLE).
         SET recovery_work[work_id].due_status <- CONSUMED ; SET recovery_work[work_id].status <- CONSUMED
         SET pending_recovery_work[episode] <- null
         SET recovery_episode_disposition[episode] <- RECOVERY_INSTALL_FAILED_ABORTED   # T4 (NOT recovery_outcome_finalised)
@@ -2965,11 +3035,15 @@ PROCEDURE ApplyRecoveryWorkAfterEpilogue                        # U1/U3/U4/U5: p
         CALL RoundAbort(RoundContext, reason = recovery_install_failed_aborted,
                         dispatch_envelope = W.due_dispatch_envelope, recovery_finalising = true)   # T4/S4
         RETURN recovery_work_install_aborted(work_id)
-      # rollback succeeded: no live partial assignment remains; keep the episode.
+      # rb = rollback_completed(rolled_to_offline, rolled_back_items): no live partial assignment remains and no affected
+      #   miner is WAKING (X1) — keep the episode.
       SET recovery_work[work_id].due_status <- CONSUMED ; SET recovery_work[work_id].status <- CONSUMED
       SET pending_recovery_work[episode] <- null
       RETURN recovery_work_rolled_back(work_id)                     # round stays SECURITY_RECOVERY
-    # commit = install_committed: the reserve wake(s) / redistribution PENDING heads are seated STRICTLY LATER (U2).
+    # commit = install_committed(commit_rollback_record): the reserve wake(s) / redistribution PENDING heads are seated
+    #   STRICTLY LATER (U2). X5: the caller CAPTURES commit.rollback_record; the recovery-work path performs NO later
+    #   CompleteAssignmentPhase (activation completes at each miner's own WakeCompleteEvent), so the record is retained
+    #   for audit and no post-commit rollback is required on this path.
     #   The round STAYS SECURITY_RECOVERY; NOTHING is marked RESTORED (U1). A later WakeCompleteEvent raises H_honest,
     #   and a later final census with NO breach mints RESTORED (via the ordinary completion two-step).
     SET recovery_work[work_id].due_status <- CONSUMED              # U4: consumed on apply
@@ -3049,10 +3123,13 @@ PROCEDURE ReserveActivateFromPlan                               # V4/V5: plan-bo
     #   close the assignment, restore coverage/custody ledgers, and leave the reserve miner in RESERVE (never stranded WAKING).
     IF wr = wake_transition_failed_after_seat(reason2, wref):
       IF wref is still pending on EQ: CANCEL wref on EQ                 # StartWake already cancelled; idempotent
-    CLOSE assignment as CLOSED (status = CLOSED, custody_status = revoked, reason = reserve_activation_wake_failed)   # J7: no live head (I18b)
+    CLOSE assignment as CLOSED (status = CLOSED, custody_status = revoked, termination_reason = wake_failure,
+          revocation_reason = assignment_revoked, closure_detail = reserve_activation_wake_failed)   # X7 canonical (J7/I18b): no live head
     RESTORE the coverage-state / custody ledgers for candidate_range (I8a/I8b)
     ASSERT miner_state(reserve_miner) = RESERVE                         # V4/gate 4: the reserve miner stays RESERVE, not WAKING
-    SET rollback_record <- rollback_record(RecoveryInstallID = null, created_assignments = {assignment}, created_events = {})
+    # X1: this spec ALREADY self-reverted (assignment closed, miner RESERVE), so the returned record has EMPTY items —
+    #   nothing live remains for a caller to roll back.
+    SET rollback_record <- rollback_record(RecoveryInstallID = null, items = {})
     RETURN reserve_activation_failed_after_assignment(reason = wr, AssignmentID = AssignmentID(assignment),
                                                       rollback_record = rollback_record)   # V4
   RETURNS: reserve_activation_committed(MinerID, AssignmentID, assignment_version, WakeEventRef) |
@@ -3428,8 +3505,8 @@ PROCEDURE ApplyRecoveryAssignmentContinuationAfterEpilogue     # T1 step 2 / pos
       REMOVE decision_id from pending_recovery_decisions[episode]
       RETURN recovery_continuation_failed(decision_id)
     IF commit = install_failed_after_mutation(reason, rollback_record):
-      SET rb <- CALL RollbackRecoveryAssignmentPlan(RoundContext, rollback_record)   # U5
-      IF rb = rollback_completed:                                   # no live partial assignment remains (U5)
+      SET rb <- CALL RollbackRecoveryAssignmentPlan(RoundContext, rollback_record)   # U5/X1: structured rollback result
+      IF rb = rollback_completed(rolled_to_offline, rolled_back_items):   # X1: no live partial assignment AND no affected miner WAKING
         TRANSITION round_state -> SECURITY_RECOVERY                 # rollback complete
         SET recovery_install_in_progress <- false ; SET active_recovery_install_decision <- null
         SET recovery_decisions[decision_id].continuation_due_status <- CONSUMED
@@ -3446,7 +3523,10 @@ PROCEDURE ApplyRecoveryAssignmentContinuationAfterEpilogue     # T1 step 2 / pos
       CALL RoundAbort(RoundContext, reason = recovery_install_failed_aborted,
                       dispatch_envelope = D.continuation_due_dispatch_envelope, recovery_finalising = true)   # T4/S4
       RETURN recovery_continuation_install_aborted(decision_id)
-    # commit = install_committed: run CompleteAssignmentPhase (T5 explicit disposition).
+    # commit = install_committed(commit_rollback_record): X5 — CAPTURE the explicit rollback record for a possible
+    #   post-CompleteAssignmentPhase rollback (never an undeclared pass-by-reference to plan.rollback_metadata).
+    SET commit_rollback_record <- commit.rollback_record
+    # run CompleteAssignmentPhase (T5 explicit disposition).
     SET disp <- CALL CompleteAssignmentPhase(RoundContext, D.continuation_due_dispatch_envelope)   # T5
     IF disp = assignment_phase_completed:                           # round now HASHING; the FINAL census confirms the floor
       # T3 exit (i): HASHING + decision APPLIED. This is the moment branch-C RESTORED is actually applied.
@@ -3458,7 +3538,7 @@ PROCEDURE ApplyRecoveryAssignmentContinuationAfterEpilogue     # T1 step 2 / pos
       SET current_recovery_episode <- null
       RETURN recovery_continuation_applied(decision_id, RESTORED)
     ELSE:  # assignment_phase_failed -> REVERSIBLE (round still ASSIGNMENT). T3 exit (ii): roll the committed plan back.
-      SET rb <- CALL RollbackRecoveryAssignmentPlan(RoundContext, plan.rollback_metadata)   # U5: undo the committed install
+      SET rb <- CALL RollbackRecoveryAssignmentPlan(RoundContext, commit_rollback_record)   # U5/X5: the EXPLICIT record returned by install_committed
       IF rb = rollback_failed(rr):
         # irreversible — T4 abort (never fabricate UNRECOVERABLE).
         SET recovery_decisions[decision_id].continuation_due_status <- CANCELLED
@@ -3515,7 +3595,8 @@ PROCEDURE PrepareRecoveryAssignmentPlan                         # U5: COMPUTE-ON
     # W4: each spec's SINGLE implied wake is performed by its plan-bound constructor (ReserveActivateFromPlan /
     #   RangeReassignFromPlan / RangeAssignFromPlan), which returns the ACTUAL WakeEventRef. The commit path captures that
     #   one ref and NEVER seats a second wake for the same activation — there is no separate required_wake_operations loop.
-    SET plan.rollback_metadata              <- an EMPTY rollback record keyed by plan.RecoveryInstallID (filled by Commit)
+    # X1/X5: the plan carries NO rollback_metadata field — CommitRecoveryAssignmentPlan builds the complete rollback_record
+    #   (items) and returns it EXPLICITLY in every disposition (the obsolete pass-by-reference plan.rollback_metadata is withdrawn).
     # U5: VERIFY I1 (no overlap among valid active assignments), I3 (RoundID/TemplateID match), I10 (reserve activation
     #   adds no overlap), I18b (unique live head per lineage) over the PROPOSED specs — BEFORE any mutation.
     IF the proposed specs would violate I1 OR I3 OR I10 OR I18b:
@@ -3537,36 +3618,37 @@ PROCEDURE CommitRecoveryAssignmentPlan                          # U5: apply a pr
     #   violation is detected BEFORE any assignment is created, fail cleanly with NO mutation.
     IF the plan's specs now violate I1 OR I3 OR I10 OR I18b:
       RETURN install_failed_before_mutation(reason = revalidation_failed)   # U5: nothing created
-    SET created_assignments <- empty ; SET created_events <- empty
+    SET created_items <- empty   # X1: per-item rollback records (a COMPLETE state transaction)
     FOR EACH spec in plan.new_pending_assignment_specs (STABLE creation order):
-      # V2: scheduling_context is threaded EXPLICITLY to every constructor / wake (a POST_EPILOGUE caller's wakes are
-      #   seated STRICTLY LATER). V5: the commit uses the spec's EXACT plan-selected values (MinerID / range / origin /
-      #   source) — NO independent SELECT. V4: it captures the ACTUAL references the transaction returns and builds
-      #   rollback_metadata from them, never from undefined fields.
+      # V2: scheduling_context is threaded EXPLICITLY to every constructor / wake. V5: the commit uses the spec's EXACT
+      #   plan-selected values (no SELECT). X1: BEFORE the constructor mutates, capture the per-item rollback pre-images —
+      #   the pre-wake miner state, the exact ledger before-image, and the COMPLETE rollback transition envelope for a
+      #   later T12 departure — so the rollback record can reverse the item precisely.
+      SET pre_wake_state <- miner_state(spec.MinerID)                                            # X1
+      SET before_image   <- coverage_custody_before_image(spec.range)                            # X1: I8a/I8b snapshot
+      SET rbenv          <- (scheduling_context is POST_EPILOGUE(pctx) ? pctx.source_envelope
+                                                                       : scheduling_context.dispatch_envelope)   # X1: complete transition envelope
       IF spec.kind = RESERVE_ACTIVATION:                                # V6: a SECURITY_FLOOR_RECOVERY_WORK spec (changes the census)
         SET r <- CALL ReserveActivateFromPlan(RoundContext, reserve_miner = spec.MinerID, candidate_range = spec.range,
                        assignment_origin = spec.origin, source_assignment = spec.source_assignment,
                        scheduling_context = scheduling_context)         # V5/V4: plan-bound; returns ACTUAL refs
         IF r = reserve_activation_committed(mid, aid, aver, wref):
-          ADD aid to created_assignments ; ADD wref to created_events   # V4: ACTUAL references from the transaction
+          ADD rollback_item(MinerID = spec.MinerID, AssignmentID = aid, assignment_version = aver, WakeEventRef = wref,
+                pre_wake_state = pre_wake_state, rollback_envelope = rbenv, coverage_custody_before_image = before_image,
+                kind = spec.kind, provenance = spec.source_assignment) to created_items          # X1: ACTUAL refs
           CONTINUE
         IF r = reserve_activation_failed_before_mutation(reason):
-          IF created_assignments is empty AND created_events is empty:
-            RETURN install_failed_before_mutation(reason)               # V4: reversible; nothing created so far
-          SET plan.rollback_metadata <- rollback_record(RecoveryInstallID = plan.RecoveryInstallID,
-                created_assignments = created_assignments, created_events = created_events)
-          RETURN install_failed_after_mutation(reason, plan.rollback_metadata)
+          IF created_items is empty: RETURN install_failed_before_mutation(reason)               # reversible; nothing created so far
+          RETURN install_failed_after_mutation(reason,
+                rollback_record(RecoveryInstallID = plan.RecoveryInstallID, items = created_items))   # X1/X5: explicit record
         # r = reserve_activation_failed_after_assignment(reason, aid, rr): this spec ALREADY self-rolled-back (its
         #   assignment closed, miner stays RESERVE). Roll back the EARLIER specs of this install.
-        IF created_assignments is empty AND created_events is empty:
-          RETURN install_failed_before_mutation(reason = r.reason)      # only this spec touched, and it self-rolled-back
-        SET plan.rollback_metadata <- rollback_record(RecoveryInstallID = plan.RecoveryInstallID,
-              created_assignments = created_assignments, created_events = created_events)
-        RETURN install_failed_after_mutation(reason = r.reason, plan.rollback_metadata)
+        IF created_items is empty: RETURN install_failed_before_mutation(reason = r.reason)
+        RETURN install_failed_after_mutation(reason = r.reason,
+              rollback_record(RecoveryInstallID = plan.RecoveryInstallID, items = created_items))
       ELSE:  # REDISTRIBUTION spec — V6: COVERAGE_REPAIR_WORK, or a no-breach branch-C redistribution
         # W5: call the PLAN-BOUND range constructor with the spec's EXACT values (no SELECT), chosen by spec.origin.
-        #   W4: it is a create-then-wake TRANSACTION that performs EXACTLY ONE wake and returns a STRUCTURED range
-        #   result — the commit path CONSUMES that result and does NOT StartWake again (no double wake).
+        #   W4: it performs EXACTLY ONE wake and returns a STRUCTURED range result — the commit CONSUMES it (no double wake).
         IF spec.origin = REASSIGNED:
           SET rr <- CALL RangeReassignFromPlan(RoundContext, MinerID = spec.MinerID, range = spec.range,
                          assignment_origin = spec.origin, source_assignment = spec.source_assignment,
@@ -3578,58 +3660,82 @@ PROCEDURE CommitRecoveryAssignmentPlan                          # U5: apply a pr
                          reassignment_reason = spec.reassignment_reason, lease_duration = default_lease_duration,
                          scheduling_context = scheduling_context)        # W4/W5
         IF rr = range_reassigned(prov, aid, wref) OR rr = range_assigned(aid, wref, ws):
-          # W5: the committed object equals the exact spec (the constructor asserts this internally too).
           ASSERT rr.AssignmentID resolves MinerID = spec.MinerID AND range = spec.range
                  AND assignment_origin = spec.origin AND source_assignment_ref = spec.source_assignment   # W5
-          ADD rr.AssignmentID to created_assignments ; ADD rr.WakeEventRef to created_events   # W4: ACTUAL refs; ONE WakeCompleteEvent per activation
+          ADD rollback_item(MinerID = spec.MinerID, AssignmentID = rr.AssignmentID,
+                assignment_version = assignment_version(rr.AssignmentID), WakeEventRef = rr.WakeEventRef,
+                pre_wake_state = pre_wake_state, rollback_envelope = rbenv, coverage_custody_before_image = before_image,
+                kind = spec.kind, provenance = (rr = range_reassigned(prov, aid, wref) ? rr.provenance : null)) to created_items   # X1/W4
           CONTINUE
         IF rr = range_reassign_creation_failed(reason) OR rr = range_assign_creation_failed(reason):
           # W7: nothing was created for this spec (pre-mutation) — reversible if this is the first spec.
-          IF created_assignments is empty AND created_events is empty:
-            RETURN install_failed_before_mutation(reason)
-          SET plan.rollback_metadata <- rollback_record(RecoveryInstallID = plan.RecoveryInstallID,
-                created_assignments = created_assignments, created_events = created_events)
-          RETURN install_failed_after_mutation(reason, plan.rollback_metadata)
+          IF created_items is empty: RETURN install_failed_before_mutation(reason)
+          RETURN install_failed_after_mutation(reason,
+                rollback_record(RecoveryInstallID = plan.RecoveryInstallID, items = created_items))
         # rr = range_reassign_wake_failed(reason, aid) OR range_assign_wake_failed(reason, aid): the plan-bound
-        #   constructor ALREADY self-rolled-back THIS spec's head (closed, ledgers restored, miner not WAKING).
-        #   Roll back the EARLIER specs of this install.
-        IF created_assignments is empty AND created_events is empty:
-          RETURN install_failed_before_mutation(reason = rr.reason)      # only this spec touched, and it self-rolled-back
-        SET plan.rollback_metadata <- rollback_record(RecoveryInstallID = plan.RecoveryInstallID,
-              created_assignments = created_assignments, created_events = created_events)
-        RETURN install_failed_after_mutation(reason = rr.reason, plan.rollback_metadata)
-    SET plan.rollback_metadata <- rollback_record(RecoveryInstallID = plan.RecoveryInstallID,
-          created_assignments = created_assignments, created_events = created_events)   # for a later CompleteAssignmentPhase-fail rollback
-    RETURN install_committed
-  RETURNS: install_committed | install_failed_before_mutation(reason) | install_failed_after_mutation(reason, rollback_record)
+        #   constructor ALREADY self-rolled-back THIS spec's head. Roll back the EARLIER specs of this install.
+        IF created_items is empty: RETURN install_failed_before_mutation(reason = rr.reason)
+        RETURN install_failed_after_mutation(reason = rr.reason,
+              rollback_record(RecoveryInstallID = plan.RecoveryInstallID, items = created_items))
+    # X5: return the COMPLETE rollback record EXPLICITLY as part of the success disposition — the caller captures
+    #   commit.rollback_record for a later CompleteAssignmentPhase-fail rollback (no undeclared pass-by-reference).
+    RETURN install_committed(rollback_record(RecoveryInstallID = plan.RecoveryInstallID, items = created_items))
+  RETURNS: install_committed(rollback_record) | install_failed_before_mutation(reason) |
+           install_failed_after_mutation(reason, rollback_record)   # X5: rollback_record explicit in EVERY disposition
   NOTE: V5/V4/U2: replaces the opaque `INSTALL` macro's MUTATION half. It commits EXACTLY the prepared plan (the spec's
         MinerID / range / origin / source — no independent SELECT, V5), via the plan-bound ReserveActivateFromPlan and
         the redistribution constructors, threading the explicit scheduling_context (a POST_EPILOGUE caller's wakes are
-        seated STRICTLY LATER). It builds rollback_metadata from the ACTUAL references the transactions return (V4), and
-        distinguishes a reversible pre-mutation failure from an irreversible post-mutation one (returning a rollback record).
+        seated STRICTLY LATER). X1/X5: it builds the COMPLETE rollback_record (per-item MinerID / AssignmentID /
+        assignment_version / WakeEventRef / pre_wake_state / rollback_envelope / coverage_custody_before_image / kind /
+        provenance) from the ACTUAL references the transactions return, and RETURNS it EXPLICITLY in EVERY disposition —
+        install_committed(rollback_record) as well as install_failed_after_mutation(reason, rollback_record) — so a caller
+        never relies on a pass-by-reference field. It distinguishes a reversible pre-mutation failure from an irreversible
+        post-mutation one.
 
-PROCEDURE RollbackRecoveryAssignmentPlan                        # U5: explicitly revert a partially/fully committed plan
-  INPUTS: RoundContext, rollback_record   # { RecoveryInstallID, created_assignments, created_events }
-  PRECONDITIONS: called by ApplyRecoveryAssignmentContinuationAfterEpilogue / ApplyRecoveryWorkAfterEpilogue on an
-                 install_failed_after_mutation or a post-commit CompleteAssignmentPhase failure. It must leave NO live
-                 partial assignment.
+PROCEDURE RollbackRecoveryAssignmentPlan                        # U5/X1: revert a partially/fully committed plan as a COMPLETE state transaction
+  INPUTS: RoundContext, rollback_record   # X1: { RecoveryInstallID, items : [rollback_item] } (returned explicitly by CommitRecoveryAssignmentPlan, X5)
+  PRECONDITIONS: called by ApplyRecoveryWorkAfterEpilogue / ApplyRecoveryAssignmentContinuationAfterEpilogue on an
+                 install_failed_after_mutation OR a post-commit CompleteAssignmentPhase failure (with the record returned
+                 by install_committed, X5). It must leave NO live partial assignment AND NO affected miner WAKING.
   EFFECTS:
-    # U5: cancel every event the plan created, then close/remove every plan-created PENDING head LEGALLY, and restore
-    #   the coverage/custody ledgers. Order: events first (so no wake can activate a head being closed), then heads.
-    FOR EACH event_ref in rollback_record.created_events (stable order):
-      IF event_ref is still pending on EQ: CANCEL event_ref on EQ
-    FOR EACH a in rollback_record.created_assignments (stable order):
-      IF a is not a live head anymore: CONTINUE                    # already superseded/closed — idempotent
-      CLOSE a as CLOSED (status = CLOSED, custody_status = revoked, reason = recovery_install_rolled_back)   # J7: legal close, no live head (I18b)
-      RESTORE the coverage-state / custody ledgers to their pre-plan values for a's range (I8a/I8b)
-    IF any plan-created PENDING head remains live OR any created event remains pending on EQ:
-      RETURN rollback_failed(reason = residual_partial_assignment)  # U5/T4: caller aborts the round (never fabricate UNRECOVERABLE)
-    RETURN rollback_completed
-  RETURNS: rollback_completed | rollback_failed(reason)
-  NOTE: U5: replaces the opaque `UNDO the partial install` macro. It cancels every plan event, closes every plan-created
-        live head legally (I18b), and restores the coverage/custody ledgers — leaving NO live partial assignment. If a
-        residual partial assignment cannot be removed, it returns rollback_failed and the caller takes the declared
-        RECOVERY_INSTALL_FAILED_ABORTED / RoundAbort path (T4) — it NEVER fabricates an UNRECOVERABLE outcome.
+    SET rolled_to_offline <- false ; SET rolled_back_items <- empty   # X1: structured result
+    # (1) X1: cancel every captured WakeCompleteEvent FIRST (so no wake can activate a head being closed).
+    FOR EACH item in rollback_record.items (stable order):
+      IF item.WakeEventRef is still pending on EQ: CANCEL item.WakeEventRef on EQ
+    # (2) X1/X2/X8: for every miner still WAKING on its plan-created assignment, depart it to OFFLINE via the LEGAL T12
+    #   edge, using the EXACT assignment version (never null) and the item's COMPLETE rollback_envelope. ApplyMinerStateTransition
+    #   (F6/X8) closes the WAKING residency at THIS rollback event_time, charges E_transition/E_coordination ONCE, opens
+    #   OFFLINE residency, and (T12) makes NO census change (the miner never entered H_active) — so no open WAKING
+    #   residency survives to horizon T, and the complete transition identity is preserved.
+    FOR EACH item in rollback_record.items (stable order):
+      IF miner_state(item.MinerID) = WAKING AND item.AssignmentID is item.MinerID's bound live head:
+        SET tr <- CALL ApplyMinerStateTransition(item.MinerID, WAKING, OFFLINE,
+               transition_envelope = item.rollback_envelope, reason = cancellation,           # X2/X7: complete envelope; legal T12
+               assignment_ref = assignment_version_ref(item.AssignmentID, item.assignment_version),   # X2: EXACT version, never null
+               candidate_id = null, propagation_id = null)   # F6/X8
+        IF tr is transition_applied(teid): SET rolled_to_offline <- true
+    # (3) X1/X7: close the exact plan-created head legally with CANONICAL closure fields; (4) restore the before-image.
+    FOR EACH item in rollback_record.items (stable order):
+      IF item.AssignmentID is a live head:
+        CLOSE item.AssignmentID as CLOSED (status = CLOSED, custody_status = revoked, termination_reason = cancellation,
+              revocation_reason = assignment_revoked, closure_detail = recovery_install_rolled_back)   # X7: canonical fields (J7/I18b)
+      RESTORE the coverage-state / custody ledgers for item.AssignmentID's range FROM item.coverage_custody_before_image (I8a/I8b)
+      ADD item to rolled_back_items
+    # (5) X1: verify a coherent state — NEVER return rollback_completed while an affected miner is WAKING with no live event.
+    IF any item.WakeEventRef remains pending on EQ
+       OR any item.AssignmentID remains a live head
+       OR any item.MinerID remains WAKING on a plan-created head:
+      RETURN rollback_failed(reason = residual_partial_assignment)  # X1/T4: caller takes RECOVERY_INSTALL_FAILED_ABORTED / RoundAbort
+    RETURN rollback_completed(rolled_to_offline, rolled_back_items)  # X1: structured result
+  RETURNS: rollback_completed(rolled_to_offline, rolled_back_items) | rollback_failed(reason)
+  NOTE: U5/X1: a COMPLETE state transaction. From each rollback_item it cancels the WakeCompleteEvent, departs a
+        still-WAKING miner to OFFLINE via the LEGAL T12 edge with the EXACT assignment version + complete rollback
+        envelope (X2), closes the exact head legally with canonical closure fields (X7), and restores the ledger
+        before-image — leaving NO live partial assignment AND NO affected miner WAKING (it CANNOT return
+        rollback_completed while any affected miner is WAKING without a live WakeCompleteEvent). The T12 departure runs
+        through ApplyMinerStateTransition, so WAKING residency closes at the rollback time (not at horizon T) and
+        transition energy is charged exactly once (X8). A residual it cannot clear returns rollback_failed and the caller
+        takes the declared RECOVERY_INSTALL_FAILED_ABORTED / RoundAbort path (T4) — it NEVER fabricates UNRECOVERABLE.
 
 PROCEDURE FinalizePostRecoveryApplicationState                  # R2: the ONE post-application SETTLEMENT at t (NOT a 2nd floor decision)
   INPUTS: RoundContext, event_time t
@@ -3883,7 +3989,8 @@ PROCEDURE RangeReassignFromPlan                                 # W5: plan-bound
       #   WAKING) and cancelled any seated event; ROLL BACK the un-activated head legally so the suffix stays reassignable.
       IF wr = wake_transition_failed_after_seat(reason2, wref):
         IF wref is still pending on EQ: CANCEL wref on EQ            # idempotent; StartWake already cancelled
-      CLOSE assignment as CLOSED (status = CLOSED, custody_status = revoked, reason = range_reassign_wake_failed)   # J7/I18b
+      CLOSE assignment as CLOSED (status = CLOSED, custody_status = revoked, termination_reason = wake_failure,
+          revocation_reason = assignment_revoked, closure_detail = range_reassign_wake_failed)   # X7 canonical (J7/I18b)
       RESTORE the coverage-state / custody ledgers for range (I8a/I8b) so it remains reassignable
       ASSERT miner_state(MinerID) = fs                             # V3/gate 4: the miner is not left WAKING
       RETURN range_reassign_wake_failed(reason = wr, AssignmentID = AssignmentID(assignment))   # V3/V9: structured failure
@@ -4605,9 +4712,10 @@ PROCEDURE TemplateRefresh
   EFFECTS:
     # D8/E8: correct round-state sequencing so TemplateCommit ALWAYS runs from TEMPLATE_COMMITMENT;
     #        TEMPLATE_REFRESH NEVER bypasses TEMPLATE_COMMITMENT.
+    SET old_TemplateID_snapshot <- TemplateID_current          # X3: capture the old TemplateID before the refresh mutates it
     TRANSITION round_state -> TEMPLATE_REFRESH                  # from ROUND_EXHAUSTED or HASHING
     # E8-(1)/(2): close ALL old-template assignments via the EXPLICIT procedure; history preserved.
-    CALL CloseTemplateAssignments(RoundContext, old_TemplateID = TemplateID_current,
+    CALL CloseTemplateAssignments(RoundContext, old_TemplateID = old_TemplateID_snapshot,
                                   dispatch_envelope = dispatch_envelope)   # M1: threaded envelope
     # (3) build the new immutable template WHILE in TEMPLATE_REFRESH (C5: a NEW search domain).
     build new candidate_template
@@ -4615,63 +4723,77 @@ PROCEDURE TemplateRefresh
     TRANSITION round_state -> TEMPLATE_COMMITMENT
     # E8-(4): TemplateCommit REQUIRES TEMPLATE_COMMITMENT and transitions the round to ASSIGNMENT.
     new_TemplateID <- CALL TemplateCommit(RoundContext, new candidate_template)   # -> ASSIGNMENT
-    # E8-(5): select ONLY eligible miners whose CURRENT state has a LEGAL activation edge into WAKING:
-    #         REGISTERED (T3), RESERVE (T4), or the permitted low-power state LOW_POWER_LISTEN (T10).
-    #         OFFLINE and DISQUALIFIED miners receive NO assignment; mid-wake WAKING miners are skipped.
+    # X3: record the IDEMPOTENT markers that old-template closure + candidate construction + TemplateCommit ran EXACTLY
+    #   ONCE for new_TemplateID, keyed so a TEMPLATE_REFRESH_SETUP retry NEVER repeats them.
+    SET TemplateRefreshSetupID <- (RoundID_current, new_TemplateID)                     # X3: idempotent identity
+    SET template_refresh_setup_committed[new_TemplateID] <- refresh_setup_markers(
+          RoundID = RoundID_current, old_TemplateID = old_TemplateID_snapshot,
+          TemplateRefreshSetupID = TemplateRefreshSetupID)                              # X3: closure + commit happened once
+    # X3: delegate the post-TemplateCommit assignment phase to the named continuation (the SOLE owner of that phase,
+    #   its rollback, and its bounded retry). The initial invocation carries SetupRetryID = null, generation = 0.
+    RETURN CALL ContinueTemplateRefreshAssignmentSetup(RoundContext, dispatch_envelope, TemplateID = new_TemplateID,
+                     SetupRetryID = null, setup_retry_generation = 0)   # X3
+  RETURNS: new_TemplateID | template_refresh_retry_seated | round_aborted   # (propagates ContinueTemplateRefreshAssignmentSetup's disposition)
+  NOTE: X3: TemplateRefresh performs INITIATION ONLY — old-template closure (CloseTemplateAssignments), candidate
+        construction, the TEMPLATE_REFRESH -> TEMPLATE_COMMITMENT -> ASSIGNMENT sequencing, TemplateCommit, and the
+        idempotent template_refresh_setup_committed marker — then DELEGATES the assignment phase to
+        ContinueTemplateRefreshAssignmentSetup. It is NEVER the retry target: a TEMPLATE_REFRESH_SETUP SetupRetryEvent
+        resumes ContinueTemplateRefreshAssignmentSetup (X3/X4), so a retry NEVER re-closes the old template, re-builds a
+        candidate template, or re-commits (TemplateCommit runs only from TEMPLATE_COMMITMENT, D8/E8, exactly once).
+
+PROCEDURE ContinueTemplateRefreshAssignmentSetup               # X3: SOLE owner of the post-TemplateCommit template-refresh assignment phase
+  INPUTS: RoundContext, dispatch_envelope, TemplateID, SetupRetryID, setup_retry_generation
+          # SetupRetryID = null AND setup_retry_generation = 0 on the initial call from TemplateRefresh; a bounded
+          #   SetupRetryID + generation on a TEMPLATE_REFRESH_SETUP retry (X3/X4).
+  PRECONDITIONS: round_state = ASSIGNMENT; TemplateID = TemplateID_committed;
+                 template_refresh_setup_committed[TemplateID] EXISTS (X3: the old-template closure + TemplateCommit ran
+                 EXACTLY once). This procedure NEVER closes the old template, constructs a candidate template, or calls
+                 TemplateCommit — it owns ONLY the assignment phase, its rollback, and its bounded retry/abort.
+  EFFECTS:
+    # E8-(5): select ONLY eligible miners with a LEGAL activation edge into WAKING (REGISTERED T3 / RESERVE T4 /
+    #         LOW_POWER_LISTEN T10). OFFLINE and DISQUALIFIED receive NO assignment; mid-wake WAKING miners are skipped.
     eligible <- { m : miner_state(m) in {REGISTERED, RESERVE, LOW_POWER_LISTEN} }
-    # W1/W3/V8: initialise the refresh setup TRANSACTION BEFORE the miner loop, carrying an IMMUTABLE rollback_envelope
-    #   (this refresh's own dispatch_envelope: { envelope_namespace, event_time, delta_cycle, event_seq, hook_id }).
-    #   Every created AssignmentID, prior miner state, and StartWake WakeEventRef is captured by EXPLICIT statements
-    #   INSIDE the loop — NEVER reconstructed afterward from prose.
+    # W1/W3/V8/X2: initialise the refresh setup TRANSACTION BEFORE the miner loop, carrying an IMMUTABLE rollback_envelope
+    #   and an assignment_by_miner map. Every field is populated by EXPLICIT in-loop statements (W3) — never from prose.
     SET refresh_setup_txn <- setup_transaction(rollback_envelope = dispatch_envelope,
-          wakes = empty, created_assignments = empty, prior_states = empty)   # W1/W3
-    SET refresh_setup_error <- null   # W3: set on a CreatePendingAssignment or StartWake failure; checked after the loop
-    # M5: iterate in STABLE MinerID order so the StartWake events this loop produces are scheduled in a
-    #     deterministic order BEFORE ScheduleEvent assigns event_creation_seq (G7/J4).
+          wakes = empty, created_assignments = empty, prior_states = empty, assignment_by_miner = empty)   # W1/W3/X2
+    SET refresh_setup_error <- null
+    # M5: STABLE MinerID order (G7/J4).
     FOR EACH miner m IN SORT(eligible BY MinerID ascending):
-      IF refresh_setup_error != null: BREAK    # W3: once the refresh has failed, mint NO further work; roll back below
-      # E8-(6)/F4/W7: a FRESH ORIGINAL assignment over the NEW domain via the shared constructor; BRANCH on its result
-      #   BEFORE reading AssignmentID / setting lease fields / recording it in the transaction.
+      IF refresh_setup_error != null: BREAK    # W3: once failed, mint NO further work; roll back below
       SET cr <- CALL CreatePendingAssignment(RoundContext, m, fresh_range(m),
                       assignment_origin = ORIGINAL, source_assignment = null, reason = null)   # F4/W7
       IF cr is assignment_creation_failed(reason):
-        SET refresh_setup_error <- assignment_creation_failed(reason) ; CONTINUE   # W7: nothing created; refresh failed
+        SET refresh_setup_error <- assignment_creation_failed(reason) ; CONTINUE   # W7: nothing created
       SET assignment_m <- cr.assignment                                            # W7: cr = assignment_created(assignment_m)
-      RECORD refresh_setup_txn.prior_states[m] <- miner_state(m)                   # W3: capture prior state EXPLICITLY
-      ADD AssignmentID(assignment_m) to refresh_setup_txn.created_assignments       # W3: capture AssignmentID EXPLICITLY
+      RECORD refresh_setup_txn.prior_states[m] <- miner_state(m)                   # W3
+      ADD AssignmentID(assignment_m) to refresh_setup_txn.created_assignments       # W3
+      SET refresh_setup_txn.assignment_by_miner[m] <- (AssignmentID(assignment_m), assignment_version(assignment_m))   # X2: EXACT version BEFORE StartWake
       SET lease_start(assignment_m)  <- now
       SET lease_expiry(assignment_m) <- now + default_lease_duration
-      # E8-(7)/F5: the LEGAL per-source edge into WAKING (T3 REGISTERED / T4 RESERVE / T10 LOW_POWER_LISTEN) via the
-      #            NON-BLOCKING StartWake; PENDING -> CURRENT happens at each miner's own WakeCompleteEvent (T5).
       SET wr <- CALL StartWake(RoundContext, m, target_assignment = assignment_m, from_state = miner_state(m),
-                     scheduling_context = ORDINARY_DISPATCH(dispatch_envelope))   # V2/V3: explicit context; structured result
-      IF wr = wake_seated(waid, wref, wtt, ws): ADD wref to refresh_setup_txn.wakes   # W3: capture ACTUAL WakeEventRef EXPLICITLY
-      ELSE: SET refresh_setup_error <- wr                                             # W3: a refresh wake failure IS a setup failure
-      # do NOT call RangeReassign for old ranges; do NOT rebind old assignments to new_TemplateID
+                     scheduling_context = ORDINARY_DISPATCH(dispatch_envelope))   # V2/V3: structured result
+      IF wr = wake_seated(waid, wref, wtt, ws): ADD wref to refresh_setup_txn.wakes   # W3
+      ELSE: SET refresh_setup_error <- wr                                             # W3: a wake failure IS a setup failure
+      # do NOT call RangeReassign for old ranges; do NOT rebind old assignments to TemplateID
     ASSERT difficulty unchanged                                 # I12
-    # W3: if a CreatePendingAssignment or StartWake failed, DO NOT call CompleteAssignmentPhase — roll back immediately
-    #   and take the declared liveness path.
+    # W3: if a CreatePendingAssignment or StartWake failed, DO NOT call CompleteAssignmentPhase — roll back immediately.
     IF refresh_setup_error != null:
       SET setup_reason <- refresh_setup_error
     ELSE:
-      # L2: the intended assignment set is now valid. Perform the ASSIGNMENT -> HASHING transition through the SINGLE
-      #     sanctioned owner CompleteAssignmentPhase (K2) — the ONLY executable ASSIGNMENT -> HASHING step. U6: CAPTURE
-      #     and BRANCH on the T5 disposition — do NOT return a successful new_TemplateID while the round is still ASSIGNMENT.
       ASSERT round_state = ASSIGNMENT
       SET disp <- CALL CompleteAssignmentPhase(RoundContext, dispatch_envelope)   # L2/M2/T5: SOLE ASSIGNMENT -> HASHING owner
-      IF disp = assignment_phase_completed: RETURN new_TemplateID
+      IF disp = assignment_phase_completed: RETURN TemplateID     # success: round now HASHING
       SET setup_reason <- disp.reason        # assignment_phase_failed(reason) — reversible (round still ASSIGNMENT)
-    # W1/W2/V8: NAMED rollback using the txn's IMMUTABLE rollback_envelope; RollbackTemplateRefreshSetup departs any
-    #   WAKING miner to OFFLINE via the LEGAL T12 edge and reports rolled_to_offline.
-    SET rb <- CALL RollbackTemplateRefreshSetup(RoundContext, refresh_setup_txn)   # W1/W2/V8
+    # W1/W2/X2/X7: NAMED rollback with the txn's complete rollback_envelope + exact assignment versions.
+    SET rb <- CALL RollbackTemplateRefreshSetup(RoundContext, refresh_setup_txn)   # W1/W2/X2/X7
     IF rb = rollback_failed(rr):
       RETURN CALL RoundAbort(RoundContext, reason = template_refresh_rollback_failed,
                              dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # declared abort
-    # W8 LIVENESS: bounded, state-compatible retry ONLY when no miner was routed to OFFLINE and the budget/horizon allow;
-    #   otherwise ABORT. Never a retry from an incompatible OFFLINE state.
+    # W8 LIVENESS: bounded, state-compatible retry ONLY when no miner was routed to OFFLINE and the budget/horizon allow.
     IF rb.rolled_to_offline:
       RETURN CALL RoundAbort(RoundContext, reason = template_refresh_failed(setup_reason),
-                             dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # W8: retry state-incompatible
+                             dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # W8: state-incompatible
     IF setup_retry_generation[(RoundID_current, TEMPLATE_REFRESH_SETUP)] >= maximum_setup_retries:
       RETURN CALL RoundAbort(RoundContext, reason = template_refresh_retries_exhausted(setup_reason),
                              dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # W8: bounded
@@ -4683,17 +4805,18 @@ PROCEDURE TemplateRefresh
                      target_event_time = next_representable_simulation_time(dispatch_envelope.event_time),
                      target_microphase = ROUND_SETUP,
                      {RoundID = RoundID_current, setup_kind = TEMPLATE_REFRESH_SETUP, SetupRetryID = srid,
-                      setup_retry_generation = g, reason = setup_reason})               # W8
+                      setup_retry_generation = g, reason = setup_reason})               # W8/X3: the retry resumes THIS procedure (never TemplateRefresh)
       IF r = scheduled(...): RETURN template_refresh_retry_seated(srid, setup_reason)
     RETURN CALL RoundAbort(RoundContext, reason = template_refresh_failed(setup_reason),
                            dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # declared abort
-  RETURNS: new_TemplateID | template_refresh_retry_seated | round_aborted
-  NOTE: Refresh NEVER bypasses TEMPLATE_COMMITMENT (TemplateCommit runs only from it, D8/E8) and
-        NEVER reassigns a completed old range -- old assignments are CLOSED via CloseTemplateAssignments
-        and NEW ORIGINAL assignments are created over the new domain (C5). Only eligible REGISTERED /
-        RESERVE / LOW_POWER_LISTEN miners are activated, each via its legal edge into WAKING; OFFLINE
-        and DISQUALIFIED miners receive no assignment (E8). L2: the round reaches HASHING through the SINGLE
-        owner CompleteAssignmentPhase (K2) — the only executable ASSIGNMENT -> HASHING step in the spec.
+  RETURNS: TemplateID | template_refresh_retry_seated | round_aborted
+  NOTE: X3: the SOLE owner of the post-TemplateCommit template-refresh assignment phase — eligible-miner selection,
+        new-template assignment creation, StartWake, CompleteAssignmentPhase, RollbackTemplateRefreshSetup, and the
+        bounded retry/abort. It NEVER re-closes the old template, re-builds a candidate template, or re-commits — those
+        ran EXACTLY once in the initial TemplateRefresh (marked by template_refresh_setup_committed[TemplateID]). A
+        TEMPLATE_REFRESH_SETUP SetupRetryEvent resumes THIS procedure (X3/X4), so a retry never repeats the closure /
+        commit. Success returns the committed TemplateID (round HASHING); every other exit is a bounded retry seat or a
+        declared RoundAbort — the round is never left in ASSIGNMENT with no controller.
 ```
 
 ## 20. Round abort

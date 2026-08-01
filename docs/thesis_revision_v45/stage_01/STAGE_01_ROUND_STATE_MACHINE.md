@@ -678,6 +678,53 @@ participant in a state the setup can legally re-enlist (`rolled_to_offline = fal
 round `RoundAbort`s. Each retry carries a `SetupRetryID = (RoundID, setup_kind, generation)` and is idempotent
 (`applied_setup_retry_ids`) and bounded.
 
+### 3.10b Stage-1X addendum (recovery-rollback & retry-contract lock)
+
+**X1 (recovery-plan rollback is a complete state transaction).** `RollbackRecoveryAssignmentPlan` consumes a
+`rollback_record` of per-item records — each carrying `{ MinerID, AssignmentID, assignment_version, WakeEventRef,
+pre_wake_state, rollback_envelope, coverage_custody_before_image, kind, provenance }` — cancels every `WakeEventRef`,
+departs every still-`WAKING` miner to `OFFLINE` via the legal `T12` edge, closes the exact head, and restores the
+before-image. It returns `rollback_completed(rolled_to_offline, rolled_back_items)` and CANNOT return
+`rollback_completed` while any affected miner is `WAKING` with no live `WakeCompleteEvent`; an irreversible residual
+returns `rollback_failed`, and the caller takes the declared `RECOVERY_INSTALL_FAILED_ABORTED` / `RoundAbort` path.
+
+**X2 (every T12 rollback binds the exact assignment version).** `participant_setup_txn` / `refresh_setup_txn` carry
+`assignment_by_miner : MinerID -> (AssignmentID, assignment_version)`, populated after `assignment_created` and before
+`StartWake`; `RollbackParticipantSetup` / `RollbackTemplateRefreshSetup` pass that exact version as `assignment_ref` to
+the `WAKING -> OFFLINE` transition — never `null` when the miner holds a setup-created `PENDING` head.
+
+**X3 (template-refresh initiation is split from the assignment retry).** `TemplateRefresh` performs old-template
+closure + candidate construction + `TemplateCommit` (recording the idempotent `template_refresh_setup_committed`
+marker keyed to the new `TemplateID`), then delegates to `ContinueTemplateRefreshAssignmentSetup`, which owns the
+post-commit assignment phase, rollback, and bounded retry. A `TEMPLATE_REFRESH_SETUP` retry resumes
+`ContinueTemplateRefreshAssignmentSetup` only — never re-entering `TemplateRefresh`, and never repeating
+`CloseTemplateAssignments` / candidate construction / `TemplateCommit`.
+
+**X4 (kind-specific setup-retry guards).** `SetupRetryEvent` requires `round_state = ASSIGNMENT` for BOTH kinds
+(`ROUND_INITIALISING` / `TEMPLATE_COMMITMENT` are rejected); `PARTICIPANT_SETUP` calls `PrepareParticipantsForNewRound`,
+`TEMPLATE_REFRESH_SETUP` calls `ContinueTemplateRefreshAssignmentSetup` (asserting the committed `TemplateID` matches
+the refresh setup's and its markers exist). An over-budget retry `RoundAbort`s (never merely `setup_retry_exhausted`);
+every dispatch ends in the target's disposition, a round-terminal state, or a stale terminal no-op.
+
+**X5 (plan commit returns its rollback record explicitly).** `CommitRecoveryAssignmentPlan` returns
+`install_committed(rollback_record)`; callers capture `commit.rollback_record` for a later
+`CompleteAssignmentPhase`-failure rollback. The obsolete `plan.rollback_metadata` pass-by-reference field is withdrawn.
+
+**X6 (assignment-creation failure is reachable without violating a precondition).** `CreatePendingAssignment`'s
+PRECONDITIONS are type/shape only; the runtime-varying protocol-validity predicates (I1 disjointness; custody;
+coverage; provenance; RoundID/TemplateID epoch) are evaluated in the executable guard and a violation returns
+`assignment_creation_failed` — a conforming caller can exercise either result legally.
+
+**X7 (canonical closure fields).** Every rollback / wake-failure close sets `status = CLOSED`, `custody_status`,
+`termination_reason`, and (where applicable) `revocation_reason` from the canonical enums, and records the fine-grained
+cause in the non-enum `closure_detail` audit field. No string outside the canonical enums is stored in
+`termination_reason`, `custody_status`, or `revocation_reason`.
+
+**X8 (rollback reconciled with energy/census accounting).** Each rollback `WAKING -> OFFLINE` runs through
+`ApplyMinerStateTransition` (F6), which closes the `WAKING` residency at the rollback `event_time`, charges
+`E_transition`/`E_coordination` exactly once, opens `OFFLINE` residency, and (T12) makes no census change (the miner
+never entered `H_active`) — so no `WAKING` residency stays open until horizon `T`.
+
 ### 3.11 What causes a template refresh
 
 A template refresh (`TEMPLATE_REFRESH`) is caused by (a) exhaustion of the committed
