@@ -834,7 +834,8 @@ STRUCTURE RoundContext registries (initialised by RoundInitialise, cleared on cl
   #   final coherence gate is "no affected MinerID remains WAKING" (not "no miner WAKING on a plan-created head").
   # --- Z1 complete setup-retry status lifecycle (one record per SetupRetryID) ---
   # setup_retry_record = { SetupRetryID, setup_kind, RoundID, TemplateID_at_seat, TemplateRefreshSetupID, retry_generation,
-  #   event_ref, status : SetupRetryStatus, target_disposition }. setup_retry_records : map SetupRetryID -> setup_retry_record
+  #   event_ref, status : SetupRetryStatus, target_disposition, terminal_closure_pending } (terminal_closure_pending : bool,
+  #   default false, added AA2). setup_retry_records : map SetupRetryID -> setup_retry_record
   #   is the SINGLE registry (it REPLACES the Y-era applied_setup_retry_ids mirror AND the bare setup_retry_status_by_id).
   #   LIFECYCLE (every retained SetupRetryStatus has an executable producer): (1) the SEATING procedure, AFTER a successful
   #   ScheduleEvent(SetupRetryEvent), publishes the record ATOMICALLY with status = SEATED; (2) SetupRetryEvent's FIRST valid
@@ -871,12 +872,49 @@ STRUCTURE RoundContext registries (initialised by RoundInitialise, cleared on cl
   #   wake-origin association must match. On a mismatch AbortPendingWakeForRollback returns wake_abort_failed and departs NO
   #   miner; the association is cleared exactly once by the successful T12 departure.
   # --- Z6 centralised setup rollback item (one complete record; no parallel-map partial states) ---
-  # setup_rollback_item = { MinerID, AssignmentID, assignment_version, pre_wake_state, before_image, WakeEventRef (| null),
-  #   wake_result, rollback_envelope }. setup_transaction = { rollback_envelope, rollback_items : [setup_rollback_item] }
+  # setup_rollback_item = { RollbackItemID, MinerID, AssignmentID, assignment_version, pre_wake_state, before_image,
+  #   WakeEventRef (| null), wake_result, rollback_envelope } (RollbackItemID added, AA6). setup_transaction =
+  #   { rollback_envelope, rollback_items : map RollbackItemID -> setup_rollback_item } (KEYED, AA6)
   #   REPLACES the Y-era parallel maps (assignment_by_miner / wake_by_miner / before_image_by_miner / prior_states). Every
   #   created assignment has EXACTLY ONE complete rollback_item appended BEFORE StartWake is invoked (WakeEventRef / wake_result
   #   default to null and are set immediately after StartWake, Z3) — so no state exists in which an AssignmentID is present but
   #   its before-image or wake reference is absent.
+  # --- AA1 canonical RoundAbort result ---
+  # RoundAbort RETURNS round_aborted(abort_record) (AA1) — ONE canonical result name; RoundAbort is the SOLE abort producer
+  #   and there is no bare abort_record and no prose alias anywhere. Every procedure that PROPAGATES the result to its own
+  #   caller (SetupRetryEvent, PrepareParticipantsForNewRound, ContinueTemplateRefreshAssignmentSetup, TemplateRefresh,
+  #   FullRangeExhaustNoSolution) lists round_aborted in its RETURNS union and classifies the EXACT round_aborted(abort_record)
+  #   result via RETURN CALL RoundAbort. The recovery paths (CompleteSecurityRecovery branch D, ApplyRecoveryWorkAfterEpilogue,
+  #   ApplyRecoveryAssignmentContinuationAfterEpilogue) instead CALL the same canonical RoundAbort for effect
+  #   (recovery_finalising = true) and return their OWN recovery-specific disposition after classifying the ROUND_ABORTED
+  #   effect. RULE: a target's round_aborted result maps setup_retry_record.status = ABORTED (NEVER CANCELLED).
+  # --- AA2 terminalise every SEATED retry record on round closure ---
+  # CancelSetupRetriesForRound(RoundContext, closing_RoundID, cancellation_reason, dispatch_or_run_hook_context) is the ONE
+  #   named terminaliser: for each setup_retry_record of closing_RoundID, a SEATED record has its event_ref cancelled (when
+  #   still queued) and becomes status = CANCELLED (target_disposition = cancellation_reason); an APPLYING record is NOT
+  #   overwritten (a terminal_closure_pending flag is set and the executing handler's captured target result finishes it as
+  #   ABORTED/CANCELLED). CloseRoundAssignments INVOKES it, and the round-closure event-cancellation list EXPLICITLY
+  #   includes SetupRetryEvent. No terminal or superseded round leaves a SEATED retry record.
+  # --- AA3 stale-RoundID handling through the record lifecycle ---
+  # SetupRetryEvent resolves setup_retry_records[SetupRetryID] and verifies the payload BEFORE the stale-RoundID check, so a
+  #   stale dispatch of a KNOWN SEATED record TERMINALISES it (status = CANCELLED or SUPERSEDED, target_disposition =
+  #   setup_retry_stale_noop) rather than leaving it SEATED. A malformed payload that matches no record may stale-noop.
+  # --- AA4 assignment-effect policy is part of transition identity (design A) ---
+  # assignment_effect_policy in { EDGE_DEFAULT, STATE_ONLY_ROLLBACK } is a field of TransitionEventID (AA4-A). Two otherwise
+  #   identical transitions with different assignment_effect_policy are DISTINCT ids, so the applied/replay registry never
+  #   aliases transitions with different assignment side effects.
+  # --- AA5 legal STATE_ONLY_ROLLBACK tuple ---
+  # STATE_ONLY_ROLLBACK is legal IFF old_state = WAKING AND new_state = OFFLINE AND reason = validation_abort AND
+  #   assignment_ref is exact and non-null AND waking_origin_assignment_ref[MinerID] = assignment_ref. Any other use returns
+  #   illegal_transition and performs NO mutation. Every non-rollback caller uses EDGE_DEFAULT (the declared signature
+  #   default). No caller can use STATE_ONLY_ROLLBACK on T5 / T21 / any other edge to bypass assignment effects.
+  # --- AA6 explicit keyed rollback-item storage ---
+  # setup_rollback_item gains RollbackItemID; setup_transaction.rollback_items is KEYED by RollbackItemID. The item is CREATED
+  #   with WakeEventRef = null and wake_result = NOT_ATTEMPTED and ADDED under RollbackItemID BEFORE StartWake; after StartWake
+  #   the stored record is UPDATED EXPLICITLY by key — setup_txn.rollback_items[RollbackItemID].wake_result <- wr and
+  #   .WakeEventRef <- (actual ref | returned cancelled ref | null). Rollback CONSUMES the stored keyed record, never an
+  #   unproven alias to a local variable. wake_result in { NOT_ATTEMPTED, wake_seated, wake_schedule_failed_before_transition,
+  #   wake_transition_failed_after_seat }.
   # Q7 recovery-timing CONFIG constants (declared, deterministic):
   #   recovery_deadline_window            : config; > 0. The delay from SECURITY_RECOVERY entry to the deadline event.
   #   configured_recovery_completion_delay: config; > 0 (or the next-representable simulation instant). The
@@ -1133,7 +1171,11 @@ PROCEDURE ApplyMinerStateTransition
     SET TransitionEventID <- (envelope_namespace, hook_id, event_time, delta_cycle, event_seq,
                               MinerID, old_state, new_state, reason,
                               AssignmentID(assignment_ref), assignment_version(assignment_ref),
-                              candidate_id, propagation_id)                       # R3: namespace + hook_id in the id (immutable, J3)
+                              candidate_id, propagation_id,
+                              assignment_effect_policy)                           # R3 + AA4-A: policy in the id (immutable, J3)
+    # AA4-A: assignment_effect_policy is a FIELD of TransitionEventID, so two otherwise-identical transitions with
+    #     DIFFERENT assignment side effects (EDGE_DEFAULT vs STATE_ONLY_ROLLBACK) are DISTINCT ids — the applied/replay
+    #     registry never aliases transitions whose assignment mutation differs.
     # (2) K5 REPLAY GUARD — check the APPLIED registry. Suppress ONLY an exact-same-id replay of an
     #     ALREADY-APPLIED transition; do NOT read old_state and do NOT charge energy.
     IF TransitionEventID in applied_transition_registry:
@@ -1152,6 +1194,15 @@ PROCEDURE ApplyMinerStateTransition
        OR (candidate-triggered AND (candidate_id = null OR propagation_id = null)):   # J3
       RECORD transition_rejection_log(TransitionEventID, reason_rejected = illegal_or_malformed)
       RETURN illegal_transition(TransitionEventID)   # W6
+    # (4b) AA5 LEGAL STATE_ONLY_ROLLBACK TUPLE. STATE_ONLY_ROLLBACK (which suppresses the edge's assignment effect, 5c)
+    #     is legal IFF the EXACT ValidationAbort rollback tuple holds; any other use is rejected with NO mutation, so no
+    #     caller can use it on T5 / T21 / any other edge to bypass assignment effects.
+    IF assignment_effect_policy = STATE_ONLY_ROLLBACK
+       AND NOT (old_state = WAKING AND new_state = OFFLINE AND reason = validation_abort
+                AND assignment_ref is exact and non-null
+                AND waking_origin_assignment_ref[MinerID] = assignment_version_ref(AssignmentID(assignment_ref), assignment_version(assignment_ref))):
+      RECORD transition_rejection_log(TransitionEventID, reason_rejected = illegal_state_only_rollback_tuple)   # AA5
+      RETURN illegal_transition(TransitionEventID)   # AA5: NO state/residency/energy/census/assignment mutation
     # (5) K5 ATOMIC APPLY. Register-then-apply in ONE atomic step; the id enters the APPLIED registry ONLY here.
     ATOMICALLY:
       ADD TransitionEventID to applied_transition_registry             # K5: only APPLIED transitions are registered
@@ -1669,7 +1720,7 @@ PROCEDURE PrepareParticipantsForNewRound
     # W1/V8: maintain a LOCAL setup transaction record — carrying an IMMUTABLE rollback_envelope (this entry point's own
     #   dispatch_envelope: { envelope_namespace, event_time, delta_cycle, event_seq, hook_id }) — so an
     #   assignment_phase_failed can be ROLLED BACK executably with a COMPLETE transition_envelope (no placeholder).
-    SET participant_setup_txn <- setup_transaction(rollback_envelope = dispatch_envelope, rollback_items = empty)   # W1/V8/X2/Y4/Z6: one centralised record list
+    SET participant_setup_txn <- setup_transaction(rollback_envelope = dispatch_envelope, rollback_items = empty map)   # W1/V8/X2/Y4/Z6/AA6: one centralised map keyed by RollbackItemID
     SET participant_setup_error <- null   # V3/V8/W7: set when a CreatePendingAssignment or StartWake fails; checked after the loop
     # J5/K1: enumerate eligible miners in STABLE MinerID order (G7) and give each a legal new-round path.
     FOR EACH MinerID m IN SORT(eligible miners BY MinerID ascending):
@@ -1720,17 +1771,21 @@ PROCEDURE PrepareParticipantsForNewRound
         CONTINUE
       SET a <- cr.assignment                                              # W7: cr = assignment_created(a) — safe to read now
       SET lease_start(a) <- now; SET lease_expiry(a) <- now + default_lease_duration
-      # Z6: build the ONE complete setup_rollback_item BEFORE StartWake (wake fields default to explicit null, set post-StartWake).
-      SET item <- setup_rollback_item(MinerID = m, AssignmentID = AssignmentID(a), assignment_version = assignment_version(a),
-            pre_wake_state = spec.from, before_image = before_image, WakeEventRef = null, wake_result = null,
-            rollback_envelope = dispatch_envelope)   # Z2/Z3/Z6: complete except wake fields
-      ADD item to participant_setup_txn.rollback_items
+      # AA6: build the ONE complete setup_rollback_item BEFORE StartWake, KEYED by an explicit, deterministic RollbackItemID.
+      #   The record is CREATED with WakeEventRef = null and wake_result = NOT_ATTEMPTED and ADDED under its key; after
+      #   StartWake the STORED record (never a local-variable alias) is UPDATED EXPLICITLY BY KEY, so a subsequent rollback
+      #   consumes exactly the post-StartWake wake_result / WakeEventRef persisted at setup_txn.rollback_items[RollbackItemID].
+      SET rbid <- (PARTICIPANT_SETUP, m, assignment_version_ref(AssignmentID(a), assignment_version(a)))   # AA6: explicit, deterministic RollbackItemID
+      SET item <- setup_rollback_item(RollbackItemID = rbid, MinerID = m, AssignmentID = AssignmentID(a),
+            assignment_version = assignment_version(a), pre_wake_state = spec.from, before_image = before_image,
+            WakeEventRef = null, wake_result = NOT_ATTEMPTED, rollback_envelope = dispatch_envelope)   # Z2/Z3/AA6: created wake-unattempted
+      SET participant_setup_txn.rollback_items[rbid] <- item                              # AA6: ADD the keyed record BEFORE StartWake
       SET wr <- CALL StartWake(RoundContext, m, target_assignment = a, from_state = spec.from,
                      scheduling_context = ORDINARY_DISPATCH(dispatch_envelope))   # V2/V3: explicit context; structured result
-      SET item.wake_result <- wr                                                          # Z3: record the structured wake result
-      IF wr = wake_seated(waid, wref, wtt, ws):        SET item.WakeEventRef <- wref       # Z3: actual ref
-      ELSE IF wr = wake_transition_failed_after_seat(reason, wref): SET item.WakeEventRef <- wref   # Z3: returned (already-cancelled) ref
-      ELSE:                                            SET item.WakeEventRef <- null       # Z3: wake_schedule_failed_before_transition -> null
+      UPDATE participant_setup_txn.rollback_items[rbid].wake_result <- wr                 # AA6/Z3: update the STORED record BY KEY
+      IF wr = wake_seated(waid, wref, wtt, ws):        UPDATE participant_setup_txn.rollback_items[rbid].WakeEventRef <- wref       # AA6/Z3: actual ref
+      ELSE IF wr = wake_transition_failed_after_seat(reason, wref): UPDATE participant_setup_txn.rollback_items[rbid].WakeEventRef <- wref   # AA6/Z3: returned (already-cancelled) ref
+      ELSE:                                            UPDATE participant_setup_txn.rollback_items[rbid].WakeEventRef <- null       # AA6/Z3: wake_schedule_failed_before_transition -> null
       IF wr != wake_seated(waid, wref, wtt, ws): SET participant_setup_error <- wr         # V3/V8: a wake failure IS a setup failure
     # V8: if a CreatePendingAssignment or StartWake in the loop failed, the setup is already failed — roll back and
     #   decide, do NOT proceed to CompleteAssignmentPhase.
@@ -1771,7 +1826,8 @@ PROCEDURE PrepareParticipantsForNewRound
         # Z1: publish the setup_retry_record ATOMICALLY with status = SEATED AFTER the successful ScheduleEvent.
         ATOMICALLY: SET setup_retry_records[srid] <- setup_retry_record(SetupRetryID = srid, setup_kind = PARTICIPANT_SETUP,
               RoundID = RoundID_current, TemplateID_at_seat = TemplateID_committed, TemplateRefreshSetupID = null,
-              retry_generation = g, event_ref = event_ref, status = SEATED, target_disposition = null)   # Z1
+              retry_generation = g, event_ref = event_ref, status = SEATED, target_disposition = null,
+              terminal_closure_pending = false)   # Z1/AA2
         RETURN participant_set_setup_retry_seated(srid, setup_reason)
     RETURN CALL RoundAbort(RoundContext, reason = participant_setup_failed(setup_reason),
                            dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # declared abort
@@ -1845,9 +1901,10 @@ PROCEDURE AbortPendingWakeForRollback                          # Y5: the ONE nam
         and this operation never both close the same assignment.
 
 PROCEDURE RollbackParticipantSetup                              # W1/W2/V8/X2/X7/Y4/Y5/Z6: executable rollback of a failed participant setup
-  INPUTS: RoundContext, setup_txn   # Z6: { rollback_envelope, rollback_items : [setup_rollback_item] } — ONE complete
-                                    #   record per created assignment (MinerID, AssignmentID, assignment_version, pre_wake_state,
-                                    #   before_image, WakeEventRef (| null), wake_result, rollback_envelope); no parallel maps.
+  INPUTS: RoundContext, setup_txn   # AA6: { rollback_envelope, rollback_items : map RollbackItemID -> setup_rollback_item } — ONE
+                                    #   complete keyed record per created assignment (RollbackItemID, MinerID, AssignmentID,
+                                    #   assignment_version, pre_wake_state, before_image, WakeEventRef (| null), wake_result,
+                                    #   rollback_envelope); no parallel maps. Each item's wake_result is the persisted post-StartWake value.
   PRECONDITIONS: called by PrepareParticipantsForNewRound on a CreatePendingAssignment/StartWake failure or an
                  assignment_phase_failed, BEFORE the irreversible HASHING transition (round still ASSIGNMENT). It must
                  leave NO live partial assignment AND NO affected participant WAKING. W1: setup_txn.rollback_envelope is
@@ -1859,11 +1916,12 @@ PROCEDURE RollbackParticipantSetup                              # W1/W2/V8/X2/X7
     #   there is no partial-map state. AbortPendingWakeForRollback cancels the (possibly null) wake, verifies the wake-origin
     #   binding (Z5), departs a still-WAKING miner via the LEGAL T12 ValidationAbort trigger (STATE_ONLY_ROLLBACK, Z4),
     #   performs the SINGLE canonical close (X7), and restores the before-image.
-    FOR EACH item in setup_txn.rollback_items (stable order by item.MinerID):
+    FOR EACH RollbackItemID rbid IN SORT(KEYS(setup_txn.rollback_items) ascending):   # AA6: deterministic keyed-map iteration
+      SET item <- setup_txn.rollback_items[rbid]   # AA6: consume the STORED record (never a local-variable alias)
       SET wr <- CALL AbortPendingWakeForRollback(RoundContext, MinerID = item.MinerID, AssignmentID = item.AssignmentID,
                      assignment_version = item.assignment_version, WakeEventRef = item.WakeEventRef,
                      rollback_envelope = setup_txn.rollback_envelope, closure_detail = participant_setup_rolled_back,
-                     coverage_custody_before_image = item.before_image)   # Y4/Y5/Z3/Z6
+                     coverage_custody_before_image = item.before_image)   # Y4/Y5/Z3/AA6
       IF wr = wake_abort_completed(m, aid, departed):
         IF departed: SET rolled_to_offline <- true    # W2/W8: a WAKING participant was legally departed
       ELSE:   # wr = wake_abort_failed(...): an affected miner could not be resolved
@@ -1882,19 +1940,20 @@ PROCEDURE RollbackParticipantSetup                              # W1/W2/V8/X2/X7
         caller can refuse a state-incompatible retry (W8).
 
 PROCEDURE RollbackTemplateRefreshSetup                          # W1/W2/V8/X2/X7/Y4/Y5/Z6: executable rollback of a failed template-refresh setup
-  INPUTS: RoundContext, setup_txn   # Z6: { rollback_envelope, rollback_items : [setup_rollback_item] } (same shape as
-                                    #   RollbackParticipantSetup's setup_txn)
+  INPUTS: RoundContext, setup_txn   # AA6: { rollback_envelope, rollback_items : map RollbackItemID -> setup_rollback_item }
+                                    #   (same keyed shape as RollbackParticipantSetup's setup_txn)
   PRECONDITIONS: called by ContinueTemplateRefreshAssignmentSetup on a CreatePendingAssignment/StartWake failure or an
                  assignment_phase_failed BEFORE the irreversible HASHING transition. W1: setup_txn.rollback_envelope is complete.
   EFFECTS:
     # W1/W2/X2/X7/Y4/Y5/Z6: identical rollback discipline as RollbackParticipantSetup, iterating the CENTRALISED
     #   rollback_items. It resolves EVERY affected miner through the ONE named operation UNCONDITIONALLY.
     SET rolled_to_offline <- false   # W2
-    FOR EACH item in setup_txn.rollback_items (stable order by item.MinerID):
+    FOR EACH RollbackItemID rbid IN SORT(KEYS(setup_txn.rollback_items) ascending):   # AA6: deterministic keyed-map iteration
+      SET item <- setup_txn.rollback_items[rbid]   # AA6: consume the STORED record (never a local-variable alias)
       SET wr <- CALL AbortPendingWakeForRollback(RoundContext, MinerID = item.MinerID, AssignmentID = item.AssignmentID,
                      assignment_version = item.assignment_version, WakeEventRef = item.WakeEventRef,
                      rollback_envelope = setup_txn.rollback_envelope, closure_detail = template_refresh_setup_rolled_back,
-                     coverage_custody_before_image = item.before_image)   # Y4/Y5/Z3/Z6
+                     coverage_custody_before_image = item.before_image)   # Y4/Y5/Z3/AA6
       IF wr = wake_abort_completed(m, aid, departed):
         IF departed: SET rolled_to_offline <- true
       ELSE:   # wr = wake_abort_failed(...)
@@ -1921,28 +1980,37 @@ PROCEDURE SetupRetryEvent                                       # W8/X4/Y1/Y2/Y3
   PRECONDITIONS: a dispatched queued handler seated by PrepareParticipantsForNewRound / ContinueTemplateRefreshAssignmentSetup
                  after a rolled-back setup; its dispatch_envelope is its own (§0.7f).
   EFFECTS:
-    # Y1/Z1 CANONICAL GUARD ORDER: (1) event shape + RoundID identity; (2) STATUS-based EXACT-replay idempotence;
-    #   (3) terminal; (4) kind-specific template identity; (5) target round state; (6) budget + participant compatibility;
-    #   (7) SEATED -> APPLYING, CAPTURE the target result, set the terminal status. Idempotence (2) precedes the terminal
-    #   check (3) AND the wrong-state abort (5), so a replay of a retry that already succeeded and moved the round to
-    #   HASHING is duplicate-suppressed — it NEVER calls RoundAbort for a forward round.
-    # (1) EVENT SHAPE + ROUND IDENTITY. A different round means the retry is stale.
-    IF dispatch_envelope is incomplete OR RoundID != RoundID_current:
-      RETURN setup_retry_stale_noop(SetupRetryID)          # the round moved on / malformed; no-op, no abort
-    # (2) Z1 STATUS-BASED EXACT-REPLAY IDEMPOTENCE. Look up the ONE record (published SEATED by the seating procedure).
-    #   A SEATED record is the FIRST valid dispatch and MUST execute (do NOT suppress it). Any NON-SEATED status
-    #   (APPLYING / APPLIED / SUPERSEDED / CANCELLED / ABORTED) is a replay and is duplicate-suppressed. Testing PRESENCE
-    #   would wrongly suppress the first legitimate dispatch of a published SEATED record (Z1).
+    # AA3/Z1 CANONICAL GUARD ORDER: (1) event shape; (1b) RESOLVE the record; (2) payload matches the immutable record;
+    #   (3) STATUS-based EXACT-replay idempotence; (4) stale-RoundID / closed-round TERMINALISATION; (5) template identity;
+    #   (6) target round state; (7) budget + participant compat; (8) SEATED -> APPLYING + capture + classify. AA3: the record
+    #   is RESOLVED before the stale-RoundID check, so a stale dispatch of a KNOWN SEATED record TERMINALISES it (never
+    #   leaves it SEATED); idempotence (3) still precedes the stale/terminal/target guards (Z1).
+    # (1) EVENT SHAPE. A malformed envelope / structurally-invalid SetupRetryID is a no-op (no record to terminalise, AA3).
+    IF dispatch_envelope is incomplete OR SetupRetryID is not structurally valid:
+      RETURN setup_retry_stale_noop(SetupRetryID)
+    # (1b) AA3 RESOLVE the ONE record. An unknown id (never seated) is a no-op.
     IF setup_retry_records[SetupRetryID] does NOT EXIST:
-      RETURN setup_retry_stale_noop(SetupRetryID)          # never seated (defensive; the seat publishes SEATED)
+      RETURN setup_retry_stale_noop(SetupRetryID)          # never seated / unknown; nothing to terminalise
     SET rec <- setup_retry_records[SetupRetryID]
+    # (2) AA3 PAYLOAD MATCH. A payload whose fields disagree with the immutable record is a corrupted dispatch — no-op;
+    #   the record is LEFT for its correct dispatch (a mismatched dispatch does not own — or terminalise — the record).
+    IF NOT (RoundID = rec.RoundID AND setup_kind = rec.setup_kind AND TemplateID_at_seat = rec.TemplateID_at_seat
+            AND TemplateRefreshSetupID = rec.TemplateRefreshSetupID AND retry_generation = rec.retry_generation):
+      RETURN setup_retry_stale_noop(SetupRetryID)
+    # (3) Z1 STATUS-BASED EXACT-REPLAY IDEMPOTENCE. A published SEATED record's FIRST dispatch MUST execute; any NON-SEATED
+    #   status (APPLYING / APPLIED / SUPERSEDED / CANCELLED / ABORTED) is a replay and is duplicate-suppressed.
     IF rec.status != SEATED:
-      RETURN setup_retry_duplicate_suppressed(SetupRetryID)   # Z1: replay of an APPLYING/APPLIED/SUPERSEDED/CANCELLED/ABORTED record
-    # (3) TERMINAL. Already accepted/aborted: nothing to retry, no controller needed. CANCEL the seated record.
+      RETURN setup_retry_duplicate_suppressed(SetupRetryID)   # Z1: replay of an already-progressed record
+    # (4) AA3 STALE-RoundID / CLOSED-ROUND TERMINALISATION. The record is KNOWN and SEATED; a stale dispatch must NOT
+    #   leave it SEATED. Round advanced (RoundID moved on) -> SUPERSEDED; round terminal (closed) -> CANCELLED; either way
+    #   target_disposition is the stale no-op and the event returns a stale no-op.
+    IF RoundID != RoundID_current:
+      SET rec.status <- SUPERSEDED ; SET rec.target_disposition <- setup_retry_stale_noop   # AA3: round advanced past r1
+      RETURN setup_retry_stale_noop(SetupRetryID)
     IF round_state in {ROUND_ACCEPTED, ROUND_ABORTED}:
-      SET rec.status <- CANCELLED ; SET rec.target_disposition <- setup_retry_terminal_stale_noop   # Z1
-      RETURN setup_retry_terminal_stale_noop(SetupRetryID)   # X4
-    # (4) Y2 KIND-SPECIFIC EXACT TEMPLATE IDENTITY (no ambient "the refresh setup's TemplateID"). A stale retry for an
+      SET rec.status <- CANCELLED ; SET rec.target_disposition <- setup_retry_terminal_stale_noop   # AA3: closed round
+      RETURN setup_retry_terminal_stale_noop(SetupRetryID)
+    # (5) Y2 KIND-SPECIFIC EXACT TEMPLATE IDENTITY (no ambient "the refresh setup's TemplateID"). A stale retry for an
     #   earlier TemplateID takes a declared stale disposition, CANCELs the record, and NEVER operates on the current template.
     IF setup_kind = PARTICIPANT_SETUP:
       IF NOT (a committed eligible TemplateID exists for RoundContext AND TemplateID_at_seat = TemplateID_committed):
@@ -1954,22 +2022,22 @@ PROCEDURE SetupRetryEvent                                       # W8/X4/Y1/Y2/Y3
               AND TemplateRefreshSetupID = template_refresh_setup_committed[TemplateID_at_seat].TemplateRefreshSetupID):
         SET rec.status <- CANCELLED ; SET rec.target_disposition <- setup_retry_stale_noop   # Z1
         RETURN setup_retry_stale_noop(SetupRetryID)          # Y2: stale TemplateID / TemplateRefreshSetupID — never operate on the current template
-    # (5) X4 TARGET ROUND STATE. BOTH targets require ASSIGNMENT; a non-terminal non-ASSIGNMENT dispatch is a declared abort.
+    # (6) X4 TARGET ROUND STATE. BOTH targets require ASSIGNMENT; a non-terminal non-ASSIGNMENT dispatch is a declared abort.
     IF round_state != ASSIGNMENT:
-      SET rec.status <- ABORTED ; SET rec.target_disposition <- round_aborted   # Z1
+      SET rec.status <- ABORTED ; SET rec.target_disposition <- round_aborted   # AA1: target RoundAbort -> ABORTED
       RETURN CALL RoundAbort(RoundContext, reason = setup_retry_wrong_round_state(setup_kind, round_state),
-                             dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # X4
-    # (6) X4/W8 BOUND (Y3: scalar retry_generation vs the maximum) + STATE COMPATIBILITY. An over-budget retry ABORTS
+                             dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # X4 (returns round_aborted(abort_record), AA1)
+    # (7) X4/W8 BOUND (Y3: scalar retry_generation vs the maximum) + STATE COMPATIBILITY. An over-budget retry ABORTS
     #   (never merely "exhausted"); an OFFLINE-stranded eligible participant ABORTS rather than retry from an incompatible state.
     IF retry_generation > maximum_setup_retries:
-      SET rec.status <- ABORTED ; SET rec.target_disposition <- round_aborted   # Z1
+      SET rec.status <- ABORTED ; SET rec.target_disposition <- round_aborted   # AA1
       RETURN CALL RoundAbort(RoundContext, reason = setup_retry_budget_exhausted(setup_kind),
                              dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # X4/Y3
     IF NOT (every eligible participant of RoundID is in miner_state {REGISTERED, RESERVE, LOW_POWER_LISTEN}):
-      SET rec.status <- ABORTED ; SET rec.target_disposition <- round_aborted   # Z1
+      SET rec.status <- ABORTED ; SET rec.target_disposition <- round_aborted   # AA1
       RETURN CALL RoundAbort(RoundContext, reason = setup_retry_state_incompatible(setup_kind),
                              dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # W8
-    # (7) Z1 FIRST DISPATCH: atomically transition SEATED -> APPLYING, CAPTURE the target result (no direct RETURN CALL),
+    # (8) Z1 FIRST DISPATCH: atomically transition SEATED -> APPLYING, CAPTURE the target result (no direct RETURN CALL),
     #   then set the terminal status deterministically from that result.
     ATOMICALLY: SET rec.status <- APPLYING       # Z1: the SEATED record is now being applied
     IF setup_kind = PARTICIPANT_SETUP:
@@ -1978,28 +2046,62 @@ PROCEDURE SetupRetryEvent                                       # W8/X4/Y1/Y2/Y3
       SET disp <- CALL ContinueTemplateRefreshAssignmentSetup(RoundContext, dispatch_envelope, TemplateID = TemplateID_at_seat,
                        TemplateRefreshSetupID = TemplateRefreshSetupID,
                        SetupRetryID = SetupRetryID, retry_generation = retry_generation)   # X3/X4/Y2/Y3
-    # Z1 CLASSIFY the captured result into the terminal status:
+    # Z1/AA2 CLASSIFY the captured result into the terminal status:
     SET rec.target_disposition <- disp
-    IF disp = participant_set_prepared OR disp is a committed TemplateID value:
+    IF rec.terminal_closure_pending = true:
+      # AA2: the round CLOSED while this record was APPLYING (CancelSetupRetriesForRound flagged it); the record MUST finish
+      #   terminal — NEVER APPLIED. A target round_aborted(abort_record) maps to ABORTED (AA1); any other captured
+      #   disposition maps to CANCELLED.
+      IF disp = round_aborted(abort_record): SET rec.status <- ABORTED
+      ELSE:                                  SET rec.status <- CANCELLED
+    ELSE IF disp = participant_set_prepared OR disp is a committed TemplateID value:
       SET rec.status <- APPLIED                 # Z1: setup succeeded (round now HASHING)
     ELSE IF disp = participant_set_setup_retry_seated(...) OR disp = template_refresh_retry_seated(...):
       SET rec.status <- SUPERSEDED              # Z1: a later generation was seated by the target
-    ELSE IF disp = round_aborted:
-      SET rec.status <- ABORTED                 # Z1: the target aborted the round
+    ELSE IF disp = round_aborted(abort_record):
+      SET rec.status <- ABORTED                 # AA1: a target RoundAbort result maps to ABORTED (never CANCELLED)
     ELSE:   # disp = template_refresh_retry_stale_noop or another declared stale disposition
       SET rec.status <- CANCELLED               # Z1: a declared stale cancellation
     RETURN disp
-  RETURNS: setup_retry_stale_noop | setup_retry_terminal_stale_noop | setup_retry_duplicate_suppressed | round_aborted |
-           (the re-run target procedure's disposition)
-  NOTE: Z1/Y1/Y2/Y3/X3/X4/W8: the guard order checks STATUS-based EXACT-replay idempotence (2) BEFORE the terminal (3) and
-        the wrong-state abort (5). A published SEATED record's FIRST dispatch is NEVER duplicate-suppressed — only a record
-        already APPLYING/APPLIED/SUPERSEDED/CANCELLED/ABORTED is (Z1). The first dispatch transitions SEATED -> APPLYING,
-        CAPTURES the target result (no direct RETURN CALL), and sets the terminal status: APPLIED (succeeded) / SUPERSEDED
-        (later generation seated) / ABORTED (RoundAbort) / CANCELLED (terminal or stale). "applied" is DEFINED as status =
-        APPLIED and is set ONLY after the target result is known; the redundant applied_setup_retry_ids mirror is REMOVED.
-        Y2 verifies the EXACT TemplateID_at_seat / TemplateRefreshSetupID; Y3 keeps retry_generation scalar; every dispatch
-        ends in exactly one of: duplicate/stale/terminal no-op; the target's disposition; or a declared RoundAbort — NEVER
-        leaving ASSIGNMENT with no controller.
+  RETURNS: setup_retry_stale_noop | setup_retry_terminal_stale_noop | setup_retry_duplicate_suppressed |
+           round_aborted(abort_record) | (the re-run target procedure's disposition)   # AA1: canonical round_aborted(abort_record)
+  NOTE: AA1/AA3/Z1/Y1/Y2/Y3/X3/X4/W8: AA3 RESOLVES the record and verifies the payload BEFORE the stale-RoundID check, so a
+        stale dispatch of a KNOWN SEATED record TERMINALISES it (SUPERSEDED for an advanced round, CANCELLED for a closed
+        round) rather than leaving it SEATED; a malformed/mismatched payload stale-noops without terminalising a record it
+        cannot own. Idempotence (3) still precedes the stale/terminal/target guards, so a post-success replay is
+        duplicate-suppressed. The first dispatch transitions SEATED -> APPLYING, CAPTURES the target result (no direct RETURN
+        CALL), and sets the terminal status: APPLIED (succeeded) / SUPERSEDED (later generation seated) / ABORTED (a target
+        round_aborted(abort_record), AA1 — never CANCELLED) / CANCELLED (a declared stale/terminal disposition). "applied" =
+        status = APPLIED, set only after the target result is known. Every dispatch ends in exactly one of: a
+        duplicate/stale/terminal no-op that leaves NO SEATED record; the target's disposition; or a declared
+        round_aborted(abort_record) — NEVER leaving ASSIGNMENT with no controller.
+
+PROCEDURE CancelSetupRetriesForRound                            # AA2: terminalise every setup-retry record of a closing/superseded round
+  INPUTS: RoundContext, closing_RoundID, cancellation_reason, dispatch_or_run_hook_context
+          # dispatch_or_run_hook_context: the closer's dispatch envelope (ordinary closure) or the RUN_HOOK envelope
+          #   (horizon close, §20b) — used only to cancel a still-queued event_ref on EQ.
+  PRECONDITIONS: called by CloseRoundAssignments for the round being closed (ROUND_ACCEPTED / ROUND_ABORTED), so no
+                 terminal or superseded round leaves a SEATED setup-retry record (AA2).
+  EFFECTS:
+    # AA2: iterate every setup_retry_record whose RoundID = closing_RoundID (BOTH PARTICIPANT_SETUP and TEMPLATE_REFRESH_SETUP
+    #   records carry the seat-time RoundID), in STABLE SetupRetryID order (deterministic).
+    FOR EACH rec in SORT({ r in setup_retry_records : r.RoundID = closing_RoundID } BY SetupRetryID ascending):
+      IF rec.status = SEATED:
+        # cancel its still-queued dispatch, then TERMINALISE the record.
+        IF rec.event_ref != null AND rec.event_ref is still pending on EQ: CANCEL rec.event_ref on EQ
+        SET rec.status <- CANCELLED ; SET rec.target_disposition <- cancellation_reason           # AA2
+      ELSE IF rec.status = APPLYING:
+        # do NOT overwrite the executing handler's final classification; mark terminal-closure-pending and let the
+        #   captured target result finish it as ABORTED / CANCELLED (the handler is mid-flight, SetupRetryEvent step 8).
+        SET rec.terminal_closure_pending <- true                                                  # AA2
+      # APPLIED / SUPERSEDED / CANCELLED / ABORTED records are already terminal — left unchanged.
+    RETURN setup_retries_terminalised(closing_RoundID)
+  RETURNS: setup_retries_terminalised(closing_RoundID)
+  NOTE: AA2: the ONE named terminaliser invoked by CloseRoundAssignments. A SEATED record's queued SetupRetryEvent is
+        cancelled and the record becomes CANCELLED; an APPLYING record is not overwritten (its executing handler sets the
+        final ABORTED/CANCELLED status, honouring terminal_closure_pending). After a round closes, NO setup-retry record
+        of that round remains SEATED (AA2 invariant), complementing the explicit inclusion of SetupRetryEvent in the
+        CloseRoundAssignments event-cancellation list.
 ```
 
 ## 2a-bis. Round-state transition helper — automatic applicability-entry census (M2)
@@ -4779,7 +4881,12 @@ PROCEDURE CloseRoundAssignments
     # acceptance batch registry so no stale batch finalizes after closure; S4: including the recovery-timeline events).
     CANCEL all pending wake / resume / certificate-arrival / BlockAcceptancePoint / HashWorkEvent /
            AdversarialParticipationChangeEvent / RecoveryDeadlineEvent / RecoveryCompletionDueEvent /
-           RecoveryAssignmentContinuationDueEvent / RecoveryWorkDueEvent events for RoundID   # S4/T1/U1: recovery-timeline events cancelled at closure
+           RecoveryAssignmentContinuationDueEvent / RecoveryWorkDueEvent / SetupRetryEvent events for RoundID   # S4/T1/U1/AA2: recovery-timeline AND setup-retry events cancelled at closure
+    # AA2: TERMINALISE every setup-retry record of this closing RoundID through the ONE named terminaliser — a SEATED
+    #   record has its (now-cancelled) event_ref released and becomes CANCELLED; an APPLYING record is left for its
+    #   executing handler to finish (ABORTED/CANCELLED). No terminal/superseded round leaves a SEATED retry record.
+    CALL CancelSetupRetriesForRound(RoundContext, closing_RoundID = RoundID,
+           cancellation_reason = round_closed(disposition), dispatch_or_run_hook_context = dispatch_envelope)   # AA2
     CLEAR active_propagation_set                                # no live candidate survives closure
     CLEAR acceptance_batch_registry                             # no pending batch survives closure
     # S4 TERMINAL RECOVERY CLEANUP. If a recovery episode is STILL ACTIVE and this closure is NOT the
@@ -4845,7 +4952,7 @@ PROCEDURE FullRangeExhaustNoSolution
       RETURN CALL TemplateRefresh(RoundContext, dispatch_envelope = dispatch_envelope)   # L1: threaded envelope
     ELSE:
       RETURN CALL RoundAbort(RoundContext, reason=exhausted_no_solution, dispatch_envelope = dispatch_envelope)   # M1
-  RETURNS: disposition (refresh | abort)
+  RETURNS: (TemplateRefresh disposition: new_TemplateID | template_refresh_retry_seated | template_refresh_retry_stale_noop | round_aborted(abort_record)) | round_aborted(abort_record)   # AA1: the RoundAbort branch propagates the canonical round_aborted(abort_record), never a prose "abort"
 ```
 
 ## 19. Template refresh
@@ -4970,7 +5077,7 @@ PROCEDURE ContinueTemplateRefreshAssignmentSetup               # X3: SOLE owner 
     eligible <- { m : miner_state(m) in {REGISTERED, RESERVE, LOW_POWER_LISTEN} }
     # W1/W3/V8/X2/Z6: initialise the refresh setup TRANSACTION BEFORE the miner loop, carrying an IMMUTABLE rollback_envelope
     #   and a centralised rollback_items list. Every item is a COMPLETE record appended by EXPLICIT in-loop statements — never from prose.
-    SET refresh_setup_txn <- setup_transaction(rollback_envelope = dispatch_envelope, rollback_items = empty)   # W1/W3/X2/Y4/Z6: centralised record list
+    SET refresh_setup_txn <- setup_transaction(rollback_envelope = dispatch_envelope, rollback_items = empty map)   # W1/W3/X2/Y4/Z6/AA6: centralised map keyed by RollbackItemID
     SET refresh_setup_error <- null
     # M5: STABLE MinerID order (G7/J4).
     FOR EACH miner m IN SORT(eligible BY MinerID ascending):
@@ -4984,19 +5091,22 @@ PROCEDURE ContinueTemplateRefreshAssignmentSetup               # X3: SOLE owner 
       IF cr is assignment_creation_failed(reason):
         SET refresh_setup_error <- assignment_creation_failed(reason) ; CONTINUE   # W7/Z2: nothing created; discard before_image
       SET assignment_m <- cr.assignment                                            # W7: cr = assignment_created(assignment_m)
-      # Z6: build the ONE complete setup_rollback_item BEFORE StartWake (wake fields default to explicit null).
-      SET item <- setup_rollback_item(MinerID = m, AssignmentID = AssignmentID(assignment_m),
+      # AA6: build the ONE complete setup_rollback_item BEFORE StartWake, KEYED by an explicit, deterministic RollbackItemID;
+      #   created with WakeEventRef = null and wake_result = NOT_ATTEMPTED, ADDED under its key, then UPDATED BY KEY after
+      #   StartWake (never a local-variable alias) so the rollback reads exactly the persisted post-StartWake fields.
+      SET rbid <- (TEMPLATE_REFRESH_SETUP, m, assignment_version_ref(AssignmentID(assignment_m), assignment_version(assignment_m)))   # AA6: explicit, deterministic RollbackItemID
+      SET item <- setup_rollback_item(RollbackItemID = rbid, MinerID = m, AssignmentID = AssignmentID(assignment_m),
             assignment_version = assignment_version(assignment_m), pre_wake_state = pre_wake_state,
-            before_image = before_image, WakeEventRef = null, wake_result = null, rollback_envelope = dispatch_envelope)   # Z2/Z3/Z6
-      ADD item to refresh_setup_txn.rollback_items
+            before_image = before_image, WakeEventRef = null, wake_result = NOT_ATTEMPTED, rollback_envelope = dispatch_envelope)   # Z2/Z3/AA6
+      SET refresh_setup_txn.rollback_items[rbid] <- item                            # AA6: ADD the keyed record BEFORE StartWake
       SET lease_start(assignment_m)  <- now
       SET lease_expiry(assignment_m) <- now + default_lease_duration
       SET wr <- CALL StartWake(RoundContext, m, target_assignment = assignment_m, from_state = pre_wake_state,
                      scheduling_context = ORDINARY_DISPATCH(dispatch_envelope))   # V2/V3: structured result
-      SET item.wake_result <- wr                                                    # Z3: record the structured wake result
-      IF wr = wake_seated(waid, wref, wtt, ws):        SET item.WakeEventRef <- wref   # Z3: actual ref
-      ELSE IF wr = wake_transition_failed_after_seat(reason, wref): SET item.WakeEventRef <- wref   # Z3: returned (already-cancelled) ref
-      ELSE:                                            SET item.WakeEventRef <- null   # Z3: wake_schedule_failed_before_transition -> null
+      UPDATE refresh_setup_txn.rollback_items[rbid].wake_result <- wr               # AA6/Z3: update the STORED record BY KEY
+      IF wr = wake_seated(waid, wref, wtt, ws):        UPDATE refresh_setup_txn.rollback_items[rbid].WakeEventRef <- wref   # AA6/Z3: actual ref
+      ELSE IF wr = wake_transition_failed_after_seat(reason, wref): UPDATE refresh_setup_txn.rollback_items[rbid].WakeEventRef <- wref   # AA6/Z3: returned (already-cancelled) ref
+      ELSE:                                            UPDATE refresh_setup_txn.rollback_items[rbid].WakeEventRef <- null   # AA6/Z3: wake_schedule_failed_before_transition -> null
       IF wr != wake_seated(waid, wref, wtt, ws): SET refresh_setup_error <- wr         # W3: a wake failure IS a setup failure
       # do NOT call RangeReassign for old ranges; do NOT rebind old assignments to TemplateID
     ASSERT difficulty unchanged                                 # I12
@@ -5034,7 +5144,8 @@ PROCEDURE ContinueTemplateRefreshAssignmentSetup               # X3: SOLE owner 
         # Z1: publish the setup_retry_record ATOMICALLY with status = SEATED AFTER the successful ScheduleEvent.
         ATOMICALLY: SET setup_retry_records[srid] <- setup_retry_record(SetupRetryID = srid, setup_kind = TEMPLATE_REFRESH_SETUP,
               RoundID = RoundID_current, TemplateID_at_seat = TemplateID, TemplateRefreshSetupID = TemplateRefreshSetupID,
-              retry_generation = g, event_ref = event_ref, status = SEATED, target_disposition = null)   # Z1
+              retry_generation = g, event_ref = event_ref, status = SEATED, target_disposition = null,
+              terminal_closure_pending = false)   # Z1/AA2
         RETURN template_refresh_retry_seated(srid, setup_reason)
     RETURN CALL RoundAbort(RoundContext, reason = template_refresh_failed(setup_reason),
                            dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # declared abort
@@ -5094,7 +5205,9 @@ PROCEDURE RoundAbort
     TRANSITION round_state -> ROUND_ABORTED                     # bumps state_version (G10)
     # N1 (5): RETURN control. If simulated time remains, the sim driver may start another round via
     #     RoundInitialise; otherwise FinalizeSimulationRun performs the single run-end settle at the horizon.
-  RETURNS: abort_record
+    # AA1: ONE canonical result — round_aborted carrying the abort_record. Every caller/propagator classifies THIS name.
+    RETURN round_aborted(abort_record(RoundID, TemplateID, reason))
+  RETURNS: round_aborted(abort_record)   # AA1: canonical result name across every contract (was bare abort_record)
   NOTE: N1: RoundAbort terminates ONE round and reconciles NOTHING to the horizon; an early abort (t < T)
         is followed by RoundInitialise when simulated time remains. The generic final-run flush (drain,
         horizon-close a nonterminal round, single FINAL_RUN_END settle, then I5/I6/I7 reconciliation) is

@@ -664,3 +664,28 @@ ValidationAbort**, §3 row T12).
 This addendum supersedes the Stage-1Y prose that the rollback "changes miner state only" and that a `WAKING` miner is
 resolved without an explicit wake-origin check; Stage-1A–1Y lettered artifacts are unchanged (see
 `STAGE_01Z_SUPERSESSION_REGISTER.md`).
+
+### 3.5 Stage-1AA addendum — `assignment_effect_policy` in the transition identity and the legal `STATE_ONLY_ROLLBACK` tuple
+
+Stage 1AA makes the assignment-effect policy part of the transition's replay identity and pins `STATE_ONLY_ROLLBACK` to
+exactly the `T12` `ValidationAbort` rollback. It does NOT change the authoritative `T12` trigger set (still **Departure /
+WakeDeadlineExpiry / ValidationAbort**, §3 row T12), nor any legal edge.
+
+- **`assignment_effect_policy` is part of `TransitionEventID` (AA4, design A).** `ApplyMinerStateTransition` builds
+  `TransitionEventID` from the full dispatch envelope plus the transition-specific fields INCLUDING
+  `assignment_effect_policy in { EDGE_DEFAULT, STATE_ONLY_ROLLBACK }`. Two transitions that are otherwise identical
+  (same miner, edge, envelope, reason, assignment, candidate ids) but carry a different `assignment_effect_policy` are
+  therefore DISTINCT ids. The applied/replay registry can never alias a state-only rollback with an edge-default
+  transition that would have applied the edge's assignment side effect — a replay is suppressed only against an exactly
+  matching policy.
+- **Legal `STATE_ONLY_ROLLBACK` tuple (AA5).** `STATE_ONLY_ROLLBACK` (which suppresses the edge's assignment-status
+  change in the atomic apply) is legal IFF `old_state = WAKING` AND `new_state = OFFLINE` AND `reason = validation_abort`
+  AND `assignment_ref` is exact and non-null AND `waking_origin_assignment_ref[MinerID] = assignment_ref`. Any other use
+  — a different edge (`T5`, `T21`, …), a null/inexact `assignment_ref`, a wake-origin mismatch, or a non-`validation_abort`
+  reason — is REJECTED as `illegal_transition` with NO state/residency/energy/census/assignment mutation and a logged
+  `illegal_state_only_rollback_tuple`. Every non-rollback caller uses the signature default `EDGE_DEFAULT`, so no caller
+  can smuggle `STATE_ONLY_ROLLBACK` onto another edge to bypass its assignment effects.
+
+This addendum supersedes the Stage-1Z framing in which `assignment_effect_policy` was a caller-passed argument outside the
+transition identity and was not tuple-guarded; §3.4 is retained as the frozen Z layer, and Stage-1A–1Z lettered artifacts
+are unchanged (see `STAGE_01AA_SUPERSESSION_REGISTER.md`).

@@ -969,3 +969,43 @@ Catalogue" denotes the separate document defining I1..I19.
   exactly one complete item appended BEFORE `StartWake` — no partial-map state.
 - **Historical freeze.** Stage-1A–1Y lettered artifacts are unchanged; Stage-1Z supersessions are recorded in
   `STAGE_01Z_SUPERSESSION_REGISTER.md`.
+
+## Stage-1AA terminology addendum (retry-terminalisation & transition-policy identity lock)
+
+- **`round_aborted(abort_record)` (AA1).** The SINGLE canonical result of `RoundAbort` (`abort_record =
+  abort_record(RoundID, TemplateID, reason)`), replacing the bare `abort_record`; `RoundAbort` is the sole abort producer
+  and no bare `abort_record` or prose alias appears anywhere. Every procedure that PROPAGATES the result to its own caller
+  — `SetupRetryEvent`, `PrepareParticipantsForNewRound`, `ContinueTemplateRefreshAssignmentSetup`, `TemplateRefresh`,
+  `FullRangeExhaustNoSolution` — lists `round_aborted` in its RETURNS union and classifies the exact
+  `round_aborted(abort_record)` result via `RETURN CALL RoundAbort`. The recovery paths (`CompleteSecurityRecovery`
+  branch D, `ApplyRecoveryWorkAfterEpilogue`, `ApplyRecoveryAssignmentContinuationAfterEpilogue`) instead CALL the same
+  canonical `RoundAbort` for effect (`recovery_finalising = true`) and return their own recovery-specific disposition. A
+  target's `round_aborted` maps `setup_retry_record.status = ABORTED`, never `CANCELLED`.
+- **`CancelSetupRetriesForRound` (AA2).** The one named terminaliser `CancelSetupRetriesForRound(RoundContext,
+  closing_RoundID, cancellation_reason, dispatch_or_run_hook_context)`, invoked by `CloseRoundAssignments`. For each
+  `setup_retry_record` of `closing_RoundID`: a `SEATED` record has its still-queued `event_ref` cancelled and becomes
+  `CANCELLED` (`target_disposition = cancellation_reason`); an `APPLYING` record is flagged `terminal_closure_pending` and
+  left for its executing handler to finish `ABORTED` / `CANCELLED`. `CloseRoundAssignments` also lists `SetupRetryEvent`
+  among the events cancelled at closure. Postcondition: no closed/superseded round leaves a `SEATED` retry record.
+- **`terminal_closure_pending` (AA2).** A boolean field of `setup_retry_record` (default `false`), set by
+  `CancelSetupRetriesForRound` on an `APPLYING` record when its round closes; `SetupRetryEvent`'s classification honours it,
+  finishing the record `ABORTED` (target `round_aborted`) or `CANCELLED` (any other captured disposition) — never `APPLIED`.
+- **Stale-`RoundID` terminalisation in `SetupRetryEvent` (AA3).** The guard order resolves the record and verifies the
+  payload BEFORE the stale-`RoundID` check, so a stale dispatch of a known `SEATED` record is terminalised — `SUPERSEDED`
+  (round advanced) or `CANCELLED` (closed round), `target_disposition = setup_retry_stale_noop` — rather than left `SEATED`.
+  A malformed/mismatched payload may stale-noop without terminalising a record it cannot own.
+- **`assignment_effect_policy` in `TransitionEventID` (AA4, design A).** `assignment_effect_policy in { EDGE_DEFAULT,
+  STATE_ONLY_ROLLBACK }` is a FIELD of the immutable `TransitionEventID`; two otherwise-identical transitions with
+  different assignment side effects are distinct replay ids, so the applied/replay registry never aliases them.
+- **Legal `STATE_ONLY_ROLLBACK` tuple + `illegal_state_only_rollback_tuple` (AA5).** `STATE_ONLY_ROLLBACK` is legal IFF
+  `old_state = WAKING` AND `new_state = OFFLINE` AND `reason = validation_abort` AND `assignment_ref` is exact and non-null
+  AND `waking_origin_assignment_ref[MinerID] = assignment_ref`; any other use is rejected `illegal_transition` (logged
+  `illegal_state_only_rollback_tuple`) with no mutation. Every non-rollback caller uses `EDGE_DEFAULT`.
+- **`RollbackItemID` + keyed `rollback_items` + `NOT_ATTEMPTED` (AA6).** `setup_rollback_item` gains a `RollbackItemID` and
+  `setup_transaction = { rollback_envelope, rollback_items : map RollbackItemID -> setup_rollback_item }`. An item is
+  created `WakeEventRef = null` / `wake_result = NOT_ATTEMPTED` and added under its key BEFORE `StartWake`; the stored record
+  is then updated explicitly by key. `wake_result in { NOT_ATTEMPTED, wake_seated, wake_schedule_failed_before_transition,
+  wake_transition_failed_after_seat }`. Rollback consumes the stored keyed record (iterating deterministically by
+  `RollbackItemID`), never a local-variable alias.
+- **Historical freeze.** Stage-1A–1Z lettered artifacts are unchanged; Stage-1AA supersessions are recorded in
+  `STAGE_01AA_SUPERSESSION_REGISTER.md`.

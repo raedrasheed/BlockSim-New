@@ -373,6 +373,20 @@ point, planned test stage, and consequence of violation.
   `waking_origin_assignment_ref[MinerID]` (set on WAKING entry, cleared on WAKING exit); a mismatch departs no miner.
   **Z6:** `setup_transaction.rollback_items` (one complete `setup_rollback_item` per created assignment, appended before
   `StartWake`) replaces the Y-era parallel maps — no partial-map state.
+- **Stage-1AA clause (retry-terminalisation & transition-policy identity lock).**
+  **AA1:** `RoundAbort` RETURNS the single canonical `round_aborted(abort_record)`; every propagating procedure lists it in
+  its RETURNS union and classifies the exact result, and a target `round_aborted` maps `setup_retry_record.status = ABORTED`
+  (never `CANCELLED`). **AA2:** `CancelSetupRetriesForRound` (invoked by `CloseRoundAssignments`, which also lists
+  `SetupRetryEvent` in its event-cancellation set) terminalises every `SEATED` record of the closing round to `CANCELLED`
+  and flags an `APPLYING` record `terminal_closure_pending` (its handler finishes it `ABORTED`/`CANCELLED`) — no terminal or
+  superseded round leaves a `SEATED` retry record. **AA3:** `SetupRetryEvent` resolves the record and verifies the payload
+  BEFORE the stale-`RoundID` check, so a stale dispatch of a known `SEATED` record is terminalised (`SUPERSEDED`/`CANCELLED`)
+  rather than left `SEATED`. **AA4:** `assignment_effect_policy` is a field of `TransitionEventID`, so transitions with
+  different assignment side effects are distinct replay ids. **AA5:** `STATE_ONLY_ROLLBACK` is legal IFF the exact
+  `WAKING → OFFLINE` / `validation_abort` / exact-non-null `assignment_ref` / matching `waking_origin_assignment_ref` tuple
+  holds; any other use is `illegal_transition` with no mutation. **AA6:** `setup_transaction.rollback_items` is keyed by
+  `RollbackItemID`; each item is created `wake_result = NOT_ATTEMPTED` / `WakeEventRef = null` before `StartWake` and updated
+  explicitly by key afterward, and rollback consumes the stored keyed record.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest

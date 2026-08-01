@@ -802,6 +802,56 @@ replaces the Y-era parallel maps. Every created assignment has exactly one compl
 (`MinerID, AssignmentID, assignment_version, pre_wake_state, before_image, WakeEventRef | null, wake_result,
 rollback_envelope`) appended BEFORE `StartWake` — no partial-map state.
 
+### 3.10e Stage-1AA addendum (retry-terminalisation & transition-policy identity lock)
+
+Stage 1AA standardises the `RoundAbort` result contract, terminalises every SEATED setup-retry record on round closure,
+handles a stale `RoundID` through the record lifecycle, makes the assignment-effect policy part of transition identity,
+enforces a legal `STATE_ONLY_ROLLBACK` tuple, and makes the rollback-item updates explicit and keyed. These statements
+supersede the Stage-1Z ones they name; §3.10a/§3.10b/§3.10c/§3.10d are retained as the frozen W/X/Y/Z layers.
+
+**AA1 (canonical `RoundAbort` result).** `RoundAbort` RETURNS `round_aborted(abort_record)` — ONE canonical result name
+(it was a bare `abort_record`); `RoundAbort` is the sole abort producer, and no bare `abort_record` or prose alias appears
+anywhere. Every procedure that PROPAGATES the result to its own caller (`SetupRetryEvent`,
+`PrepareParticipantsForNewRound`, `ContinueTemplateRefreshAssignmentSetup`, `TemplateRefresh`, `FullRangeExhaustNoSolution`)
+lists `round_aborted` in its RETURNS union and classifies the exact `round_aborted(abort_record)` result via
+`RETURN CALL RoundAbort`. The recovery paths (`CompleteSecurityRecovery` branch D, `ApplyRecoveryWorkAfterEpilogue`,
+`ApplyRecoveryAssignmentContinuationAfterEpilogue`) instead CALL the same canonical `RoundAbort` for effect
+(`recovery_finalising = true`) and return their own recovery-specific disposition after classifying the `ROUND_ABORTED`
+effect. RULE: a target's `round_aborted` result maps `setup_retry_record.status = ABORTED` (NEVER `CANCELLED`).
+
+**AA2 (terminalise every SEATED retry record on round closure).** `CancelSetupRetriesForRound(RoundContext,
+closing_RoundID, cancellation_reason, dispatch_or_run_hook_context)` is the ONE named terminaliser: for each
+`setup_retry_record` of `closing_RoundID`, a `SEATED` record has its `event_ref` cancelled (when still queued) and becomes
+`status = CANCELLED` (`target_disposition = cancellation_reason`); an `APPLYING` record is NOT overwritten — a
+`terminal_closure_pending` flag is set and the executing handler's captured target result finishes it as `ABORTED` /
+`CANCELLED`. `CloseRoundAssignments` INVOKES it, and the round-closure event-cancellation list EXPLICITLY includes
+`SetupRetryEvent`. No terminal or superseded round leaves a `SEATED` retry record.
+
+**AA3 (stale-`RoundID` handling through the record lifecycle).** `SetupRetryEvent` RESOLVES
+`setup_retry_records[SetupRetryID]` and verifies the payload against the immutable record BEFORE the stale-`RoundID` check.
+A stale dispatch of a KNOWN `SEATED` record TERMINALISES it — `status = SUPERSEDED` (round advanced) or `CANCELLED`
+(closed round), `target_disposition = setup_retry_stale_noop` — rather than leaving it `SEATED`. Status-based idempotence
+still precedes the stale/terminal/target guards. A malformed payload that matches no record may stale-noop, but a known
+`SEATED` record never remains `SEATED` after a stale dispatch.
+
+**AA4 (assignment-effect policy is part of transition identity — design A).** `assignment_effect_policy in
+{ EDGE_DEFAULT, STATE_ONLY_ROLLBACK }` is a FIELD of `TransitionEventID`. Two otherwise-identical transitions with
+different assignment side effects are DISTINCT ids, so the applied/replay registry never aliases transitions whose
+assignment mutation differs (see miner-SM §3.5).
+
+**AA5 (legal `STATE_ONLY_ROLLBACK` tuple).** `STATE_ONLY_ROLLBACK` is legal IFF `old_state = WAKING` AND
+`new_state = OFFLINE` AND `reason = validation_abort` AND `assignment_ref` is exact and non-null AND
+`waking_origin_assignment_ref[MinerID] = assignment_ref`; any other use returns `illegal_transition` with NO mutation.
+Every non-rollback caller uses `EDGE_DEFAULT`, so no caller can use `STATE_ONLY_ROLLBACK` on `T5` / `T21` / any other edge
+to bypass assignment effects (see miner-SM §3.5).
+
+**AA6 (explicit keyed rollback-item storage).** `setup_rollback_item` gains a `RollbackItemID` and
+`setup_transaction.rollback_items` is KEYED by it. The item is CREATED with `WakeEventRef = null` and
+`wake_result = NOT_ATTEMPTED` and ADDED under `RollbackItemID` BEFORE `StartWake`; after `StartWake` the STORED record is
+UPDATED EXPLICITLY by key (`rollback_items[RollbackItemID].wake_result <- wr` and `.WakeEventRef <- actual | returned |
+null`). Rollback CONSUMES the stored keyed record (iterating deterministically by `RollbackItemID`), never an unproven
+alias to a local variable. Applies to participant setup and template-refresh setup.
+
 ### 3.11 What causes a template refresh
 
 A template refresh (`TEMPLATE_REFRESH`) is caused by (a) exhaustion of the committed
