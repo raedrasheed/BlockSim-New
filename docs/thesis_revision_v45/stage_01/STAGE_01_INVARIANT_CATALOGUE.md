@@ -344,6 +344,21 @@ point, planned test stage, and consequence of violation.
   uses canonical `custody_status`/`revocation_reason`/`termination_reason` values plus a non-enum `closure_detail`.
   **X8:** each rollback `WAKING -> OFFLINE` closes `WAKING` residency at the rollback time and charges transition energy
   exactly once (F6/T12), so no `WAKING` residency survives to horizon `T`.
+- **Stage-1Y clause (retry-identity & rollback-closure lock).**
+  **Y1:** `SetupRetryEvent` checks EXACT-replay idempotence (a `SetupRetryID` recorded in `applied_setup_retry_ids` /
+  `setup_retry_status_by_id`) BEFORE the terminal check and the wrong-round-state abort, so a replay of a retry that
+  already succeeded and moved the round to `HASHING` returns `setup_retry_duplicate_suppressed` and NEVER aborts the round.
+  **Y2:** a `TEMPLATE_REFRESH_SETUP` retry carries and verifies the EXACT `TemplateID_at_seat` and
+  `TemplateRefreshSetupID = (RoundID, committed_new_TemplateID)` against `template_refresh_setup_committed`; there is no
+  ambient "the refresh setup's TemplateID", and a stale-`TemplateID` retry never operates on the current template.
+  **Y3:** the scalar `retry_generation` and the map `setup_retry_generation_by_scope`
+  `(RoundID, setup_kind, TemplateRefreshSetupID_or_null)` are distinct identifiers — no identifier is both a scalar and a
+  map. **Y4:** a rollback resolves every affected `WAKING` miner UNCONDITIONALLY (independent of whether the head is still
+  live) and its coherence gate is "no affected miner remains `WAKING`". **Y5:** the ONE named operation
+  `AbortPendingWakeForRollback` departs a `WAKING` miner via `T12` using its authoritative `ValidationAbort` trigger
+  (`reason = validation_abort`, declared in `STAGE_01_MINER_STATE_MACHINE.md` §3), never the assignment
+  `termination_reason`, and is the SINGLE owner of the canonical assignment close — the transition hook and the operation
+  never both close the same assignment.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest

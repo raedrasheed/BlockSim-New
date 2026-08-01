@@ -902,3 +902,37 @@ Catalogue" denotes the separate document defining I1..I19.
   string outside the canonical enums appears in `termination_reason`, `custody_status`, or `revocation_reason`.
 - **Historical freeze.** Stage-1A–1W lettered artifacts are unchanged; Stage-1X supersessions are recorded in
   `STAGE_01X_SUPERSESSION_REGISTER.md`.
+
+## Stage-1Y terminology addendum (retry-identity & rollback-closure lock)
+
+- **`SetupRetryStatus` (Y1).** An enum `{ SEATED, APPLYING, APPLIED, SUPERSEDED, CANCELLED, ABORTED }` recorded per
+  `SetupRetryID` in `setup_retry_status_by_id`. `SetupRetryEvent` checks EXACT-replay idempotence (a `SetupRetryID` in
+  `applied_setup_retry_ids` / `setup_retry_status_by_id`) BEFORE the terminal check and the wrong-round-state abort, so a
+  replay of a retry that already succeeded and advanced the round (e.g. to `HASHING`) returns
+  `setup_retry_duplicate_suppressed` and NEVER calls `RoundAbort` for a forward round.
+- **`TemplateRefreshSetupID` (Y2).** `= (RoundID, committed_new_TemplateID)`. A `TEMPLATE_REFRESH_SETUP` retry payload
+  carries BOTH `TemplateID_at_seat` and `TemplateRefreshSetupID` explicitly; `SetupRetryEvent` and
+  `ContinueTemplateRefreshAssignmentSetup` VERIFY the exact `TemplateRefreshSetupID` against
+  `template_refresh_setup_committed[TemplateID_at_seat].TemplateRefreshSetupID` on the initial invocation and every retry.
+  There is no ambient "the refresh setup's TemplateID"; a stale-`TemplateID` retry takes a declared stale disposition and
+  never operates on the current committed template.
+- **`retry_generation` vs `setup_retry_generation_by_scope` (Y3).** `retry_generation` is the SCALAR generation carried
+  as an input by `SetupRetryEvent` / `ContinueTemplateRefreshAssignmentSetup`; the bounded per-scope counter registry is
+  the DISTINCT map `setup_retry_generation_by_scope : (RoundID, setup_kind, TemplateRefreshSetupID_or_null) -> generation`.
+  No identifier is both a scalar and a map. `SetupRetryID` carries the full scope:
+  `(RoundID, TemplateID, PARTICIPANT_SETUP, retry_generation)` /
+  `(TemplateRefreshSetupID, TEMPLATE_REFRESH_SETUP, retry_generation)`.
+- **`setup_txn.wake_by_miner` / `setup_txn.before_image_by_miner` (Y4).** Per-miner maps captured after
+  `assignment_created` and before `StartWake`, so a setup rollback can cancel the EXACT wake and restore the EXACT
+  before-image for every affected miner through the one named operation.
+- **`AbortPendingWakeForRollback` (Y5).** The ONE named rollback wake-abort operation used by
+  `RollbackRecoveryAssignmentPlan`, `RollbackParticipantSetup`, and `RollbackTemplateRefreshSetup`. It cancels the exact
+  `WakeCompleteEvent`, departs a still-`WAKING` miner `WAKING -> OFFLINE` via the legal `T12` `ValidationAbort` trigger
+  (`reason = validation_abort`, declared in `STAGE_01_MINER_STATE_MACHINE.md` §3 — NOT the assignment
+  `termination_reason`), binds the EXACT assignment version, lets `ApplyMinerStateTransition` close the `WAKING` residency
+  + charge transition energy once (no census change), performs the SINGLE canonical assignment close, restores the
+  before-image, and returns `wake_abort_completed` / `wake_abort_failed`. It resolves a `WAKING` miner UNCONDITIONALLY
+  (Y4) — a `CLOSED`/revoked/detached head does not make a `WAKING` miner safe — and is the SOLE owner of the assignment
+  close for a rollback (the transition hook changes miner state only for this form).
+- **Historical freeze.** Stage-1A–1X lettered artifacts are unchanged; Stage-1Y supersessions are recorded in
+  `STAGE_01Y_SUPERSESSION_REGISTER.md`.

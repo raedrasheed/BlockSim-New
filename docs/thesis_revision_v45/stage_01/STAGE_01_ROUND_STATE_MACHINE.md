@@ -725,6 +725,45 @@ cause in the non-enum `closure_detail` audit field. No string outside the canoni
 `E_transition`/`E_coordination` exactly once, opens `OFFLINE` residency, and (T12) makes no census change (the miner
 never entered `H_active`) — so no `WAKING` residency stays open until horizon `T`.
 
+### 3.10c Stage-1Y addendum (retry-identity & rollback-closure lock)
+
+Stage 1Y hardens the setup-retry identity contract and the rollback wake-abort so a replayed retry cannot abort a
+round that already moved forward, a template-refresh retry always carries its exact identity, and a rollback resolves
+every affected `WAKING` miner through one named legal-`T12` operation with a single assignment-closure owner. These
+statements supersede the Stage-1W/1X descriptions they name; §3.10a/§3.10b are retained as the frozen W/X layers.
+
+**Y1 (idempotence before mutating guards).** `SetupRetryEvent` checks EXACT-replay idempotence (a `SetupRetryID`
+recorded in `applied_setup_retry_ids` / `setup_retry_status_by_id`) BEFORE the terminal check and BEFORE the
+wrong-round-state abort. A replay of a retry that already succeeded and moved the round to `HASHING` returns
+`setup_retry_duplicate_suppressed` — it NEVER calls `RoundAbort` because the round moved forward. `SetupRetryStatus`
+∈ { `SEATED`, `APPLYING`, `APPLIED`, `SUPERSEDED`, `CANCELLED`, `ABORTED` }.
+
+**Y2 (exact template-refresh setup identity).** A `TEMPLATE_REFRESH_SETUP` retry payload carries BOTH
+`TemplateID_at_seat` AND `TemplateRefreshSetupID = (RoundID, committed_new_TemplateID)`.
+`ContinueTemplateRefreshAssignmentSetup` receives and VERIFIES the exact `TemplateRefreshSetupID` against
+`template_refresh_setup_committed[TemplateID_at_seat].TemplateRefreshSetupID` on the initial invocation AND every
+retry; there is no ambient "the refresh setup's TemplateID". A stale retry for an earlier `TemplateID` takes a declared
+stale disposition and never operates on the current committed template.
+
+**Y3 (retry-generation ownership; no shadowing).** The SCALAR `retry_generation` is the retry-generation input; the
+bounded per-scope counter registry is the DISTINCT map `setup_retry_generation_by_scope` keyed by
+`(RoundID, setup_kind, TemplateRefreshSetupID_or_null)`. No identifier is both a scalar and a map. `SetupRetryID`
+carries the complete scope: `(RoundID, TemplateID, PARTICIPANT_SETUP, retry_generation)` /
+`(TemplateRefreshSetupID, TEMPLATE_REFRESH_SETUP, retry_generation)`.
+
+**Y4 (unconditional affected-`WAKING` resolution).** `RollbackRecoveryAssignmentPlan`, `RollbackParticipantSetup`, and
+`RollbackTemplateRefreshSetup` resolve every affected `WAKING` miner REGARDLESS of whether its assignment remains a live
+bound head; a `CLOSED` / revoked / detached head does not make a `WAKING` miner safe. The final coherence gate is "no
+affected miner remains `WAKING`". A rollback with an unresolved affected `WAKING` miner returns `rollback_failed` and the
+caller takes the declared `RECOVERY_INSTALL_FAILED_ABORTED` / `RoundAbort` path.
+
+**Y5 (one legal-`T12` rollback trigger; one closure owner).** The named `AbortPendingWakeForRollback` departs a
+`WAKING` miner via `T12` using its authoritative `ValidationAbort` trigger (`reason = validation_abort`, a trigger
+declared in `STAGE_01_MINER_STATE_MACHINE.md` §3), NOT the assignment `termination_reason`. The transition hook changes
+miner state only for this form; `AbortPendingWakeForRollback` is the SINGLE owner of the canonical assignment close
+(`termination_reason = cancellation`, `revocation_reason = assignment_revoked`, `closure_detail = ...`). The hook and
+the operation never both close the same assignment.
+
 ### 3.11 What causes a template refresh
 
 A template refresh (`TEMPLATE_REFRESH`) is caused by (a) exhaustion of the committed

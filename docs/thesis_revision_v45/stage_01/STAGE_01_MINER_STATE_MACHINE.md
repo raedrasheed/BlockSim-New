@@ -610,3 +610,31 @@ enforcement explicit:
 
 No security, fairness, or incentive property is claimed by any part of this state machine;
 the accounting effects above are modeled quantities only (scope §C).
+
+### 3.3 Stage-1Y addendum — the `T12` `ValidationAbort` rollback form and its single closure owner
+
+Stage 1Y does NOT change the authoritative `T12` contract: `T12` (`WAKING -> OFFLINE`) keeps its declared triggers
+**Departure / WakeDeadlineExpiry / ValidationAbort** (§3 transition table, row T12). Stage 1Y only makes explicit which
+declared trigger the setup/recovery rollback uses, and who owns the assignment-record closure, so no rollback conflates
+the transition trigger with the assignment `termination_reason`.
+
+- **Rollback uses the `ValidationAbort` trigger (Y5).** The named rollback operation `AbortPendingWakeForRollback`
+  (`STAGE_01_PROTOCOL_PSEUDOCODE.md`) departs a still-`WAKING` miner via `T12` with transition `reason = validation_abort`
+  — a trigger already declared for `T12`. It NEVER passes an assignment `termination_reason` (e.g. `cancellation`) as the
+  transition trigger. The bound assignment's `assignment_version` is passed EXACTLY (never null).
+- **One assignment-status owner (Y5, option B).** For this rollback form, `ApplyMinerStateTransition` (the `T12` hook)
+  changes miner state ONLY — it closes the `WAKING` residency at the rollback `event_time`, charges the transition energy
+  ONCE, opens the `OFFLINE` residency, and (per the T12 census column) makes NO census change (the miner never entered
+  `ACTIVE_HASHING`). It does NOT set the assignment-record closure fields. The SINGLE canonical assignment close
+  (`status = CLOSED`, `custody_status = revoked`, `termination_reason = cancellation`,
+  `revocation_reason = assignment_revoked`, `closure_detail = participant_setup_rolled_back` /
+  `template_refresh_setup_rolled_back` / `recovery_install_rolled_back`) is performed EXACTLY ONCE by
+  `AbortPendingWakeForRollback`. The transition hook and the rollback operation never both release/close the same
+  assignment.
+- **Unconditional affected-miner resolution (Y4).** A rollback resolves a `WAKING` miner through the `ValidationAbort`
+  `T12` form regardless of whether its assignment head is still live; a `CLOSED` / revoked / detached head does not make a
+  `WAKING` miner safe. A rollback that cannot depart an affected `WAKING` miner returns `rollback_failed` and the caller
+  takes the declared `RECOVERY_INSTALL_FAILED_ABORTED` / `RoundAbort` path — it never leaves a miner `WAKING`.
+
+This addendum supersedes the Stage-1W/1X description of the rollback edge as a bare `T12` with
+`reason = cancellation`; Stage-1A–1X lettered artifacts are unchanged (see `STAGE_01Y_SUPERSESSION_REGISTER.md`).
