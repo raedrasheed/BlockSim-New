@@ -764,6 +764,44 @@ miner state only for this form; `AbortPendingWakeForRollback` is the SINGLE owne
 (`termination_reason = cancellation`, `revocation_reason = assignment_revoked`, `closure_detail = ...`). The hook and
 the operation never both close the same assignment.
 
+### 3.10d Stage-1Z addendum (retry-lifecycle & rollback-snapshot lock)
+
+Stage 1Z completes the setup-retry status lifecycle, makes the rollback snapshot and assignment-effect policy executable,
+and centralises the rollback item. These statements supersede the Stage-1Y ones they name; §3.10a/§3.10b/§3.10c are
+retained as the frozen W/X/Y layers.
+
+**Z1 (complete setup-retry status lifecycle).** `setup_retry_records[SetupRetryID]` (one `setup_retry_record` per retry)
+is the SINGLE registry. The seating procedure publishes `status = SEATED` atomically after a successful `ScheduleEvent`;
+`SetupRetryEvent`'s FIRST valid dispatch flips `SEATED -> APPLYING` and EXECUTES the target (a SEATED record is NEVER
+duplicate-suppressed); the captured target result sets the terminal status — `APPLIED` (succeeded) / `SUPERSEDED` (a later
+generation seated) / `ABORTED` (RoundAbort) / `CANCELLED` (terminal or stale). A replay is duplicate-suppressed IFF the
+status is already non-SEATED. The Y-era `applied_setup_retry_ids` / `setup_retry_status_by_id` are withdrawn; "applied" =
+`status = APPLIED`, set only after the target result is known.
+
+**Z2 (pre-mutation ledger snapshot).** Each setup transaction item's `before_image` is captured IMMEDIATELY BEFORE
+`CreatePendingAssignment` (which mutates `custody_status` / `assignment_ledger`); rollback restores the exact
+pre-constructor I8a/I8b state (invariant I20). On a creation failure the `before_image` is discarded and no item is made.
+
+**Z3 (explicitly-optional wake reference).** A setup item carries `WakeEventRef : WakeEventRef | null` and `wake_result`.
+`wake_seated` stores the actual ref; `wake_schedule_failed_before_transition` stores null; `wake_transition_failed_after_seat`
+stores the returned (already-cancelled) ref. `AbortPendingWakeForRollback` cancels only a non-null, still-pending ref; no
+rollback performs an undefined map lookup.
+
+**Z4 (executable T12 assignment-effect policy).** `ApplyMinerStateTransition` takes `assignment_effect_policy in
+{ EDGE_DEFAULT, STATE_ONLY_ROLLBACK }` (default `EDGE_DEFAULT`). `AbortPendingWakeForRollback` passes
+`STATE_ONLY_ROLLBACK`, so the hook changes miner state / residency / energy / census ONLY and the operation owns the
+single canonical assignment close — never both (see miner-SM §3.4).
+
+**Z5 (wake-origin binding).** `waking_origin_assignment_ref[MinerID]` is set on WAKING entry and cleared on WAKING exit
+inside `ApplyMinerStateTransition`. The rollback `ValidationAbort` is legal only when `miner_state = WAKING` AND the
+association equals the rollback item's exact `assignment_version_ref` — even if the head is `CLOSED`/detached; a mismatch
+returns `wake_abort_failed` and departs no miner.
+
+**Z6 (centralised rollback item).** `setup_transaction = { rollback_envelope, rollback_items : [setup_rollback_item] }`
+replaces the Y-era parallel maps. Every created assignment has exactly one complete `setup_rollback_item`
+(`MinerID, AssignmentID, assignment_version, pre_wake_state, before_image, WakeEventRef | null, wake_result,
+rollback_envelope`) appended BEFORE `StartWake` — no partial-map state.
+
 ### 3.11 What causes a template refresh
 
 A template refresh (`TEMPLATE_REFRESH`) is caused by (a) exhaustion of the committed

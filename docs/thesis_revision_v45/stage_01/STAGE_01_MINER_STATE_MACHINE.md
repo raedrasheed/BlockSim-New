@@ -638,3 +638,29 @@ the transition trigger with the assignment `termination_reason`.
 
 This addendum supersedes the Stage-1W/1X description of the rollback edge as a bare `T12` with
 `reason = cancellation`; Stage-1A–1X lettered artifacts are unchanged (see `STAGE_01Y_SUPERSESSION_REGISTER.md`).
+
+### 3.4 Stage-1Z addendum — the `STATE_ONLY_ROLLBACK` assignment-effect policy and the wake-origin binding
+
+Stage 1Z makes the `T12` `ValidationAbort` rollback form's assignment-effect policy EXECUTABLE and binds the departure to
+the exact wake origin. It does NOT change the authoritative `T12` trigger set (still **Departure / WakeDeadlineExpiry /
+ValidationAbort**, §3 row T12).
+
+- **`assignment_effect_policy` (Z4).** `ApplyMinerStateTransition` takes `assignment_effect_policy in { EDGE_DEFAULT,
+  STATE_ONLY_ROLLBACK }` (default `EDGE_DEFAULT`). Under `EDGE_DEFAULT` (every non-rollback caller) the hook applies the
+  edge's declared assignment-status change as before. Under `STATE_ONLY_ROLLBACK` — passed ONLY by
+  `AbortPendingWakeForRollback` for the `ValidationAbort` `T12` rollback — the hook changes miner state / residency /
+  one-shot energy / census ONLY and performs NO assignment status / custody / coverage mutation; the caller
+  (`AbortPendingWakeForRollback`) then performs the single canonical assignment close. This replaces the prose-only "the
+  rollback form changes miner state only" statement with an executable policy: the hook and the caller never both mutate
+  the same assignment.
+- **Wake-origin binding for a detached / closed head (Z5).** The `T12` `ValidationAbort` rollback is legal only when
+  `miner_state = WAKING` AND the immutable `waking_origin_assignment_ref[MinerID]` equals the exact
+  `assignment_version_ref(AssignmentID, assignment_version)` of the rollback item — the head may be live, `CLOSED`,
+  revoked, or detached, but the wake-origin must match. `ApplyMinerStateTransition` SETS
+  `waking_origin_assignment_ref[MinerID]` on entry to `WAKING` and CLEARS it on any `WAKING` departure (T5/T12/T21), so it
+  is total for a `WAKING` miner and cleared exactly once by the departure. On a mismatch `AbortPendingWakeForRollback`
+  returns `wake_abort_failed` and departs NO miner.
+
+This addendum supersedes the Stage-1Y prose that the rollback "changes miner state only" and that a `WAKING` miner is
+resolved without an explicit wake-origin check; Stage-1A–1Y lettered artifacts are unchanged (see
+`STAGE_01Z_SUPERSESSION_REGISTER.md`).

@@ -359,6 +359,20 @@ point, planned test stage, and consequence of violation.
   (`reason = validation_abort`, declared in `STAGE_01_MINER_STATE_MACHINE.md` §3), never the assignment
   `termination_reason`, and is the SINGLE owner of the canonical assignment close — the transition hook and the operation
   never both close the same assignment.
+- **Stage-1Z clause (retry-lifecycle & rollback-snapshot lock).**
+  **Z1:** the setup-retry status lifecycle is complete — `setup_retry_records[SetupRetryID]` (one record per retry) is the
+  single registry; the seat publishes `SEATED`, the first dispatch flips `SEATED -> APPLYING` and executes (a SEATED
+  record is never duplicate-suppressed), and the captured target result sets `APPLIED` / `SUPERSEDED` / `ABORTED` /
+  `CANCELLED`; a replay is duplicate-suppressed IFF the status is already non-SEATED; the Y-era
+  `applied_setup_retry_ids` / `setup_retry_status_by_id` mirror is withdrawn. **Z2:** each setup item's `before_image` is
+  captured BEFORE `CreatePendingAssignment` and rollback restores the exact pre-constructor ledgers (see I20). **Z3:** a
+  setup item's `WakeEventRef` is explicitly nullable with a `wake_result`; a rollback cancels only a non-null pending ref
+  (no undefined lookup). **Z4:** `ApplyMinerStateTransition` takes `assignment_effect_policy` (`EDGE_DEFAULT` |
+  `STATE_ONLY_ROLLBACK`); the rollback passes `STATE_ONLY_ROLLBACK` so the hook mutates no assignment and
+  `AbortPendingWakeForRollback` owns the single close. **Z5:** the `T12` `ValidationAbort` rollback is bound to the exact
+  `waking_origin_assignment_ref[MinerID]` (set on WAKING entry, cleared on WAKING exit); a mismatch departs no miner.
+  **Z6:** `setup_transaction.rollback_items` (one complete `setup_rollback_item` per created assignment, appended before
+  `StartWake`) replaces the Y-era parallel maps — no partial-map state.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest
@@ -519,6 +533,28 @@ replaced by two consistent invariants** (the old form was impossible while a lin
   boundary and again per hash unit), inflating `t_hash`/`E_hash`; a residency time written by two
   owners; or an energy figure whose reduction is mis-attributed to double-counted time rather than
   to reduced active power-time.
+
+---
+
+### I20 — A setup/recovery rollback restores the exact pre-constructor coverage/custody ledgers (Stage 1Z, Z2).
+
+- **Formal statement.** For every setup transaction item (and every recovery-plan rollback item), the
+  `before_image` (`coverage_custody_before_image`) is the I8a/I8b coverage-state / custody-ledger snapshot captured
+  **immediately before** `CreatePendingAssignment` (or the plan-bound constructor) mutates `custody_status(range)` and
+  appends to `assignment_ledger`. On rollback, `AbortPendingWakeForRollback` (setup) / `RollbackRecoveryAssignmentPlan`
+  (recovery) RESTORES the ledgers for the item's range from that `before_image`, so the post-rollback I8a/I8b values equal
+  the exact pre-constructor values — never a post-mutation snapshot. On a creation failure the `before_image` is discarded
+  and no transaction item exists, so nothing is restored for an assignment that was never created.
+- **Scope.** The setup transaction items (`PrepareParticipantsForNewRound`, `ContinueTemplateRefreshAssignmentSetup`) and
+  the recovery-plan rollback items (`CommitRecoveryAssignmentPlan`); a structural rollback-fidelity invariant. It does not
+  change the A1 baseline (`8.420833333 kWh`).
+- **Required inputs.** The `before_image` captured before creation (Z2); the item's `range`; the I8a/I8b ledgers.
+- **Enforcement point.** `PrepareParticipantsForNewRound` / `ContinueTemplateRefreshAssignmentSetup` (capture before
+  `CreatePendingAssignment`, Z2); `CommitRecoveryAssignmentPlan` (capture before the constructor, X1);
+  `AbortPendingWakeForRollback` / `RollbackRecoveryAssignmentPlan` (restore from `before_image`).
+- **Consequence of violation.** A rollback that restores a post-mutation ledger state (leaving a range marked
+  `original`/`reassigned`/searched by an assignment that was rolled back), so coverage/custody accounting diverges from
+  the true pre-setup state.
 
 ---
 

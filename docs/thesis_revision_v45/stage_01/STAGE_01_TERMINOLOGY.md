@@ -936,3 +936,36 @@ Catalogue" denotes the separate document defining I1..I19.
   close for a rollback (the transition hook changes miner state only for this form).
 - **Historical freeze.** Stage-1A–1X lettered artifacts are unchanged; Stage-1Y supersessions are recorded in
   `STAGE_01Y_SUPERSESSION_REGISTER.md`.
+
+## Stage-1Z terminology addendum (retry-lifecycle & rollback-snapshot lock)
+
+- **`setup_retry_record` / `setup_retry_records` (Z1).** `setup_retry_record = { SetupRetryID, setup_kind, RoundID,
+  TemplateID_at_seat, TemplateRefreshSetupID, retry_generation, event_ref, status : SetupRetryStatus,
+  target_disposition }`; `setup_retry_records : SetupRetryID -> setup_retry_record` is the SINGLE setup-retry registry,
+  replacing the Y-era `applied_setup_retry_ids` and `setup_retry_status_by_id`. Lifecycle: the seating procedure publishes
+  `status = SEATED` (atomically, after a successful `ScheduleEvent`); `SetupRetryEvent`'s first dispatch flips
+  `SEATED -> APPLYING` and executes; the captured target result sets `APPLIED` / `SUPERSEDED` / `ABORTED` / `CANCELLED`.
+  A replay is duplicate-suppressed IFF the status is already non-`SEATED` (a SEATED record's first dispatch always runs).
+  "applied" ≡ `status = APPLIED`, set only after the target result is known.
+- **`coverage_custody_before_image` — pre-mutation snapshot (Z2/I20).** The I8a/I8b snapshot captured immediately BEFORE
+  `CreatePendingAssignment` (or a plan-bound constructor) mutates the ledgers. Rollback restores the exact pre-constructor
+  values (invariant I20); on a creation failure it is discarded and no item is created.
+- **Nullable `WakeEventRef` + `wake_result` (Z3).** A setup rollback item's `WakeEventRef` is `WakeEventRef | null`
+  (null when `StartWake` returned `wake_schedule_failed_before_transition`; the returned already-cancelled ref when
+  `wake_transition_failed_after_seat`; the actual ref when `wake_seated`), paired with the structured `wake_result`.
+  `AbortPendingWakeForRollback` cancels it ONLY when non-null and still pending — no undefined map lookup.
+- **`assignment_effect_policy` (Z4).** `ApplyMinerStateTransition` parameter in `{ EDGE_DEFAULT, STATE_ONLY_ROLLBACK }`
+  (default `EDGE_DEFAULT`). `STATE_ONLY_ROLLBACK` (passed only by `AbortPendingWakeForRollback`) makes the hook change
+  miner state / residency / energy / census only, performing NO assignment mutation; the operation then performs the
+  single canonical close. Every other caller uses `EDGE_DEFAULT`.
+- **`waking_origin_assignment_ref` (Z5).** `MinerID -> assignment_version_ref`, set on entry to `WAKING` and cleared on any
+  `WAKING` departure inside `ApplyMinerStateTransition`. The `T12` `ValidationAbort` rollback is legal only when
+  `miner_state = WAKING` and this association equals the rollback item's exact `assignment_version_ref` — even for a
+  `CLOSED` / detached head; a mismatch returns `wake_abort_failed` and departs no miner.
+- **`setup_rollback_item` / `setup_transaction.rollback_items` (Z6).** `setup_rollback_item = { MinerID, AssignmentID,
+  assignment_version, pre_wake_state, before_image, WakeEventRef (| null), wake_result, rollback_envelope }`;
+  `setup_transaction = { rollback_envelope, rollback_items : [setup_rollback_item] }` replaces the Y-era parallel maps
+  (`assignment_by_miner` / `wake_by_miner` / `before_image_by_miner` / `prior_states`). Every created assignment has
+  exactly one complete item appended BEFORE `StartWake` — no partial-map state.
+- **Historical freeze.** Stage-1A–1Y lettered artifacts are unchanged; Stage-1Z supersessions are recorded in
+  `STAGE_01Z_SUPERSESSION_REGISTER.md`.
