@@ -823,3 +823,33 @@ Catalogue" denotes the separate document defining I1..I19.
   declared structured result; `RETURN ScheduleEvent(...) AND wake_started`-style constructs are removed.
 - **Historical freeze.** Stage-1A–1U lettered artifacts are unchanged; Stage-1V supersessions are recorded in
   `STAGE_01V_SUPERSESSION_REGISTER.md`.
+
+## Stage-1W terminology addendum (legal-rollback & plan-transaction lock)
+
+- **`rollback_envelope` (W1).** An IMMUTABLE field of the setup transaction (`participant_setup_txn` /
+  `refresh_setup_txn`), set at creation to the setup's own dispatch envelope
+  (`{ envelope_namespace, event_time, delta_cycle, event_seq, hook_id }`). Every rollback transition uses it as its
+  `transition_envelope`; no placeholder, ambient, or undeclared envelope is used.
+- **Legal rollback edge (W2).** A setup rollback departs a `WAKING` participant to `OFFLINE` via the authoritative
+  `T12` edge only; the illegal `WAKING -> REGISTERED`/`RESERVE`/`LOW_POWER_LISTEN` edges are never used.
+  `RollbackParticipantSetup` / `RollbackTemplateRefreshSetup` return `rollback_completed(rolled_to_offline)`.
+- **`refresh_setup_txn` populated in-loop (W3).** `TemplateRefresh` initialises the transaction before its miner loop
+  and populates each field with EXPLICIT statements as it creates assignments and seats wakes; a wake/creation failure
+  sets `refresh_setup_error`, skips `CompleteAssignmentPhase`, and takes the named rollback + liveness path.
+- **Structured range result (W4).** `RangeAssign*`/`RangeReassign*` return `range_assigned` / `range_assign_creation_failed`
+  / `range_assign_wake_failed` (and the `range_reassign_*` analogues); `CommitRecoveryAssignmentPlan` consumes the
+  success result's `AssignmentID` + `WakeEventRef` and never wakes twice.
+- **Plan-bound range constructor (W5).** `RangeAssignFromPlan` / `RangeReassignFromPlan` take the exact validated spec
+  fields (`MinerID`, `range`, `assignment_origin`, `source_assignment`, `reassignment_reason`, `lease_duration`,
+  `scheduling_context`) and perform NO `SELECT`; the ordinary entry points select policy and delegate.
+- **Transition result union (W6).** `ApplyMinerStateTransition` returns `transition_applied(TransitionEventID)` |
+  `duplicate_suppressed(TransitionEventID)` | `illegal_stale_source(TransitionEventID)` |
+  `illegal_transition(TransitionEventID)`.
+- **Assignment-creation result (W7).** `CreatePendingAssignment` returns `assignment_created(assignment)` |
+  `assignment_creation_failed(reason)`; every caller branches before any `AssignmentID` access, lease update, or
+  transaction-record entry.
+- **`SetupRetryID` / bounded retry (W8).** `SetupRetryID = (RoundID, setup_kind, setup_retry_generation)`; a retry is
+  seated only when it is state-compatible (no participant `OFFLINE`), idempotent (`applied_setup_retry_ids`), and within
+  `maximum_setup_retries`; otherwise `RoundAbort`.
+- **Historical freeze.** Stage-1A–1V lettered artifacts are unchanged; Stage-1W supersessions are recorded in
+  `STAGE_01W_SUPERSESSION_REGISTER.md`.

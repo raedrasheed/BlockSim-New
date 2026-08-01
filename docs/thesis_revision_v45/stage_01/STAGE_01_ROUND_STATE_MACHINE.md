@@ -630,6 +630,54 @@ remains WAKING for a rolled-back head. `PrepareParticipantsForNewRound` and `Tem
 every procedure inspects the scheduler disposition explicitly and returns one declared structured result whose
 signature, RETURNS block, and call sites agree.
 
+### 3.10a Stage-1W addendum (legal-rollback & plan-transaction lock)
+
+**W1 (no free / placeholder rollback envelope).** The setup transaction (`participant_setup_txn` / `refresh_setup_txn`)
+carries an IMMUTABLE `rollback_envelope` set at creation to the setup's own dispatch envelope
+(`{ envelope_namespace, event_time, delta_cycle, event_seq, hook_id }`). `RollbackParticipantSetup` and
+`RollbackTemplateRefreshSetup` transition with `transition_envelope = setup_txn.rollback_envelope` — no angle-bracket
+placeholder, ambient envelope, or undeclared identity remains.
+
+**W2 (rollback uses only legal miner-state edges).** A participant left `WAKING` when setup fails is departed to
+`OFFLINE` via the LEGAL `T12` edge (the only legal `WAKING` departure besides `T5`/`T21`); the illegal
+`WAKING -> REGISTERED` / `WAKING -> RESERVE` / `WAKING -> LOW_POWER_LISTEN` edges are never passed to
+`ApplyMinerStateTransition`. The rollback reports `rolled_to_offline`, and a rollback that routed any participant to
+`OFFLINE` forces a `RoundAbort` (no retry from an incompatible state).
+
+**W3 (template-refresh setup is a real transaction).** `TemplateRefresh` initialises `refresh_setup_txn` BEFORE its
+miner loop and populates it by EXPLICIT statements inside the loop (each created `AssignmentID`, prior state, and the
+`StartWake` `WakeEventRef`); on any `CreatePendingAssignment` / `StartWake` failure it sets `refresh_setup_error`, does
+NOT call `CompleteAssignmentPhase`, invokes `RollbackTemplateRefreshSetup`, and takes the declared retry/abort path.
+
+**W4 (consume structured range results exactly).** `CommitRecoveryAssignmentPlan` calls the plan-bound range
+constructor once per REDISTRIBUTION spec, captures the returned `AssignmentID` + `WakeEventRef` on success (and NEVER
+seats a second wake), and branches on the declared failure results (`range_*_creation_failed` /
+`range_*_wake_failed`) — never on an undefined `creation_failed`. Exactly one `WakeCompleteEvent` per committed
+activation.
+
+**W5 (plan-bound range constructors).** `RangeAssignFromPlan` and `RangeReassignFromPlan` take the exact validated spec
+fields (`MinerID`, `range`, `assignment_origin`, `source_assignment`, `reassignment_reason`, `lease_duration`,
+`scheduling_context`) and perform NO `SELECT`; the ordinary `RangeAssign` / `RangeReassign` entry points do policy
+selection and delegate. The recovery-plan commit path calls ONLY the plan-bound constructors and asserts the committed
+object equals its spec.
+
+**W6 (transition result union).** `ApplyMinerStateTransition` returns exactly one of
+`transition_applied(TransitionEventID)` | `duplicate_suppressed(TransitionEventID)` |
+`illegal_stale_source(TransitionEventID)` | `illegal_transition(TransitionEventID)`; `StartWake` retains the wake and
+returns `wake_seated` only on `transition_applied`, and cancels the seated event on any other result. The
+`transition_record` return name is withdrawn.
+
+**W7 (assignment-creation result).** `CreatePendingAssignment` returns `assignment_created(assignment)` |
+`assignment_creation_failed(reason)`; every caller branches on the result BEFORE reading `AssignmentID`, setting lease
+fields, or adding the object to a transaction record. No transaction record contains an `AssignmentID` for an object
+that was not created.
+
+**W8 (state-compatible, bounded setup retry).** A `SetupRetryEvent` is seated only when the rollback left every eligible
+participant in a state the setup can legally re-enlist (`rolled_to_offline = false`), the retry budget is not exhausted
+(`setup_retry_generation <= maximum_setup_retries`), and the strictly-later target is within horizon; otherwise the
+round `RoundAbort`s. Each retry carries a `SetupRetryID = (RoundID, setup_kind, generation)` and is idempotent
+(`applied_setup_retry_ids`) and bounded.
+
 ### 3.11 What causes a template refresh
 
 A template refresh (`TEMPLATE_REFRESH`) is caused by (a) exhaustion of the committed

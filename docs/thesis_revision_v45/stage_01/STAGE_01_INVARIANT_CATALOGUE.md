@@ -319,6 +319,18 @@ point, planned test stage, and consequence of violation.
   redistribution after a no-breach census remains the branch-C redistribution-only continuation. **V7:** each
   `RecoveryWorkID` has exactly one live or terminal disposition and at most one per episode is
   {ARMED, DUE, APPLYING}; terminal closure cancels EVERY nonterminal work record, so no orphan survives.
+  **W1/W2 (legal setup rollback):** an ordinary-setup rollback (`RollbackParticipantSetup` /
+  `RollbackTemplateRefreshSetup`) transitions with the setup transaction's IMMUTABLE `rollback_envelope`
+  (a complete `{ envelope_namespace, event_time, delta_cycle, event_seq, hook_id }`) and departs any `WAKING`
+  participant to `OFFLINE` via the LEGAL `T12` edge ONLY — no placeholder envelope and no illegal
+  `WAKING -> REGISTERED`/`RESERVE`/`LOW_POWER_LISTEN` edge is ever passed to `ApplyMinerStateTransition`; after
+  rollback no participant remains `WAKING` and no live partial assignment remains. **W6/W7 (declared results):**
+  `ApplyMinerStateTransition` returns exactly one of {transition_applied, duplicate_suppressed, illegal_stale_source,
+  illegal_transition} and `CreatePendingAssignment` returns exactly one of {assignment_created,
+  assignment_creation_failed}; a wake is retained (and an `AssignmentID`/lease/transaction entry recorded) ONLY on the
+  applied/created result. **W8 (bounded state-compatible retry):** a `SetupRetryEvent` is seated only when rollback left
+  every eligible participant re-enlistable (never routed to `OFFLINE`), the retry generation is within
+  `maximum_setup_retries`, and the target is within horizon; it is idempotent on `SetupRetryID`, else the round aborts.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest
