@@ -387,6 +387,19 @@ point, planned test stage, and consequence of violation.
   holds; any other use is `illegal_transition` with no mutation. **AA6:** `setup_transaction.rollback_items` is keyed by
   `RollbackItemID`; each item is created `wake_result = NOT_ATTEMPTED` / `WakeEventRef = null` before `StartWake` and updated
   explicitly by key afterward, and rollback consumes the stored keyed record.
+- **Stage-1AB clause (retry-record persistence & exact abort-contract lock).**
+  **AB1:** every direct value-propagator lists the exact `round_aborted(abort_record)` shape (never the bare constructor);
+  `SetupRetryEvent`'s RETURNS names it once and enumerates the target dispositions explicitly. **AB2:** every guard-driven
+  abort captures `disp <- CALL RoundAbort(...)` first, then persists `status = ABORTED` and `target_disposition = disp` by
+  key — the stored disposition is the exact returned `round_aborted(abort_record)`. **AB3:** `rec` is a read-only snapshot;
+  the seat is the only CREATE and every subsequent lifecycle mutation is a keyed UPDATE of `setup_retry_records[SetupRetryID]`;
+  `CancelSetupRetriesForRound` iterates `SetupRetryID`s and updates by key. **AB4:** after its target returns,
+  `SetupRetryEvent` re-reads the persisted record and classifies on the stored `terminal_closure_pending`, so a record whose
+  round closed can never finish `APPLIED`. **AB5:** `dispatched_event_ref` binds ownership — an unknown id or a foreign
+  `dispatched_event_ref ≠ rec.event_ref` stale-noops (leaving the genuine record seated), and the genuine event with a
+  mismatched payload is an integrity abort that terminalises the record and cancels any residual event. **AB6:**
+  `CancelSetupRetriesForRound` uses keyed updates and clears a cancelled record's `event_ref`, so after closure no record is
+  `SEATED` and none holds a queued event.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest

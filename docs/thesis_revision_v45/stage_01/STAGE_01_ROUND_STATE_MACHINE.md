@@ -852,6 +852,57 @@ UPDATED EXPLICITLY by key (`rollback_items[RollbackItemID].wake_result <- wr` an
 null`). Rollback CONSUMES the stored keyed record (iterating deterministically by `RollbackItemID`), never an unproven
 alias to a local variable. Applies to participant setup and template-refresh setup.
 
+### 3.10f Stage-1AB addendum (retry-record persistence & exact abort-contract lock)
+
+Stage 1AB makes the `RoundAbort` result contract exact in every declaration, captures the abort result before persisting
+it, makes every setup-retry lifecycle mutation an explicit keyed registry update, re-reads the record after the target
+returns, and binds dispatch ownership to the retry event reference. These statements supersede the Stage-1AA ones they
+name; §3.10a/§3.10b/§3.10c/§3.10d/§3.10e are retained as the frozen W/X/Y/Z/AA layers.
+
+**AB1 (exact `round_aborted(abort_record)` in every contract).** Every direct value-propagator lists the EXACT shaped
+result `round_aborted(abort_record)` in its RETURNS union, never the bare constructor name: `PrepareParticipantsForNewRound`,
+`ContinueTemplateRefreshAssignmentSetup`, `TemplateRefresh`, and `FullRangeExhaustNoSolution` are shaped, and
+`SetupRetryEvent`'s RETURNS names the shaped result ONCE and ENUMERATES the re-run target dispositions explicitly (no vague
+"target procedure's disposition"). A bare `round_aborted` may appear only as an exact pattern match, a constructor
+invocation, or a type declaration — each with its payload — never as a result-contract alias.
+
+**AB2 (capture the abort result before persisting `target_disposition`).** Each guard-driven abort in `SetupRetryEvent`
+(wrong round state, retry budget exhausted, incompatible participant state, and the AB5 payload-integrity abort) executes
+`SET disp <- CALL RoundAbort(...)` FIRST, then persists `status <- ABORTED` and `target_disposition <- disp` by key, then
+returns `disp`. The stored `target_disposition` is the exact `round_aborted(abort_record(RoundID, TemplateID, reason))`
+returned by `RoundAbort` — never a bare token written before the abort result exists.
+
+**AB3 (explicit keyed persistence of every lifecycle mutation).** `SET rec <- setup_retry_records[SetupRetryID]` yields a
+READ-ONLY snapshot; record-reference write semantics are not assumed anywhere. The SEAT is the only CREATE; every
+subsequent lifecycle change (`status`, `target_disposition`, `terminal_closure_pending`, `event_ref`) is an explicit keyed
+UPDATE of `setup_retry_records[SetupRetryID]`. `CancelSetupRetriesForRound` iterates `SetupRetryID`s (not detached record
+values) and updates each record by key.
+
+**AB4 (re-read the record after the target returns).** A `SetupRetryEvent` target may synchronously call `RoundAbort` →
+`CloseRoundAssignments` → `CancelSetupRetriesForRound`, which PERSISTS `terminal_closure_pending` on this record by key.
+After `SET disp <- CALL target(...)`, the handler RE-READS `post_target_rec <- setup_retry_records[SetupRetryID]` and
+classifies on `post_target_rec.terminal_closure_pending` (the persisted flag), never the pre-target snapshot — so a record
+whose round closed finishes `ABORTED` / `CANCELLED` and NEVER `APPLIED`.
+
+**AB5 (dispatch ownership bound to the retry event reference).** A `SetupRetryEvent` carries `dispatched_event_ref` (the
+canonical identity of the dispatched event, derivable from `dispatch_envelope`, equal to the seat-stored `rec.event_ref`
+for a genuine dispatch). Ownership cases: (A) unknown `SetupRetryID` → stale no-op; (B) known id but
+`dispatched_event_ref ≠ rec.event_ref` → foreign/replayed event → stale no-op that LEAVES the record `SEATED` for its
+genuine queued event; (C) the genuine event (`dispatched_event_ref = rec.event_ref`) with a payload that mismatches the
+immutable record → integrity corruption of the owning event → terminalise the record via the declared
+`setup_retry_payload_integrity_failure` abort (`ABORTED`, exact stored disposition), cancelling any residual event ref. The
+only event a `SEATED` record owns is never consumed while the record stays `SEATED`.
+
+**AB6 (round-closure terminalisation uses keyed updates + post-conditions).** `CancelSetupRetriesForRound` uses keyed
+UPDATEs, CLEARS a cancelled `SEATED` record's `event_ref` to null, and after it completes for `closing_RoundID`: no record
+has `status = SEATED`; no `SEATED` record has a queued `event_ref`; every terminalised record has a terminal
+`target_disposition`; every `APPLYING` record has `terminal_closure_pending` persisted in the registry.
+
+**AB7 (supersede inaccurate Stage-1AA audit claims).** The Stage-1AA audits `STAGE_01AA_ROUND_ABORT_RESULT_AUDIT` and
+`STAGE_01AA_RETRY_TERMINALIZATION_AUDIT` (and TV227) treated bare `round_aborted` return declarations as exact contracts
+and assumed writes through local `rec` variables persist in `setup_retry_records`; those Stage-1AA artifacts are frozen and
+the corrections are recorded in `STAGE_01AB_SUPERSESSION_REGISTER.md`.
+
 ### 3.11 What causes a template refresh
 
 A template refresh (`TEMPLATE_REFRESH`) is caused by (a) exhaustion of the committed
