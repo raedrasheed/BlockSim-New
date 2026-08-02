@@ -903,6 +903,54 @@ has `status = SEATED`; no `SEATED` record has a queued `event_ref`; every termin
 and assumed writes through local `rec` variables persist in `setup_retry_records`; those Stage-1AA artifacts are frozen and
 the corrections are recorded in `STAGE_01AB_SUPERSESSION_REGISTER.md`.
 
+### 3.10g Stage-1AC addendum (event-reference & retry-state closure lock)
+
+Stage 1AC defines one canonical `EventRef` type, threads it from `ScheduleEvent` through `ProcessEventTime` to the
+handler, reorders the `SetupRetryEvent` guard so a terminal replay is suppressed before payload integrity, scopes an
+integrity failure to the record's own round, declares an authoritative `SetupRetryStatus` transition table, and keeps the
+immutable event identity separate from queue state. These statements supersede the Stage-1AB ones they name;
+§3.10a–§3.10f are retained as the frozen W/X/Y/Z/AA/AB layers.
+
+**AC1 (canonical `EventRef`).** `EventRef = (envelope_namespace, event_type, event_time, delta_cycle, microphase, seq)`
+is the ONE immutable reference to a queued ordinary event. `ScheduleEvent` derives exactly one from the envelope it creates
+and returns `scheduled(EventRef, envelope)`. Cancellation, stored retry ownership (`seat_event_ref`), and dispatch
+ownership (`dispatched_event_ref`) all use this type; `event_ref` / `envelope` / `dispatched_event_ref` are not silently
+interchangeable.
+
+**AC2 (dispatcher-owned threading).** `EventQueueContext` gains `current_event_ref : EventRef | null`. `ProcessEventTime`
+sets it to `EventRef(e)` before dispatching `e`, injects `dispatched_event_ref = EQ.current_event_ref`, and clears it after
+the handler returns. `SetupRetryEvent` receives `dispatched_event_ref` from this dispatcher-owned path — never from its own
+payload — as a mandatory input.
+
+**AC3 (terminal replay before payload integrity).** `SetupRetryEvent`'s guard order is: resolve the record → verify
+EventRef ownership → if `status != SEATED` return `setup_retry_duplicate_suppressed` (BEFORE any payload-integrity abort) →
+stale/closed disposition → payload validation for a current owned SEATED record only → target guards + execution. A replay
+of a terminal record never aborts a round because of differing replayed payload fields.
+
+**AC4 (integrity scoped to the record's round).** Membership in the current round is decided from the IMMUTABLE record
+fields (`rec.RoundID`, the record's round state, `rec.TemplateID_at_seat`), never untrusted payload fields. A record of an
+older/terminal round is terminalised (`SUPERSEDED`/`CANCELLED`); a corrupted HISTORICAL retry never aborts a later round.
+
+**AC5 (no known record left SEATED on malformed dispatch).** Case A (unknown id) → stale no-op; Case B (foreign
+`dispatched_event_ref`) → stale no-op leaving the genuine record SEATED; Case C (genuine EventRef but incomplete dispatch
+envelope or payload mismatch) → integrity abort of the owning event, taken as a current-round abort only if the record is
+of the current nonterminal round. The genuine owned event is never consumed while the record stays SEATED.
+
+**AC6 (legal status path for aborts).** A current SEATED retry about to run any aborting guard first moves
+`SEATED → APPLYING`, then (after `RoundAbort` and after `CancelSetupRetriesForRound` persists `terminal_closure_pending`)
+`APPLYING → ABORTED`. There is never a straight `SEATED → ABORTED` and never a terminal → terminal transition (in
+particular `CANCELLED → ABORTED` is forbidden). `CancelSetupRetriesForRound` therefore sees `APPLYING` and sets
+`terminal_closure_pending`.
+
+**AC7 (`SetupRetryStatus` transition table).** Authoritative table: `SEATED → {APPLYING, CANCELLED, SUPERSEDED}`;
+`APPLYING → {APPLIED, SUPERSEDED, CANCELLED, ABORTED}`; `APPLIED`/`SUPERSEDED`/`CANCELLED`/`ABORTED` are terminal.
+`SetSetupRetryStatus` is the sole status writer and rejects every illegal transition (especially terminal → terminal) with
+no mutation.
+
+**AC8 (immutable identity vs queue state).** The retry record carries `seat_event_ref : EventRef` (immutable, set at seat)
+and `event_queue_status : { QUEUED, DISPATCHING, CONSUMED, CANCELLED }`. Ownership uses `seat_event_ref`; cancellation /
+consumption changes only `event_queue_status` and never erases the historical seat EventRef used for replay auditing.
+
 ### 3.11 What causes a template refresh
 
 A template refresh (`TEMPLATE_REFRESH`) is caused by (a) exhaustion of the committed

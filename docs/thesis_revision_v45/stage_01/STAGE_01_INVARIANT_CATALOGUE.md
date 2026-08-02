@@ -400,6 +400,19 @@ point, planned test stage, and consequence of violation.
   mismatched payload is an integrity abort that terminalises the record and cancels any residual event. **AB6:**
   `CancelSetupRetriesForRound` uses keyed updates and clears a cancelled record's `event_ref`, so after closure no record is
   `SEATED` and none holds a queued event.
+- **Stage-1AC clause (event-reference & retry-state closure lock).**
+  **AC1:** `EventRef = (envelope_namespace, event_type, event_time, delta_cycle, microphase, seq)` is the one canonical
+  immutable queued-event reference; `ScheduleEvent` derives and returns `scheduled(EventRef, envelope)`, and cancellation /
+  retry ownership / dispatch ownership all use it. **AC2:** `EventQueueContext.current_event_ref` is set by
+  `ProcessEventTime` and injected as `dispatched_event_ref` into the handler (a mandatory input, never from the payload).
+  **AC3:** `SetupRetryEvent` suppresses a non-SEATED replay BEFORE any payload-integrity handling. **AC4:** stale/closed
+  disposition is decided from the immutable record fields, so a corrupted historical retry never aborts a later round.
+  **AC5:** an unknown id or foreign EventRef stale-noops (leaving the genuine record SEATED); a genuine dispatch with a
+  malformed envelope/payload cannot leave its record SEATED. **AC6:** every aborting current retry moves
+  `SEATED → APPLYING` before `RoundAbort` and finishes `APPLYING → ABORTED`. **AC7:** `SetSetupRetryStatus` enforces the
+  `SetupRetryStatus` transition table and rejects every terminal → terminal rewrite (e.g. `CANCELLED → ABORTED`) with no
+  mutation. **AC8:** the record's immutable `seat_event_ref` is preserved for ownership/audit while cancellation changes only
+  `event_queue_status`.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest

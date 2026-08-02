@@ -1042,3 +1042,37 @@ Catalogue" denotes the separate document defining I1..I19.
   `terminal_closure_pending` persisted.
 - **Historical freeze.** Stage-1A–1AA lettered artifacts are unchanged; Stage-1AB supersessions (including the corrected
   Stage-1AA audit claims, AB7) are recorded in `STAGE_01AB_SUPERSESSION_REGISTER.md`.
+
+## Stage-1AC terminology addendum (event-reference & retry-state closure lock)
+
+- **`EventRef` (AC1).** The one canonical immutable reference to a queued ordinary event:
+  `EventRef = (envelope_namespace, event_type, event_time, delta_cycle, microphase, seq)`. `ScheduleEvent` derives exactly
+  one from the envelope it creates and returns `scheduled(EventRef, envelope)`. The same type is used by cancellation,
+  stored retry ownership (`seat_event_ref`), and dispatch ownership (`dispatched_event_ref`). `event_ref`, `envelope`, and
+  `dispatched_event_ref` are not silently interchangeable — an envelope is the full queued record; an EventRef is its
+  canonical six-field identity.
+- **`current_event_ref` / dispatcher-owned `dispatched_event_ref` (AC2).** `EventQueueContext.current_event_ref : EventRef |
+  null` is set by `ProcessEventTime` to `EventRef(e)` before dispatching `e`, injected as `dispatched_event_ref`, and
+  cleared after the handler returns. A handler (e.g. `SetupRetryEvent`) receives `dispatched_event_ref` from this
+  dispatcher-owned path — never from its own payload — as a mandatory input.
+- **`seat_event_ref` + `event_queue_status` (AC8).** A `setup_retry_record` carries `seat_event_ref : EventRef` (immutable,
+  set at seat) and `event_queue_status : EventQueueStatus`. Ownership comparisons use `seat_event_ref`;
+  cancellation/consumption changes only `event_queue_status`, never erasing the historical seat EventRef. This pair replaces
+  the Z1-era single `event_ref` record field.
+- **`EventQueueStatus` (AC8).** `{ QUEUED, DISPATCHING, CONSUMED, CANCELLED }` — the queue-lifecycle state of a retry
+  record's seated event, kept separate from the immutable `seat_event_ref` identity.
+- **`SetupRetryStatus` transition table + `SetSetupRetryStatus` (AC7).** Authoritative table:
+  `SEATED → {APPLYING, CANCELLED, SUPERSEDED}`; `APPLYING → {APPLIED, SUPERSEDED, CANCELLED, ABORTED}`;
+  `APPLIED`/`SUPERSEDED`/`CANCELLED`/`ABORTED` terminal. `SetSetupRetryStatus` is the sole status writer and rejects every
+  illegal transition — especially a terminal → terminal rewrite such as `CANCELLED → ABORTED` — with no mutation
+  (`setup_retry_status_transition_rejected`, logging `illegal_setup_retry_status_transition`).
+- **Terminal-replay-before-integrity guard order (AC3) + record-scoped integrity (AC4/AC5).** `SetupRetryEvent` resolves the
+  record, verifies EventRef ownership, then suppresses a non-SEATED replay BEFORE any payload-integrity abort; stale/closed
+  disposition is decided from the immutable record fields (never the payload), so a corrupted historical retry is
+  terminalised and never aborts a later round, and a genuine malformed dispatch cannot leave its record SEATED.
+- **Legal abort status path (AC6).** A current SEATED retry about to run any aborting guard first moves `SEATED → APPLYING`,
+  then `APPLYING → ABORTED` after `RoundAbort` (with `CancelSetupRetriesForRound` persisting `terminal_closure_pending`).
+- **`setup_retry_payload_integrity_failure` (AC5).** The declared `RoundAbort` reason for the AC5-C integrity abort of a
+  current owned SEATED record whose genuine dispatch envelope/payload is corrupt.
+- **Historical freeze.** Stage-1A–1AB lettered artifacts are unchanged; Stage-1AC supersessions are recorded in
+  `STAGE_01AC_SUPERSESSION_REGISTER.md`.

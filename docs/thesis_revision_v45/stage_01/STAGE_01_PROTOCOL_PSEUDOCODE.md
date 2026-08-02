@@ -220,7 +220,13 @@ PROCEDURE ProcessEventTime
         SET dispatch_envelope <- { envelope_namespace = ORDINARY_EVENT, hook_id = null,      # R3: ORDINARY_EVENT identity
                                    event_time = t, delta_cycle = current_delta_cycle, event_seq = seq(e),
                                    microphase = microphase(e) }        # e's OWN enqueued envelope (§0.7f/L1/R3)
-        DISPATCH e WITH dispatch_envelope                         # its handler threads dispatch_envelope onward,
+        # AC2: the DISPATCHER owns the EventRef. Set EQ.current_event_ref to e's canonical EventRef and inject it as
+        #      dispatched_event_ref so a handler (e.g. SetupRetryEvent) verifies ownership against the ACTUAL dispatched
+        #      event — never from its own payload and never from an undocumented derivation. Cleared after the handler returns.
+        SET EQ.current_event_ref <- EventRef(e)                   # AC2: EventRef(e) = the six-field identity of e's envelope
+        DISPATCH e WITH dispatch_envelope = dispatch_envelope, dispatched_event_ref = EQ.current_event_ref   # AC2
+        SET EQ.current_event_ref <- null                          # AC2: cleared after the handler returns
+                                                                  # its handler threads dispatch_envelope onward,
                                                                   #   may schedule further events at t per the
                                                                   #   delta-cycle rule (§0.7-H2) or at a later time
       # loop re-evaluates: a handler may have added a (t, current_delta_cycle+1) event (forward only)
@@ -375,6 +381,11 @@ STRUCTURE EventQueueContext (per-RUN; K8; the sole dispatch/scheduling state)
                           `dispatch_envelope` — the ONE sanctioned (event_time, delta_cycle, event_seq) that
                           every synchronous miner transition and every StartWake done while handling the
                           event binds from. It is an EXPLICIT dispatched-envelope field, NOT an ambient seq.
+  current_event_ref     : AC2 — EventRef | null. The canonical EventRef of the event currently being dispatched, SET by
+                          ProcessEventTime from the dispatched event's OWN envelope immediately before dispatch and CLEARED
+                          after the handler returns. It is the dispatcher-owned source of `dispatched_event_ref` — a
+                          handler (e.g. SetupRetryEvent) NEVER reads its own future EventRef from its payload or an
+                          undocumented derivation; the dispatcher injects the reference of the ACTUAL event being dispatched.
   event_creation_seq    : the ONE per-run monotonic event-creation counter (J4); owned SOLELY here
   finalised_event_times : set of event_times whose epilogue has run (I-02)
   run_horizon_T         : O2 — the fixed simulation horizon T (= run-end event_time). BINDING SCHEDULING
@@ -416,6 +427,26 @@ STRUCTURE PostEpilogueSchedulingContext (S7 — the declared source of a POST-EP
   # ScheduleEvent(..., post_epilogue_context = this) requires target_event_time > source_event_time and derives
   # delta_cycle = 0; the event_creation_seq is STILL minted solely by ScheduleEvent (J4). No post-epilogue caller
   # may enqueue at source_event_time (R1 structural).
+
+STRUCTURE EventRef (AC1 — the ONE canonical immutable reference to a queued ordinary event)
+  # AC1: EventRef = (envelope_namespace, event_type, event_time, delta_cycle, microphase, seq). ScheduleEvent DERIVES it
+  #   from the envelope it creates; because seq is the per-run monotonic event_creation_seq (J4, globally unique per run),
+  #   an EventRef identifies EXACTLY ONE queued event. EventRef(envelope) projects those six fields. It is the SAME type
+  #   used by (a) ScheduleEvent's result, (b) stored retry ownership (setup_retry_record.seat_event_ref), and (c) dispatch
+  #   ownership (dispatched_event_ref, injected by ProcessEventTime). It is IMMUTABLE and NOT a prose alias for an
+  #   unspecified subset of an envelope; `event_ref`, `envelope`, and `dispatched_event_ref` are NOT silently interchangeable
+  #   — an envelope is the full queued record, an EventRef is its canonical six-field identity.
+  envelope_namespace
+  event_type
+  event_time
+  delta_cycle
+  microphase
+  seq
+
+# AC8 event-queue lifecycle state (kept SEPARATE from the immutable EventRef identity):
+# EventQueueStatus in { QUEUED, DISPATCHING, CONSUMED, CANCELLED }. A retry record stores its IMMUTABLE seat_event_ref
+#   (never destroyed) AND an event_queue_status; cancellation changes the status, it does NOT erase the seat EventRef used
+#   for replay-ownership auditing.
 
 PROCEDURE ScheduleEvent
   INPUTS: EventQueueContext EQ, RoundContext, event_type, target_event_time, target_microphase,
@@ -467,7 +498,12 @@ PROCEDURE ScheduleEvent
     # J9 (5): insert using the deterministic TOTAL-ORDER key.
     INSERT envelope INTO EQ.event_queue ORDERED BY (event_time, delta_cycle, microphase,
                                                     (CandidateID, MinerID, AssignmentID), seq)
-  RETURNS: scheduled(envelope)
+    # AC1 (6): DERIVE the ONE canonical EventRef from the envelope just created. seq is globally unique per run (J4), so
+    #     this EventRef identifies EXACTLY the queued envelope. It is the SAME type used by cancellation, stored retry
+    #     ownership (seat_event_ref), and dispatch ownership (dispatched_event_ref).
+    SET event_ref <- EventRef(envelope_namespace = ORDINARY_EVENT, event_type = event_type,
+                              event_time = target_event_time, delta_cycle = dc, microphase = target_microphase, seq = seq)
+  RETURNS: scheduled(event_ref, envelope)   # AC1: the canonical EventRef AND the envelope (was scheduled(envelope)); NOT interchangeable
   NOTE: K8/J9: the SOLE enqueue interface, over the explicit EventQueueContext. It DERIVES delta_cycle
         (caller supplies only event_time + microphase), owns event_creation_seq (J4), rejects finalised
         (I-02), post-horizon (O2: target_event_time > T), and backward event_times, and inserts by the
@@ -560,7 +596,7 @@ and dirties the census — it selects NO outcome and seats NO completion; the ev
 | `RecoveryCompletionDueEvent` | `RecoveryCompletionDueEvent` | `RECOVERY_COMPLETION_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryDecisionID)` | `event_time, delta_cycle, event_seq` | no (Q2: records due + refreshes census; NO transition — the application is the post-epilogue hook) |
 | `RecoveryAssignmentContinuationDueEvent` | `RecoveryAssignmentContinuationDueEvent` | `RECOVERY_ASSIGNMENT_CONTINUATION_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryDecisionID, ContinuationGeneration)` | `event_time, delta_cycle, event_seq` | no (T1: records the continuation DUE fact + refreshes the census; NO transition / NO assignment / NO APPLIED — the branch-C rebuild is the post-epilogue hook `ApplyRecoveryAssignmentContinuationAfterEpilogue`). It carries the full recovery identity + `ContinuationGeneration`; it is seated via the S7 PostEpilogueSchedulingContext (strictly-later) |
 | `RecoveryWorkDueEvent` | `RecoveryWorkDueEvent` | `RECOVERY_WORK_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryWorkID, WorkGeneration)` | `event_time, delta_cycle, event_seq` | no (U1: records the recovery-WORK DUE fact + refreshes the census; NO reserve activation / NO transition / NO APPLIED — the WORK is the post-epilogue hook `ApplyRecoveryWorkAfterEpilogue`). It carries the full recovery identity + `WorkGeneration`; it is seated via the U3 atomic seat (published only after a successful enqueue) |
-| `SetupRetryEvent` | `SetupRetryEvent` | `ROUND_SETUP` | `(RoundID, setup_kind, SetupRetryID, TemplateID_at_seat, TemplateRefreshSetupID, retry_generation)` | `event_time, delta_cycle, event_seq` | no (V8/X3/X4/Y1/Y2/Y3: at a strictly-later event_time after a rolled-back setup, re-invokes the KIND-SPECIFIC target — `PrepareParticipantsForNewRound` for `PARTICIPANT_SETUP`, `ContinueTemplateRefreshAssignmentSetup` (NEVER `TemplateRefresh`, so no re-close / re-commit) for `TEMPLATE_REFRESH_SETUP`; both require `round_state = ASSIGNMENT`; Y1: EXACT-replay idempotence is checked BEFORE the terminal/wrong-state guards (a post-success replay is duplicate-suppressed, never aborted); Y2: the EXACT `TemplateID_at_seat` / `TemplateRefreshSetupID` are verified against the committed marker; Y3: `retry_generation` is the SCALAR generation; an over-budget or state-incompatible retry is a declared `RoundAbort`) |
+| `SetupRetryEvent` | `SetupRetryEvent` | `ROUND_SETUP` | `(RoundID, setup_kind, SetupRetryID, TemplateID_at_seat, TemplateRefreshSetupID, retry_generation)` | `event_time, delta_cycle, event_seq` + `dispatched_event_ref` (AC2: ProcessEventTime injects `EQ.current_event_ref = EventRef(e)`; a MANDATORY input, never read from the payload) | no (V8/X3/X4/Y1/Y2/Y3/AC3: at a strictly-later event_time after a rolled-back setup, re-invokes the KIND-SPECIFIC target — `PrepareParticipantsForNewRound` for `PARTICIPANT_SETUP`, `ContinueTemplateRefreshAssignmentSetup` (NEVER `TemplateRefresh`, so no re-close / re-commit) for `TEMPLATE_REFRESH_SETUP`; both require `round_state = ASSIGNMENT`; Y1: EXACT-replay idempotence is checked BEFORE the terminal/wrong-state guards (a post-success replay is duplicate-suppressed, never aborted); Y2: the EXACT `TemplateID_at_seat` / `TemplateRefreshSetupID` are verified against the committed marker; Y3: `retry_generation` is the SCALAR generation; an over-budget or state-incompatible retry is a declared `RoundAbort`) |
 | `RoundAbort` | `RoundAbort` | `TERMINAL_ABORT` (§21 item 1) | `(RoundID)` | `event_time, delta_cycle, event_seq` | no |
 
 Run-level hooks (NOT in the seating table, O1/Q2/R2): `CloseRoundAtHorizon` (§20b, invoked inside
@@ -939,19 +975,61 @@ STRUCTURE RoundContext registries (initialised by RoundInitialise, cleared on cl
   #   PERSISTS terminal_closure_pending on THIS record by key. After SET disp <- CALL target(...), the handler RE-READS
   #   post_target_rec <- setup_retry_records[SetupRetryID] and classifies on post_target_rec.terminal_closure_pending (the
   #   PERSISTED flag), NOT the pre-target snapshot — so a record whose round closed finishes ABORTED/CANCELLED and NEVER APPLIED.
-  # --- AB5 dispatch ownership bound to the retry event reference ---
-  # A SetupRetryEvent carries dispatched_event_ref (the canonical identity of the dispatched event, derivable from
-  #   dispatch_envelope §0.7f, equal to the seat-stored rec.event_ref for a genuine dispatch). Ownership: (A) unknown
-  #   SetupRetryID -> stale no-op; (B) known id but dispatched_event_ref != rec.event_ref -> FOREIGN replay -> stale no-op,
-  #   leave the record SEATED for its genuine queued event; (C) the GENUINE event (dispatched_event_ref = rec.event_ref) with
-  #   a payload that mismatches the immutable record -> INTEGRITY corruption of the owning event -> terminalise the record
-  #   (ABORTED via the declared setup_retry_payload_integrity_failure abort), cancel any residual event ref, store the exact
+  # --- AB5 dispatch ownership bound to the retry event reference (field RENAMED to seat_event_ref by AC8) ---
+  # A SetupRetryEvent carries dispatched_event_ref (an EventRef INJECTED by ProcessEventTime, AC2; NOT read from the payload),
+  #   compared against the IMMUTABLE rec.seat_event_ref (AC1/AC8). Ownership: (A) unknown SetupRetryID -> stale no-op;
+  #   (B) known id but dispatched_event_ref != rec.seat_event_ref -> FOREIGN replay -> stale no-op, leave the record SEATED
+  #   for its genuine queued event; (C) the GENUINE event (dispatched_event_ref = rec.seat_event_ref) with a payload that
+  #   mismatches the immutable record -> INTEGRITY corruption of the owning event -> terminalise the record (ABORTED via the
+  #   declared setup_retry_payload_integrity_failure abort), mark event_queue_status CONSUMED (AC8), store the exact
   #   integrity-abort disposition. The only event a SEATED record owns is never consumed while the record stays SEATED.
+  #   (AC3 reorders the guard so the non-SEATED replay check precedes payload integrity; AC4 scopes integrity to the
+  #   record's own round; AC6 makes the abort follow SEATED -> APPLYING -> ABORTED.)
   # --- AB6 round-closure terminalisation uses keyed persistent updates + post-conditions ---
-  # CancelSetupRetriesForRound uses keyed UPDATEs (AB3), CLEARS a cancelled SEATED record's event_ref to null, and after it
-  #   completes for closing_RoundID: no record has status = SEATED; no SEATED record has a queued event_ref; every
-  #   terminalised (CANCELLED) record has a terminal target_disposition; every APPLYING record has terminal_closure_pending
-  #   persisted in the registry.
+  # CancelSetupRetriesForRound uses keyed UPDATEs (AB3), marks a cancelled SEATED record's event_queue_status CANCELLED (AC8,
+  #   was "clear event_ref to null" in AB6), and after it completes for closing_RoundID: no record has status = SEATED; no
+  #   record of that round has event_queue_status = QUEUED; every terminalised (CANCELLED) record has a terminal
+  #   target_disposition; every APPLYING record has terminal_closure_pending persisted in the registry.
+  # --- AC1 canonical EventRef type ---
+  # EventRef = (envelope_namespace, event_type, event_time, delta_cycle, microphase, seq) — see STRUCTURE EventRef (§0.7e).
+  #   ScheduleEvent DERIVES exactly one EventRef from the envelope it creates and RETURNS scheduled(EventRef, envelope). The
+  #   SAME EventRef type is used by cancellation, stored retry ownership (setup_retry_record.seat_event_ref), and dispatch
+  #   ownership (dispatched_event_ref). `event_ref`, `envelope`, and `dispatched_event_ref` are NOT silently interchangeable.
+  # --- AC2 dispatcher-owned EventRef threading ---
+  # EventQueueContext gains current_event_ref : EventRef | null. ProcessEventTime SETs EQ.current_event_ref <- EventRef(e)
+  #   before dispatching e, INJECTS dispatched_event_ref = EQ.current_event_ref, and CLEARs it after the handler returns.
+  #   SetupRetryEvent receives dispatched_event_ref from THIS dispatcher-owned path — never from its own payload and never
+  #   from an undocumented derivation. dispatched_event_ref is a MANDATORY handler input.
+  # --- AC3 terminal-replay check before payload integrity ---
+  # SetupRetryEvent guard order: (1) structure to resolve id; (2) resolve record; (3) EventRef ownership; (4) IF status !=
+  #   SEATED -> setup_retry_duplicate_suppressed (BEFORE any payload-integrity abort); (5) stale/closed disposition from the
+  #   IMMUTABLE record; (6) payload validation for a current owned SEATED record only; (7) current-round target guards +
+  #   execution. A replay of a terminal (APPLIED/SUPERSEDED/CANCELLED/ABORTED) record NEVER aborts a round.
+  # --- AC4 integrity failure scoped to the record's round ---
+  # Before any payload-integrity RoundAbort, membership in the current round is decided from the IMMUTABLE RECORD FIELDS
+  #   (rec.RoundID = RoundID_current, the record's round nonterminal, rec.TemplateID_at_seat current) — never untrusted
+  #   payload fields. A record of an older/terminal round is terminalised SUPERSEDED/CANCELLED; a corrupted HISTORICAL retry
+  #   NEVER aborts a later round.
+  # --- AC5 malformed dispatch does not leave a known record SEATED ---
+  # Case A (invalid/unknown SetupRetryID) -> stale no-op (no record). Case B (known id, foreign dispatched_event_ref !=
+  #   rec.seat_event_ref) -> stale no-op, LEAVE the genuine record SEATED. Case C (known id, genuine EventRef, but incomplete
+  #   dispatch envelope or payload mismatch) -> corruption of the owning event: terminalise the record, store the exact
+  #   integrity disposition, take the declared current-round integrity abort ONLY if the record is of the current nonterminal
+  #   round. The genuine owned event is NEVER consumed while the record stays SEATED.
+  # --- AC6 legal status path for guard-driven aborts ---
+  # A current SEATED retry about to run ANY aborting guard first moves SEATED -> APPLYING, then (after RoundAbort returns and
+  #   CancelSetupRetriesForRound has persisted terminal_closure_pending) APPLYING -> ABORTED. There is NEVER a straight
+  #   SEATED -> ABORTED and NEVER a terminal -> terminal transition (in particular CANCELLED -> ABORTED is forbidden).
+  #   CancelSetupRetriesForRound therefore sees APPLYING and sets terminal_closure_pending (it does not change it to CANCELLED).
+  # --- AC7 SetupRetryStatus transition table + SetSetupRetryStatus guard ---
+  # setup_retry_status_transitions: SEATED -> {APPLYING, CANCELLED, SUPERSEDED}; APPLYING -> {APPLIED, SUPERSEDED, CANCELLED,
+  #   ABORTED}; APPLIED/SUPERSEDED/CANCELLED/ABORTED are TERMINAL. SetSetupRetryStatus is the SOLE status writer and REJECTS
+  #   any illegal transition (especially terminal -> terminal) with no mutation. The seat CREATEs the record at SEATED.
+  # --- AC8 immutable event identity separate from queue state ---
+  # setup_rollback of the retry record: seat_event_ref : EventRef (IMMUTABLE, set at seat) + event_queue_status :
+  #   EventQueueStatus { QUEUED, DISPATCHING, CONSUMED, CANCELLED }. Ownership comparisons use the immutable seat_event_ref;
+  #   cancellation/consumption changes ONLY event_queue_status and NEVER erases the historical seat EventRef. The Z1-era
+  #   single `event_ref` field is REPLACED by this pair.
   # Q7 recovery-timing CONFIG constants (declared, deterministic):
   #   recovery_deadline_window            : config; > 0. The delay from SECURITY_RECOVERY entry to the deadline event.
   #   configured_recovery_completion_delay: config; > 0 (or the next-representable simulation instant). The
@@ -1337,11 +1415,11 @@ PROCEDURE StartWake                                             # V3/V9: a TRANS
                      target_event_time = target_time, target_microphase = WAKE_COMPLETE,
                      {MinerID, AssignmentID(target_assignment)},
                      post_epilogue_context = post_ctx)                   # V2/S7: post_ctx present ONLY for POST_EPILOGUE
-    IF seat != scheduled(...):
+    IF seat is NOT scheduled(event_ref, envelope):   # AC1: ScheduleEvent returns scheduled(EventRef, envelope)
       # V3: the schedule failed BEFORE any transition. The miner is UNCHANGED (still from_state); nothing to cancel.
       RECORD wake_schedule_rejected(MinerID, AssignmentID(target_assignment), seat)
       RETURN wake_schedule_failed_before_transition(reason = seat)
-    SET wake_event_ref <- seat.event_ref
+    SET wake_event_ref <- event_ref                  # AC1: the canonical EventRef of the seated WakeCompleteEvent
     # (4) ONLY AFTER a successful seat: apply the legal WAKING transition (accrues wake residency via F6).
     SET tr <- CALL ApplyMinerStateTransition(MinerID, from_state, WAKING,
                      transition_envelope = dispatch_envelope,           # S1: ONE explicit transition-envelope object
@@ -1532,14 +1610,15 @@ STRUCTURE RunContext (per-RUN; Q5 — the SOLE owner of run-level runtime state)
   security_census_write_seq_by_event_time   : R5 — map event_time -> monotonic census-write ordinal. The EXPLICIT
                                 : deterministic write order for latest_security_census. Owned SOLELY by
                                 : CommitSecurityCensus (§0.8a); initialised here and PRESERVED across rounds.
-  setup_retry_records         : Z1 — map SetupRetryID -> setup_retry_record { SetupRetryID, setup_kind, RoundID,
-                                : TemplateID_at_seat, TemplateRefreshSetupID, retry_generation, event_ref, status :
-                                : SetupRetryStatus, target_disposition }. The SINGLE setup-retry registry (REPLACES the
-                                : Y-era applied_setup_retry_ids mirror AND the bare setup_retry_status_by_id). The seating
-                                : procedure publishes status = SEATED after a successful ScheduleEvent; SetupRetryEvent's
-                                : first dispatch flips SEATED -> APPLYING and executes; a replay is duplicate-suppressed
-                                : IFF status is already non-SEATED (Z1). "applied" = status = APPLIED, set only after the
-                                : target result is known.
+  setup_retry_records         : Z1/AA2/AC1/AC8 — map SetupRetryID -> setup_retry_record { SetupRetryID, setup_kind, RoundID,
+                                : TemplateID_at_seat, TemplateRefreshSetupID, retry_generation, seat_event_ref : EventRef
+                                : (immutable, AC1/AC8), event_queue_status : EventQueueStatus (AC8), status : SetupRetryStatus,
+                                : target_disposition, terminal_closure_pending : bool (AA2) }. The SINGLE setup-retry registry
+                                : (REPLACES the Y-era applied_setup_retry_ids mirror AND the bare setup_retry_status_by_id).
+                                : The seating procedure publishes status = SEATED, seat_event_ref = the ScheduleEvent EventRef,
+                                : event_queue_status = QUEUED after a successful ScheduleEvent; SetupRetryEvent's first dispatch
+                                : flips SEATED -> APPLYING and executes; a replay is duplicate-suppressed IFF status is already
+                                : non-SEATED (Z1). "applied" = status = APPLIED, set only after the target result is known.
   setup_retry_generation_by_scope : Y3 — map (RoundID, setup_kind, TemplateRefreshSetupID_or_null) -> generation. The
                                 : bounded per-scope retry counter registry (RENAMED from the shadowed setup_retry_generation
                                 : map). It is NEVER a scalar; the scalar generation carried in/out is retry_generation (Y3).
@@ -1552,7 +1631,7 @@ PROCEDURE RunInitialise                                         # Q5: creates AL
   EFFECTS:
     SET RunID <- fresh per-run identifier
     INITIALISE EventQueueContext EQ WITH event_queue = empty, current_event_time = 0, current_delta_cycle = 0,
-               current_microphase = 0, current_event_seq = 0, event_creation_seq = 0,
+               current_microphase = 0, current_event_seq = 0, current_event_ref = null, event_creation_seq = 0,   # AC2: current_event_ref
                finalised_event_times = empty set, run_horizon_T = config.horizon_T          # K8/O2 (sole dispatch state)
     INITIALISE RunHookContext WITH run_hook_seq = 0, applied_run_hook_ids = empty set        # P2 (run-hook envelope owner)
     INITIALISE rebased_boundaries          <- empty set     # L5
@@ -1859,12 +1938,13 @@ PROCEDURE PrepareParticipantsForNewRound
                      {RoundID = RoundID_current, setup_kind = PARTICIPANT_SETUP, SetupRetryID = srid,
                       TemplateID_at_seat = TemplateID_committed, TemplateRefreshSetupID = null,
                       retry_generation = g, reason = setup_reason})                   # W8/Y2/Y3: exact identity + scalar generation
-      IF r = scheduled(event_ref):
-        # Z1: publish the setup_retry_record ATOMICALLY with status = SEATED AFTER the successful ScheduleEvent.
+      IF r = scheduled(event_ref, envelope):   # AC1: ScheduleEvent returns the canonical EventRef + envelope
+        # Z1/AC8: publish the setup_retry_record ATOMICALLY with status = SEATED, seat_event_ref = the EventRef (immutable),
+        #   event_queue_status = QUEUED, AFTER the successful ScheduleEvent. The seat is the ONLY CREATE (AB3).
         ATOMICALLY: SET setup_retry_records[srid] <- setup_retry_record(SetupRetryID = srid, setup_kind = PARTICIPANT_SETUP,
               RoundID = RoundID_current, TemplateID_at_seat = TemplateID_committed, TemplateRefreshSetupID = null,
-              retry_generation = g, event_ref = event_ref, status = SEATED, target_disposition = null,
-              terminal_closure_pending = false)   # Z1/AA2
+              retry_generation = g, seat_event_ref = event_ref, event_queue_status = QUEUED, status = SEATED,
+              target_disposition = null, terminal_closure_pending = false)   # Z1/AA2/AC1/AC8
         RETURN participant_set_setup_retry_seated(srid, setup_reason)
     RETURN CALL RoundAbort(RoundContext, reason = participant_setup_failed(setup_reason),
                            dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # declared abort
@@ -2014,182 +2094,219 @@ PROCEDURE SetupRetryEvent                                       # W8/X4/Y1/Y2/Y3
           #   are carried EXPLICITLY in the payload (TemplateRefreshSetupID = null for PARTICIPANT_SETUP). SetupRetryID
           #   carries the COMPLETE scope: PARTICIPANT_SETUP = (RoundID, TemplateID_at_seat, PARTICIPANT_SETUP, retry_generation);
           #   TEMPLATE_REFRESH_SETUP = (TemplateRefreshSetupID, TEMPLATE_REFRESH_SETUP, retry_generation).
-          # AB5: dispatched_event_ref is the reference of THIS dispatched SetupRetryEvent — the canonical event identity
-          #   materialised by ProcessEventTime from the dispatch (derivable from dispatch_envelope, §0.7f). It is compared
-          #   against the immutable record's event_ref to establish OWNERSHIP before the handler operates on the record.
+          # AC2: dispatched_event_ref is the canonical EventRef of THIS dispatched SetupRetryEvent, INJECTED by
+          #   ProcessEventTime from EQ.current_event_ref (the dispatcher owns it). It is NEVER read from the payload and
+          #   NEVER derived by prose; it is a MANDATORY input (the dispatch contract guarantees ProcessEventTime always
+          #   supplies it — TV245). Ownership compares it against the IMMUTABLE rec.seat_event_ref (AC1/AC8).
   PRECONDITIONS: a dispatched queued handler seated by PrepareParticipantsForNewRound / ContinueTemplateRefreshAssignmentSetup
-                 after a rolled-back setup; its dispatch_envelope is its own (§0.7f).
+                 after a rolled-back setup; its dispatch_envelope AND dispatched_event_ref are supplied by ProcessEventTime (§0.7f/AC2).
   EFFECTS:
-    # AB5/AA3/Z1 CANONICAL GUARD ORDER: (1) event shape; (1b) RESOLVE the record; (1c) AB5 DISPATCH OWNERSHIP
-    #   (dispatched_event_ref vs rec.event_ref); (2) payload matches the immutable record (a mismatch on the GENUINE owning
-    #   event is an INTEGRITY ABORT, AB5-C); (3) STATUS-based EXACT-replay idempotence; (4) stale-RoundID / closed-round
-    #   TERMINALISATION; (5) template identity; (6) target round state; (7) budget + participant compat; (8) SEATED ->
-    #   APPLYING + capture + RE-READ + classify. AB3: rec is a READ-ONLY snapshot; EVERY lifecycle mutation is a keyed
-    #   UPDATE of setup_retry_records[SetupRetryID] (the seat is the only CREATE). AB4: after the target returns the handler
-    #   RE-READS the persisted record and classifies on the STORED terminal_closure_pending.
-    # (1) EVENT SHAPE. A malformed envelope / structurally-invalid SetupRetryID is a no-op (no record to terminalise, AA3).
-    IF dispatch_envelope is incomplete OR SetupRetryID is not structurally valid:
-      RETURN setup_retry_stale_noop(SetupRetryID)
-    # (1b) AA3 RESOLVE the ONE record (READ-ONLY snapshot, AB3). CASE A — an unknown id (never seated) is a no-op.
+    # AC3 CANONICAL GUARD ORDER: (1) structure to resolve the id; (2) RESOLVE the record; (3) AC5 EVENTREF OWNERSHIP
+    #   (dispatched_event_ref vs rec.seat_event_ref); (4) AC3 STATUS-based replay (non-SEATED -> duplicate-suppress) BEFORE
+    #   any payload/integrity handling; (5) AC4 stale/closed-round disposition decided from the IMMUTABLE RECORD fields;
+    #   (6) ONLY for a current owned SEATED record: validate the dispatch envelope + payload (a failure is a CURRENT-round
+    #   integrity abort, AC5-C); (7) current-round target guards; (8) target execution. AC6: every aborting guard leaves
+    #   SEATED via SEATED -> APPLYING before RoundAbort, then APPLYING -> ABORTED (never a straight SEATED -> ABORTED, never a
+    #   terminal -> terminal rewrite). AB3/AC8: `rec` is a READ-ONLY snapshot; every status write goes through the
+    #   SetSetupRetryStatus transition guard (AC7); the seat is the only CREATE.
+    # (1) AC5-A STRUCTURE: enough to resolve the SetupRetryID. A structurally-invalid id resolves to no record — stale no-op.
+    IF SetupRetryID is not structurally valid:
+      RETURN setup_retry_stale_noop(SetupRetryID)           # AC5-A: cannot resolve a record
+    # (2) AC5-A RESOLVE the ONE record (READ-ONLY snapshot). An unknown id (never seated) is a stale no-op.
     IF setup_retry_records[SetupRetryID] does NOT EXIST:
-      RETURN setup_retry_stale_noop(SetupRetryID)          # AB5-A: never seated / unknown; nothing to terminalise
-    SET rec <- setup_retry_records[SetupRetryID]            # AB3: READ-ONLY snapshot; all mutation is keyed UPDATE below
-    # (1c) AB5 DISPATCH OWNERSHIP. The ONLY event that may operate on a record is the record's OWN queued event. CASE B — a
-    #   foreign / replayed event carries a valid SetupRetryID but a DIFFERENT dispatched_event_ref: it does NOT own the
-    #   record; stale-noop and LEAVE the record SEATED for its genuine queued event (never consume ownership on a foreign ref).
-    IF dispatched_event_ref != rec.event_ref:
-      RETURN setup_retry_stale_noop(SetupRetryID)          # AB5-B: foreign/corrupt replay; genuine event remains seated
-    # (2) AB5-C INTEGRITY OF THE OWNING EVENT. dispatched_event_ref = rec.event_ref, so THIS is the record's genuine event.
-    #   If the genuine event's payload disagrees with the IMMUTABLE record, the owning event itself is corrupted: the record
-    #   must NOT remain SEATED with its only event consumed. TERMINALISE via a declared integrity abort — capture the abort
-    #   result FIRST (AB2), then persist ABORTED + the exact returned disposition by key, and cancel any residual event ref.
-    IF NOT (RoundID = rec.RoundID AND setup_kind = rec.setup_kind AND TemplateID_at_seat = rec.TemplateID_at_seat
-            AND TemplateRefreshSetupID = rec.TemplateRefreshSetupID AND retry_generation = rec.retry_generation):
-      IF rec.event_ref != null AND rec.event_ref is still pending on EQ: CANCEL rec.event_ref on EQ   # AB5-C: no live event left
-      SET disp <- CALL RoundAbort(RoundContext, reason = setup_retry_payload_integrity_failure(setup_kind),
-                        dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # AB2/AB5-C: capture the abort FIRST
-      UPDATE setup_retry_records[SetupRetryID].status <- ABORTED                              # AB3: keyed persistent UPDATE
-      UPDATE setup_retry_records[SetupRetryID].target_disposition <- disp                     # AB2: store the EXACT round_aborted(abort_record)
-      RETURN disp
-    # (3) Z1 STATUS-BASED EXACT-REPLAY IDEMPOTENCE. A published SEATED record's FIRST dispatch MUST execute; any NON-SEATED
-    #   status (APPLYING / APPLIED / SUPERSEDED / CANCELLED / ABORTED) is a replay and is duplicate-suppressed.
+      RETURN setup_retry_stale_noop(SetupRetryID)           # AC5-A: never seated / unknown; nothing to terminalise
+    SET rec <- setup_retry_records[SetupRetryID]             # AB3/AC8: READ-ONLY snapshot; all mutation is keyed UPDATE via SetSetupRetryStatus
+    # (3) AC5 EVENTREF OWNERSHIP against the IMMUTABLE seat EventRef (AC1/AC8). CASE B — a foreign / replayed event carries a
+    #   valid SetupRetryID but a DIFFERENT EventRef: it does NOT own the record; stale-noop and LEAVE the record SEATED for
+    #   its genuine queued event (never consume ownership on a foreign ref). Uses seat_event_ref, which cancellation NEVER erases.
+    IF dispatched_event_ref != rec.seat_event_ref:
+      RETURN setup_retry_stale_noop(SetupRetryID)           # AC5-B: foreign/replayed dispatch; genuine event remains seated
+    # (4) AC3 TERMINAL-REPLAY IDEMPOTENCE — checked BEFORE any payload-integrity handling. Any NON-SEATED status
+    #   (APPLYING / APPLIED / SUPERSEDED / CANCELLED / ABORTED) is a replay: duplicate-suppress. A replay of a terminal record
+    #   must NEVER abort a round merely because replayed payload fields differ (AC3).
     IF rec.status != SEATED:
-      RETURN setup_retry_duplicate_suppressed(SetupRetryID)   # Z1: replay of an already-progressed record
-    # (4) AA3 STALE-RoundID / CLOSED-ROUND TERMINALISATION. The record is KNOWN and SEATED; a stale dispatch must NOT
-    #   leave it SEATED. Round advanced (RoundID moved on) -> SUPERSEDED; round terminal (closed) -> CANCELLED; either way
-    #   target_disposition is the stale no-op and the event returns a stale no-op. AB3: keyed persistent UPDATE.
-    IF RoundID != RoundID_current:
-      UPDATE setup_retry_records[SetupRetryID].status <- SUPERSEDED                             # AA3/AB3: round advanced past r1
+      RETURN setup_retry_duplicate_suppressed(SetupRetryID)   # AC3: replay of an already-progressed record; no payload check, no abort
+    # (5) AC4 STALE / CLOSED-ROUND DISPOSITION decided from the IMMUTABLE RECORD FIELDS (never the untrusted payload). If the
+    #   record's own round is not the current round, or its round is terminal, or the record's committed template identity is
+    #   no longer current, TERMINALISE the record — do NOT abort the current round. A corrupted historical retry can never
+    #   abort a later round.
+    IF rec.RoundID != RoundID_current:
+      CALL SetSetupRetryStatus(SetupRetryID, SUPERSEDED)     # AC4/AC7: SEATED -> SUPERSEDED (record's round advanced past current)
       UPDATE setup_retry_records[SetupRetryID].target_disposition <- setup_retry_stale_noop(SetupRetryID)
       RETURN setup_retry_stale_noop(SetupRetryID)
-    IF round_state in {ROUND_ACCEPTED, ROUND_ABORTED}:
-      UPDATE setup_retry_records[SetupRetryID].status <- CANCELLED                              # AA3/AB3: closed round
+    IF round_state in {ROUND_ACCEPTED, ROUND_ABORTED}:       # the record's (current) round is terminal
+      CALL SetSetupRetryStatus(SetupRetryID, CANCELLED)      # AC4/AC7: SEATED -> CANCELLED (closed round)
       UPDATE setup_retry_records[SetupRetryID].target_disposition <- setup_retry_terminal_stale_noop(SetupRetryID)
       RETURN setup_retry_terminal_stale_noop(SetupRetryID)
-    # (5) Y2 KIND-SPECIFIC EXACT TEMPLATE IDENTITY (no ambient "the refresh setup's TemplateID"). A stale retry for an
-    #   earlier TemplateID takes a declared stale disposition, CANCELs the record (keyed UPDATE, AB3), and NEVER operates on the current template.
-    IF setup_kind = PARTICIPANT_SETUP:
-      IF NOT (a committed eligible TemplateID exists for RoundContext AND TemplateID_at_seat = TemplateID_committed):
-        UPDATE setup_retry_records[SetupRetryID].status <- CANCELLED                            # Z1/AB3
+    IF rec.setup_kind = PARTICIPANT_SETUP:
+      IF NOT (a committed eligible TemplateID exists for RoundContext AND rec.TemplateID_at_seat = TemplateID_committed):
+        CALL SetSetupRetryStatus(SetupRetryID, SUPERSEDED)   # AC4/AC7: the record's seat-time template is no longer the committed template
         UPDATE setup_retry_records[SetupRetryID].target_disposition <- setup_retry_stale_noop(SetupRetryID)
-        RETURN setup_retry_stale_noop(SetupRetryID)          # Y2: seat-time template no longer the committed template
-    ELSE:   # setup_kind = TEMPLATE_REFRESH_SETUP
-      IF NOT (TemplateID_at_seat = TemplateID_committed
-              AND template_refresh_setup_committed[TemplateID_at_seat] EXISTS
-              AND TemplateRefreshSetupID = template_refresh_setup_committed[TemplateID_at_seat].TemplateRefreshSetupID):
-        UPDATE setup_retry_records[SetupRetryID].status <- CANCELLED                            # Z1/AB3
+        RETURN setup_retry_stale_noop(SetupRetryID)
+    ELSE:   # rec.setup_kind = TEMPLATE_REFRESH_SETUP
+      IF NOT (rec.TemplateID_at_seat = TemplateID_committed
+              AND template_refresh_setup_committed[rec.TemplateID_at_seat] EXISTS
+              AND rec.TemplateRefreshSetupID = template_refresh_setup_committed[rec.TemplateID_at_seat].TemplateRefreshSetupID):
+        CALL SetSetupRetryStatus(SetupRetryID, SUPERSEDED)   # AC4/AC7: the record's seat-time refresh template is no longer current
         UPDATE setup_retry_records[SetupRetryID].target_disposition <- setup_retry_stale_noop(SetupRetryID)
-        RETURN setup_retry_stale_noop(SetupRetryID)          # Y2: stale TemplateID / TemplateRefreshSetupID — never operate on the current template
-    # (6) X4 TARGET ROUND STATE. BOTH targets require ASSIGNMENT; a non-terminal non-ASSIGNMENT dispatch is a declared abort.
-    #   AB2: CAPTURE the abort result FIRST, then persist ABORTED + the EXACT returned disposition by key, then RETURN it.
+        RETURN setup_retry_stale_noop(SetupRetryID)
+    # (6) AC5-C OWNING-EVENT INTEGRITY — ONLY for a CURRENT OWNED SEATED record (established current nonterminal round + current
+    #   template in step 5). Validate the dispatch envelope AND the payload against the immutable record. A failure is corruption
+    #   of the genuine owning event: it may NOT remain SEATED with its only event consumed. Since the record belongs to the
+    #   CURRENT NONTERMINAL round, take the declared current-round integrity abort via the AC6 legal path
+    #   (SEATED -> APPLYING -> ABORTED). The dispatch_envelope used for RoundAbort is the dispatcher-materialised one (AC2
+    #   guarantees it complete); the envelope-incompleteness check is the defensive AC5-C trigger.
+    IF dispatch_envelope is incomplete
+       OR NOT (RoundID = rec.RoundID AND setup_kind = rec.setup_kind AND TemplateID_at_seat = rec.TemplateID_at_seat
+               AND TemplateRefreshSetupID = rec.TemplateRefreshSetupID AND retry_generation = rec.retry_generation):
+      CALL SetSetupRetryStatus(SetupRetryID, APPLYING)       # AC6: leave SEATED FIRST (the genuine owned event is being consumed)
+      UPDATE setup_retry_records[SetupRetryID].event_queue_status <- CONSUMED   # AC8: this genuine event is consumed now
+      SET disp <- CALL RoundAbort(RoundContext, reason = setup_retry_payload_integrity_failure(setup_kind),
+                        dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # AB2/AC5-C: capture the abort FIRST
+      SET post_abort_rec <- setup_retry_records[SetupRetryID]                   # AC6: re-read
+      ASSERT post_abort_rec.terminal_closure_pending = true OR round_state in {ROUND_ACCEPTED, ROUND_ABORTED}   # AC6: round terminalised coherently
+      UPDATE setup_retry_records[SetupRetryID].target_disposition <- disp       # AB2: store the EXACT round_aborted(abort_record)
+      CALL SetSetupRetryStatus(SetupRetryID, ABORTED)        # AC6/AC7: APPLYING -> ABORTED (legal; never SEATED -> ABORTED)
+      RETURN disp
+    # (7) X4/W8 CURRENT-ROUND TARGET GUARDS. Each aborting guard follows the AC6 legal path SEATED -> APPLYING -> ABORTED,
+    #   capturing the abort result FIRST (AB2) and persisting ABORTED via SetSetupRetryStatus.
     IF round_state != ASSIGNMENT:
+      CALL SetSetupRetryStatus(SetupRetryID, APPLYING)       # AC6: leave SEATED first
       SET disp <- CALL RoundAbort(RoundContext, reason = setup_retry_wrong_round_state(setup_kind, round_state),
                         dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # X4/AB2: capture FIRST
-      UPDATE setup_retry_records[SetupRetryID].status <- ABORTED                              # AB3: keyed persistent UPDATE
-      UPDATE setup_retry_records[SetupRetryID].target_disposition <- disp                     # AB2: EXACT round_aborted(abort_record)
+      SET post_abort_rec <- setup_retry_records[SetupRetryID]
+      ASSERT post_abort_rec.terminal_closure_pending = true OR round_state in {ROUND_ACCEPTED, ROUND_ABORTED}   # AC6
+      UPDATE setup_retry_records[SetupRetryID].target_disposition <- disp
+      CALL SetSetupRetryStatus(SetupRetryID, ABORTED)        # AC6/AC7: APPLYING -> ABORTED
       RETURN disp
-    # (7) X4/W8 BOUND (Y3: scalar retry_generation vs the maximum) + STATE COMPATIBILITY. An over-budget retry ABORTS
-    #   (never merely "exhausted"); an OFFLINE-stranded eligible participant ABORTS rather than retry from an incompatible state.
     IF retry_generation > maximum_setup_retries:
+      CALL SetSetupRetryStatus(SetupRetryID, APPLYING)       # AC6: leave SEATED first
       SET disp <- CALL RoundAbort(RoundContext, reason = setup_retry_budget_exhausted(setup_kind),
                         dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # X4/Y3/AB2: capture FIRST
-      UPDATE setup_retry_records[SetupRetryID].status <- ABORTED                              # AB3
-      UPDATE setup_retry_records[SetupRetryID].target_disposition <- disp                     # AB2
+      SET post_abort_rec <- setup_retry_records[SetupRetryID]
+      ASSERT post_abort_rec.terminal_closure_pending = true OR round_state in {ROUND_ACCEPTED, ROUND_ABORTED}   # AC6
+      UPDATE setup_retry_records[SetupRetryID].target_disposition <- disp
+      CALL SetSetupRetryStatus(SetupRetryID, ABORTED)        # AC6/AC7: APPLYING -> ABORTED
       RETURN disp
     IF NOT (every eligible participant of RoundID is in miner_state {REGISTERED, RESERVE, LOW_POWER_LISTEN}):
+      CALL SetSetupRetryStatus(SetupRetryID, APPLYING)       # AC6: leave SEATED first
       SET disp <- CALL RoundAbort(RoundContext, reason = setup_retry_state_incompatible(setup_kind),
                         dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # W8/AB2: capture FIRST
-      UPDATE setup_retry_records[SetupRetryID].status <- ABORTED                              # AB3
-      UPDATE setup_retry_records[SetupRetryID].target_disposition <- disp                     # AB2
+      SET post_abort_rec <- setup_retry_records[SetupRetryID]
+      ASSERT post_abort_rec.terminal_closure_pending = true OR round_state in {ROUND_ACCEPTED, ROUND_ABORTED}   # AC6
+      UPDATE setup_retry_records[SetupRetryID].target_disposition <- disp
+      CALL SetSetupRetryStatus(SetupRetryID, ABORTED)        # AC6/AC7: APPLYING -> ABORTED
       RETURN disp
-    # (8) Z1 FIRST DISPATCH: atomically transition SEATED -> APPLYING (keyed UPDATE, AB3), CAPTURE the target result (no
-    #   direct RETURN CALL), then RE-READ the persisted record (AB4) and set the terminal status deterministically.
-    ATOMICALLY: UPDATE setup_retry_records[SetupRetryID].status <- APPLYING       # Z1/AB3: the SEATED record is now being applied
+    # (8) FIRST DISPATCH: leave SEATED via SEATED -> APPLYING (AC6/AC7), mark the genuine event CONSUMED (AC8), CAPTURE the
+    #   target result (no direct RETURN CALL), then RE-READ the persisted record (AB4) and set the terminal status through the
+    #   transition guard.
+    ATOMICALLY: CALL SetSetupRetryStatus(SetupRetryID, APPLYING)   # Z1/AC7: SEATED -> APPLYING
+    UPDATE setup_retry_records[SetupRetryID].event_queue_status <- CONSUMED   # AC8: the genuine owning event is consumed
     IF setup_kind = PARTICIPANT_SETUP:
       SET disp <- CALL PrepareParticipantsForNewRound(RoundContext, dispatch_envelope)          # X4: re-run participant setup
     ELSE:   # setup_kind = TEMPLATE_REFRESH_SETUP: X3/X4 — resume ONLY the post-TemplateCommit assignment phase (identity verified above)
-      SET disp <- CALL ContinueTemplateRefreshAssignmentSetup(RoundContext, dispatch_envelope, TemplateID = TemplateID_at_seat,
-                       TemplateRefreshSetupID = TemplateRefreshSetupID,
-                       SetupRetryID = SetupRetryID, retry_generation = retry_generation)   # X3/X4/Y2/Y3
+      SET disp <- CALL ContinueTemplateRefreshAssignmentSetup(RoundContext, dispatch_envelope, TemplateID = rec.TemplateID_at_seat,
+                       TemplateRefreshSetupID = rec.TemplateRefreshSetupID,
+                       SetupRetryID = SetupRetryID, retry_generation = rec.retry_generation)   # X3/X4/Y2/Y3
     # AB4 RE-READ: the target may have synchronously invoked RoundAbort -> CloseRoundAssignments -> CancelSetupRetriesForRound,
     #   which PERSISTS terminal_closure_pending on THIS record by key. Classify on the RE-READ persisted record, NEVER on the
-    #   pre-target snapshot `rec`.
+    #   pre-target snapshot `rec`. Every status write goes through SetSetupRetryStatus (AC7).
     SET post_target_rec <- setup_retry_records[SetupRetryID]                       # AB4: re-read after the target returns
-    UPDATE setup_retry_records[SetupRetryID].target_disposition <- disp            # Z1/AB3: keyed persistent UPDATE
+    UPDATE setup_retry_records[SetupRetryID].target_disposition <- disp            # AB3: keyed persistent UPDATE
     IF post_target_rec.terminal_closure_pending = true:
-      # AA2/AB4: the round CLOSED while this record was APPLYING (CancelSetupRetriesForRound persisted the flag); the record
-      #   MUST finish terminal — NEVER APPLIED. A target round_aborted(abort_record) maps to ABORTED (AA1); any other
-      #   captured disposition maps to CANCELLED.
-      IF disp = round_aborted(abort_record): UPDATE setup_retry_records[SetupRetryID].status <- ABORTED
-      ELSE:                                  UPDATE setup_retry_records[SetupRetryID].status <- CANCELLED
+      # AA2/AB4: the round CLOSED while this record was APPLYING; the record MUST finish terminal — NEVER APPLIED. A target
+      #   round_aborted(abort_record) maps to ABORTED (AA1); any other captured disposition maps to CANCELLED.
+      IF disp = round_aborted(abort_record): CALL SetSetupRetryStatus(SetupRetryID, ABORTED)      # APPLYING -> ABORTED
+      ELSE:                                  CALL SetSetupRetryStatus(SetupRetryID, CANCELLED)     # APPLYING -> CANCELLED
     ELSE IF disp = participant_set_prepared OR disp is a committed TemplateID value:
-      UPDATE setup_retry_records[SetupRetryID].status <- APPLIED                   # Z1: setup succeeded (round now HASHING)
+      CALL SetSetupRetryStatus(SetupRetryID, APPLIED)         # Z1: setup succeeded (APPLYING -> APPLIED)
     ELSE IF disp = participant_set_setup_retry_seated(...) OR disp = template_refresh_retry_seated(...):
-      UPDATE setup_retry_records[SetupRetryID].status <- SUPERSEDED                # Z1: a later generation was seated by the target
+      CALL SetSetupRetryStatus(SetupRetryID, SUPERSEDED)      # Z1: a later generation was seated (APPLYING -> SUPERSEDED)
     ELSE IF disp = round_aborted(abort_record):
-      UPDATE setup_retry_records[SetupRetryID].status <- ABORTED                   # AA1: a target RoundAbort result maps to ABORTED (never CANCELLED)
+      CALL SetSetupRetryStatus(SetupRetryID, ABORTED)         # AA1: a target RoundAbort result maps to ABORTED (APPLYING -> ABORTED)
     ELSE:   # disp = template_refresh_retry_stale_noop or another declared stale disposition
-      UPDATE setup_retry_records[SetupRetryID].status <- CANCELLED                 # Z1: a declared stale cancellation
+      CALL SetSetupRetryStatus(SetupRetryID, CANCELLED)       # Z1: a declared stale cancellation (APPLYING -> CANCELLED)
     RETURN disp
   RETURNS: setup_retry_stale_noop(SetupRetryID) | setup_retry_terminal_stale_noop(SetupRetryID) |
            setup_retry_duplicate_suppressed(SetupRetryID) | round_aborted(abort_record) |
            participant_set_prepared | participant_set_setup_retry_seated(SetupRetryID, reason) | TemplateID |
            template_refresh_retry_seated(SetupRetryID, reason) | template_refresh_retry_stale_noop(TemplateRefreshSetupID)
-           # AB1: the exact round_aborted(abort_record) shape once; the re-run target's dispositions are ENUMERATED explicitly
-           #   (no vague "target procedure's disposition"). The abort covers both the guard-driven aborts and a target abort.
-  NOTE: AB5/AB4/AB3/AB2/AA1/AA3/Z1/Y1/Y2/Y3/X3/X4/W8: OWNERSHIP (AB5) — the handler resolves the record and checks
-        dispatched_event_ref = rec.event_ref BEFORE payload verification; a FOREIGN event (different ref) stale-noops and
-        LEAVES the record SEATED for its genuine queued event (AB5-B); the GENUINE owning event with a mismatched payload is
-        an INTEGRITY ABORT that terminalises the record and cancels any residual event ref (AB5-C), never leaving a SEATED
-        record whose only event was consumed. For an advanced/closed round a known SEATED record is terminalised
-        (SUPERSEDED / CANCELLED) not left SEATED (AA3). Idempotence (3) precedes the stale/terminal/target guards, so a
-        post-success replay is duplicate-suppressed. PERSISTENCE (AB3) — `rec` is a READ-ONLY snapshot; the seat is the only
-        CREATE and EVERY subsequent lifecycle change is a keyed UPDATE of setup_retry_records[SetupRetryID]. ABORT CONTRACT
-        (AB2) — every guard-driven abort CAPTURES `disp <- CALL RoundAbort(...)` FIRST, then persists ABORTED + the EXACT
-        returned round_aborted(abort_record) by key, then RETURNs `disp`. RE-READ (AB4) — after the target returns (it may
-        have synchronously closed the round and persisted terminal_closure_pending on this record), the handler RE-READS the
-        persisted record and classifies on the stored terminal_closure_pending: APPLIED (succeeded) / SUPERSEDED (later
-        generation seated) / ABORTED (a target round_aborted(abort_record), AA1 — never CANCELLED) / CANCELLED (a declared
-        stale/terminal disposition, or a closed round). A record whose round closed can NEVER finish APPLIED. Every dispatch
-        ends in exactly one of: a stale/duplicate/terminal no-op that leaves NO SEATED record it owns; the target's
-        enumerated disposition; or a declared round_aborted(abort_record) — NEVER leaving ASSIGNMENT with no controller.
+           # AB1: the exact round_aborted(abort_record) shape once; the re-run target's dispositions are ENUMERATED explicitly.
+  NOTE: AC3/AC4/AC5/AC6/AC7/AC8 (+AB/AA/Z/Y/X/W history): OWNERSHIP (AC5) — resolve the record, then compare
+        dispatched_event_ref (injected by ProcessEventTime, AC2) against the IMMUTABLE rec.seat_event_ref (AC8) BEFORE any
+        payload handling; a FOREIGN ref stale-noops and LEAVES the record SEATED (AC5-B). GUARD ORDER (AC3) — the non-SEATED
+        replay check runs BEFORE payload integrity, so a terminal replay with a corrupted payload is duplicate-suppressed and
+        NEVER aborts a round. SCOPE (AC4) — stale/closed disposition uses the IMMUTABLE record fields (rec.RoundID, the
+        record's round state, rec.TemplateID_at_seat), so a corrupted HISTORICAL retry is terminalised (SUPERSEDED/CANCELLED)
+        and never aborts a later round. INTEGRITY (AC5-C) — only a CURRENT OWNED SEATED record whose envelope/payload is
+        corrupt takes the current-round integrity abort; it cannot remain SEATED with its only event consumed. LEGAL STATUS
+        PATH (AC6/AC7) — every aborting guard goes SEATED -> APPLYING (before RoundAbort) -> ABORTED via SetSetupRetryStatus;
+        no SEATED -> ABORTED and no terminal -> terminal rewrite ever occurs. IDENTITY (AC8) — ownership uses the immutable
+        seat_event_ref; consuming/cancelling changes only event_queue_status. A record whose round closed can NEVER finish
+        APPLIED; every dispatch ends in exactly one of a stale/duplicate/terminal no-op leaving no SEATED record it owns, the
+        target's enumerated disposition, or a declared round_aborted(abort_record).
 
 PROCEDURE CancelSetupRetriesForRound                            # AA2: terminalise every setup-retry record of a closing/superseded round
   INPUTS: RoundContext, closing_RoundID, cancellation_reason, dispatch_or_run_hook_context
           # dispatch_or_run_hook_context: the closer's dispatch envelope (ordinary closure) or the RUN_HOOK envelope
-          #   (horizon close, §20b) — used only to cancel a still-queued event_ref on EQ.
+          #   (horizon close, §20b) — used only to cancel a still-queued event on EQ.
   PRECONDITIONS: called by CloseRoundAssignments for the round being closed (ROUND_ACCEPTED / ROUND_ABORTED), so no
                  terminal or superseded round leaves a SEATED setup-retry record (AA2).
   EFFECTS:
-    # AB3/AA2: iterate the matching SetupRetryIDs (NOT detached record values) in STABLE order and mutate EACH record by KEY.
+    # AB3/AA2/AC8: iterate the matching SetupRetryIDs (NOT detached record values) in STABLE order and mutate EACH record by KEY.
     #   BOTH PARTICIPANT_SETUP and TEMPLATE_REFRESH_SETUP records carry the seat-time RoundID. `snapshot` is READ-ONLY.
     FOR EACH SetupRetryID srid IN SORT({ id : setup_retry_records[id] EXISTS AND setup_retry_records[id].RoundID = closing_RoundID } ascending):
       SET snapshot <- setup_retry_records[srid]                                        # AB3: READ-ONLY snapshot; mutate by key below
       IF snapshot.status = SEATED:
-        # AA2/AB6: cancel its still-queued dispatch, CLEAR the now-dead event reference, then TERMINALISE the record by key.
-        IF snapshot.event_ref != null AND snapshot.event_ref is still pending on EQ: CANCEL snapshot.event_ref on EQ
-        UPDATE setup_retry_records[srid].event_ref <- null                            # AB6: the record owns NO live event
-        UPDATE setup_retry_records[srid].status <- CANCELLED                          # AA2/AB3: keyed persistent UPDATE
+        # AA2/AC8: cancel its still-queued dispatch, mark the QUEUE state CANCELLED (the IMMUTABLE seat_event_ref is PRESERVED
+        #   for replay auditing, AC8), then TERMINALISE the record by key through the transition guard (SEATED -> CANCELLED, AC7).
+        IF snapshot.event_queue_status = QUEUED AND snapshot.seat_event_ref is still pending on EQ: CANCEL snapshot.seat_event_ref on EQ
+        UPDATE setup_retry_records[srid].event_queue_status <- CANCELLED              # AC8: queue state only; seat_event_ref preserved
+        CALL SetSetupRetryStatus(srid, CANCELLED)                                     # AA2/AC7: SEATED -> CANCELLED (legal)
         UPDATE setup_retry_records[srid].target_disposition <- cancellation_reason    # AA2/AB3
       ELSE IF snapshot.status = APPLYING:
-        # AA2/AB4: do NOT overwrite the executing handler's classification; PERSIST terminal_closure_pending by KEY so the
-        #   mid-flight handler RE-READS it (SetupRetryEvent step 8) and finishes ABORTED / CANCELLED, never APPLIED.
+        # AA2/AB4/AC6: do NOT overwrite the executing handler's classification (never APPLYING -> CANCELLED here); PERSIST
+        #   terminal_closure_pending by KEY so the mid-flight handler RE-READS it (SetupRetryEvent) and finishes
+        #   APPLYING -> ABORTED / CANCELLED itself (AC7). This is why an aborting guard first moves SEATED -> APPLYING (AC6).
         UPDATE setup_retry_records[srid].terminal_closure_pending <- true             # AA2/AB3: keyed persistent UPDATE
-      # APPLIED / SUPERSEDED / CANCELLED / ABORTED records are already terminal — left unchanged.
-    # AB6 POST-CONDITIONS for closing_RoundID (every mutation above was a keyed persistent UPDATE, so these hold on the registry):
+      # APPLIED / SUPERSEDED / CANCELLED / ABORTED records are already terminal — left unchanged (AC7: no terminal -> terminal).
+    # AB6/AC8 POST-CONDITIONS for closing_RoundID (every mutation above was a keyed persistent UPDATE, so these hold on the registry):
     ASSERT no id with setup_retry_records[id].RoundID = closing_RoundID has status = SEATED                       # AB6 (1)
-    ASSERT no id with setup_retry_records[id].RoundID = closing_RoundID AND status = SEATED has a queued event_ref on EQ   # AB6 (2) (vacuous given (1))
+    ASSERT no id with setup_retry_records[id].RoundID = closing_RoundID has event_queue_status = QUEUED           # AB6 (2)/AC8: no queued event survives
     ASSERT every id terminalised here (status transitioned to CANCELLED) has a terminal target_disposition        # AB6 (3)
     ASSERT every id with setup_retry_records[id].RoundID = closing_RoundID AND status = APPLYING has terminal_closure_pending = true   # AB6 (4)
     RETURN setup_retries_terminalised(closing_RoundID)
   RETURNS: setup_retries_terminalised(closing_RoundID)
-  NOTE: AA2/AB3/AB6: the ONE named terminaliser invoked by CloseRoundAssignments. It iterates matching SetupRetryIDs and
-        mutates EACH record through a keyed persistent UPDATE (AB3) — `snapshot` is read-only. A SEATED record's queued
-        SetupRetryEvent is cancelled, its event_ref CLEARED to null (AB6: no live event remains), and the record becomes
-        CANCELLED; an APPLYING record is not overwritten — terminal_closure_pending is PERSISTED by key so its mid-flight
-        handler re-reads it (AB4) and finishes ABORTED/CANCELLED. After a round closes, NO setup-retry record of that round
-        remains SEATED and none holds a queued event (AB6 post-conditions), complementing the explicit inclusion of
-        SetupRetryEvent in the CloseRoundAssignments event-cancellation list.
+  NOTE: AA2/AB3/AB6/AC7/AC8: the ONE named terminaliser invoked by CloseRoundAssignments. It iterates matching SetupRetryIDs
+        and mutates EACH record through a keyed persistent UPDATE — `snapshot` is read-only. A SEATED record's queued
+        SetupRetryEvent is cancelled and its event_queue_status set CANCELLED (the immutable seat_event_ref is PRESERVED for
+        auditing, AC8), and the record becomes CANCELLED via SetSetupRetryStatus (SEATED -> CANCELLED). An APPLYING record is
+        NOT overwritten — terminal_closure_pending is PERSISTED so its mid-flight handler finishes it APPLYING -> ABORTED /
+        CANCELLED (so the terminaliser never performs a CANCELLED -> ABORTED or other terminal -> terminal rewrite). After a
+        round closes, NO setup-retry record of that round remains SEATED and none holds a QUEUED event (AB6/AC8 post-conditions).
+
+PROCEDURE SetSetupRetryStatus                                   # AC7: the SOLE status-transition guard for setup_retry_records
+  INPUTS: SetupRetryID, new_status
+  PRECONDITIONS: setup_retry_records[SetupRetryID] EXISTS. This is the ONLY procedure that writes
+                 setup_retry_records[SetupRetryID].status (every SetupRetryEvent / CancelSetupRetriesForRound status change
+                 routes through here); the seating publish CREATES the record with status = SEATED and does not call this.
+  EFFECTS:
+    # AC7 AUTHORITATIVE TRANSITION TABLE (setup_retry_status_transitions):
+    #   SEATED   -> { APPLYING, CANCELLED, SUPERSEDED }
+    #   APPLYING -> { APPLIED, SUPERSEDED, CANCELLED, ABORTED }
+    #   APPLIED, SUPERSEDED, CANCELLED, ABORTED are TERMINAL (no outgoing edge).
+    SET current <- setup_retry_records[SetupRetryID].status
+    IF (current -> new_status) is NOT in setup_retry_status_transitions:
+      # AC7: reject an illegal transition — in particular ANY terminal -> terminal rewrite (e.g. CANCELLED -> ABORTED) — with
+      #   NO mutation. A terminal status is FINAL.
+      RECORD illegal_setup_retry_status_transition(SetupRetryID, current, new_status)
+      RETURN setup_retry_status_transition_rejected(SetupRetryID, current, new_status)
+    UPDATE setup_retry_records[SetupRetryID].status <- new_status                     # AC3/AC7: the ONE keyed status write
+    RETURN setup_retry_status_set(SetupRetryID, new_status)
+  RETURNS: setup_retry_status_set(SetupRetryID, new_status) | setup_retry_status_transition_rejected(SetupRetryID, current, new_status)
+  NOTE: AC7: the authoritative guard for every setup_retry_record.status change. It enforces the transition table and
+        REJECTS every illegal rewrite — most importantly a terminal -> terminal transition (CANCELLED -> ABORTED, etc.) —
+        with no mutation, so a terminal SetupRetryStatus is truly final.
 ```
 
 ## 2a-bis. Round-state transition helper — automatic applicability-entry census (M2)
@@ -3165,8 +3282,8 @@ PROCEDURE SeatRecoveryCompletion                                # P4/P5/Q2/Q3/Q7
                       RecoveryCensusVersion = census_version,
                       RoundID_at_decision = RoundID_current, TemplateID_at_decision = TemplateID_committed,
                       state_version_at_decision = state_version_current})   # Q2/Q7 (deterministic target_time)
-    IF result = scheduled(...):
-      SET recovery_decisions[decision_id].due_event_ref <- result.event_ref
+    IF result = scheduled(event_ref, envelope):   # AC1: ScheduleEvent returns scheduled(EventRef, envelope)
+      SET recovery_decisions[decision_id].due_event_ref <- event_ref        # AC1: canonical EventRef of the RecoveryCompletionDueEvent
       CALL SetRecoveryDecisionStatus(RoundContext, decision_id, SCHEDULED)   # P4/R6: SCHEDULED + REFRESH mirror
       ADD decision_id to pending_recovery_decisions[episode]                # P4/Q3: added ONLY after success
       RETURN recovery_completion_seated(decision_id, outcome)
@@ -3320,12 +3437,12 @@ PROCEDURE SeatRecoveryWork                                       # U1/U3: seat O
                       RecoveryWorkAction = work_action, RecoveryCensusVersion = census_version,
                       RoundID_at_work = RoundID_current, TemplateID_at_work = TemplateID_committed,
                       state_version_at_work = state_version_current})   # U1/U3
-    IF result = scheduled(...):
+    IF result = scheduled(event_ref, envelope):   # AC1: ScheduleEvent returns scheduled(EventRef, envelope)
       # U3 PUBLISH only after success.
       SET recovery_work_seq <- candidate_seq
       SET recovery_work[work_id] <- work_record(episode = episode, action = work_action,
             bound_census_version = census_version, work_generation = 1, work_id = work_id, status = ARMED,
-            work_due_event_ref = result.event_ref, due_at_event_time = null, due_dispatch_envelope = null,
+            work_due_event_ref = event_ref, due_at_event_time = null, due_dispatch_envelope = null,   # AC1: canonical EventRef
             due_status = NOT_DUE)
       SET pending_recovery_work[episode] <- work_id
       RETURN recovery_work_seated(work_id, work_action)
@@ -3779,12 +3896,12 @@ PROCEDURE CompleteSecurityRecovery                              # INTERNAL branc
                       RoundID_at_decision = RoundID_current, TemplateID_at_decision = TemplateID_committed,
                       state_version_at_decision = state_version_current},
                      post_epilogue_context = pctx)                                       # T1/T2/S7: strictly-later seat of the DUE event
-      IF r = scheduled(...):
+      IF r = scheduled(event_ref, envelope):   # AC1: ScheduleEvent returns scheduled(EventRef, envelope)
         # (4) ONLY AFTER a SUCCESSFUL seat: record the deferred-application state. The round stays SECURITY_RECOVERY
         #     and the decision stays APPLYING (the caller does NOT finalise). Store the continuation ref so a later
         #     supersession (Reconcile) or terminal cleanup (S4) can cancel it.
-        SET recovery_decisions[decision_id].continuation_event_ref <- r.event_ref       # S3/S4: cancellable continuation
-        RETURN recovery_branch_result(kind = DEFERRED, continuation_ref = r.event_ref)   # S3: seated, NOT applied
+        SET recovery_decisions[decision_id].continuation_event_ref <- event_ref         # S3/S4/AC1: cancellable continuation EventRef
+        RETURN recovery_branch_result(kind = DEFERRED, continuation_ref = event_ref)     # S3: seated, NOT applied
       # seat REJECTED (e.g. finalised-time / backward) -> stay SECURITY_RECOVERY, no continuation pending.
       RECORD recovery_continuation_not_seated(decision_id, r)
       RETURN recovery_branch_result(kind = FAILED, reason = continuation_not_seated)     # S2: caller -> APPLY_FAILED
@@ -5228,12 +5345,13 @@ PROCEDURE ContinueTemplateRefreshAssignmentSetup               # X3: SOLE owner 
                      {RoundID = RoundID_current, setup_kind = TEMPLATE_REFRESH_SETUP, SetupRetryID = srid,
                       TemplateID_at_seat = TemplateID, TemplateRefreshSetupID = TemplateRefreshSetupID,
                       retry_generation = g, reason = setup_reason})               # W8/X3/Y2/Y3: the retry resumes THIS procedure (never TemplateRefresh) with the EXACT identity
-      IF r = scheduled(event_ref):
-        # Z1: publish the setup_retry_record ATOMICALLY with status = SEATED AFTER the successful ScheduleEvent.
+      IF r = scheduled(event_ref, envelope):   # AC1: ScheduleEvent returns the canonical EventRef + envelope
+        # Z1/AC8: publish the setup_retry_record ATOMICALLY with status = SEATED, seat_event_ref = the EventRef (immutable),
+        #   event_queue_status = QUEUED, AFTER the successful ScheduleEvent. The seat is the ONLY CREATE (AB3).
         ATOMICALLY: SET setup_retry_records[srid] <- setup_retry_record(SetupRetryID = srid, setup_kind = TEMPLATE_REFRESH_SETUP,
               RoundID = RoundID_current, TemplateID_at_seat = TemplateID, TemplateRefreshSetupID = TemplateRefreshSetupID,
-              retry_generation = g, event_ref = event_ref, status = SEATED, target_disposition = null,
-              terminal_closure_pending = false)   # Z1/AA2
+              retry_generation = g, seat_event_ref = event_ref, event_queue_status = QUEUED, status = SEATED,
+              target_disposition = null, terminal_closure_pending = false)   # Z1/AA2/AC1/AC8
         RETURN template_refresh_retry_seated(srid, setup_reason)
     RETURN CALL RoundAbort(RoundContext, reason = template_refresh_failed(setup_reason),
                            dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # declared abort
