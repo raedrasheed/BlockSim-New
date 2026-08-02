@@ -40,9 +40,23 @@ class Stage2Config:
 
     # --- deterministic round timing (seconds) ---
     wake_latency: float = 1.0             # StartWake -> WakeCompleteEvent latency
-    hash_step_time: float = 5.0           # one modeled hash-work unit
-    solution_after_units: int = 3         # a solution is discovered after this many units
-    round_span: float = 100.0             # nominal active span before acceptance in a round
+
+    # --- scientific search core (S2A-1/S2A-2) ---
+    nonce_domain_size: int = 4000         # explicit finite nonce domain [0, D)
+    difficulty: int = 1000               # fixed confirmatory difficulty (sets the work target)
+    batch_size: int = 50                 # declared nonce batch per HashWorkEvent
+    base_hash_rate: float = 100.0        # base nonces/second per miner
+    heterogeneous_hash_rates: bool = True  # vary hash rate by miner to exercise the idle policy
+    template_seed: int = 20260803        # deterministic winning-nonce sampler seed
+
+    # test-injection ONLY (disabled in confirmatory runs); NOT a success mechanism.
+    solution_after_units: int = 0        # 0 => disabled; real success is hash/target vs the sampled winner
+
+    def hash_rate_for(self, index: int) -> float:
+        """Deterministic per-miner hash rate (heterogeneous so ranges finish at different times)."""
+        if not self.heterogeneous_hash_rates:
+            return self.base_hash_rate
+        return self.base_hash_rate * (1.0 + (index % 4))   # 1x .. 4x
 
     # --- participation (idle policy) ---
     reserve_fraction: float = 0.2   # fraction of genesis miners held in RESERVE (P_listen)

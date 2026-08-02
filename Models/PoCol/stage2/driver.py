@@ -9,7 +9,8 @@ from __future__ import annotations
 from typing import Any
 
 from .events import (Driver, EventQueue, Outcome, ScheduleEvent, TerminalRotation,
-                     ordinary_dispatch_origin, next_representable_simulation_time)
+                     CancelQueuedEvent, ordinary_dispatch_origin,
+                     next_representable_simulation_time)
 from .context import RunContext, EXACT_ROUND, NEXT_AVAILABLE_ROUND, RUN_LEVEL
 
 # round states that admit each driver kind's event_type.
@@ -54,15 +55,47 @@ def _legal_effective_time(run_ctx: RunContext, requested: float) -> float:
     return t
 
 
-def _publish_seat(run_ctx: RunContext, key: Any, dr: Any, event_ref: Any) -> None:
-    """AI4: reverse binding + PENDING -> SEATED + de-index, atomically with the seat."""
+def SeatDriverEventTransaction(run_ctx: RunContext, key: Any, dr: Any, event_type: str,
+                               target: float, microphase: str, payload: Any,
+                               origin: Any) -> Outcome:
+    """S2A-5: schedule + publish (reverse binding + PENDING->SEATED) as ONE transaction.
+
+    Every step's result is captured and inspected.  If scheduler insertion succeeds but
+    request publication fails, the newly queued event is cancelled and the reverse
+    binding removed (compensating transaction), and a structured seat-publication failure
+    is returned — the split happy-path publication is eliminated.
+    """
+    eq = run_ctx.event_queue
+    r = ScheduleEvent(eq, run_ctx.current_round_context, event_type, target, microphase,
+                      payload, origin)
+    if r.kind != "scheduled":
+        return Outcome("seat_scheduling_failed", reason=r)
+    event_ref = r.event_ref
+    # injection hook (tests only): scheduler committed, request publication now fails.
+    if getattr(run_ctx, "force_seat_publication_failure", False):
+        CancelQueuedEvent(eq, run_ctx, event_ref,
+                          cancellation_reason="seat_publication_failure_compensation")
+        run_ctx.driver_event_seat.pop(key, None)
+        run_ctx.driver_request_by_seat_event_ref.pop(event_ref, None)
+        return Outcome("seat_publication_failed", event_ref=event_ref,
+                       reason=Outcome("forced_seat_publication_failure"))
+    # publish the reverse binding, then drive PENDING -> SEATED; capture the result.
     run_ctx.driver_event_seat[key] = event_ref
     run_ctx.driver_request_by_seat_event_ref[event_ref] = dr.DriverRequestID
     dr.seated_event_ref = event_ref
-    run_ctx.set_driver_request_status(
+    st = run_ctx.set_driver_request_status(
         dr.DriverRequestID, expected_status="PENDING", new_status="SEATED",
         disposition=Outcome("driver_request_seated", event_ref=event_ref))
+    if st.kind != "driver_request_status_set":
+        # compensate: remove the binding FIRST, then cancel the queued event.
+        run_ctx.driver_event_seat.pop(key, None)
+        run_ctx.driver_request_by_seat_event_ref.pop(event_ref, None)
+        dr.seated_event_ref = None
+        CancelQueuedEvent(eq, run_ctx, event_ref,
+                          cancellation_reason="seat_publication_failure_compensation")
+        return Outcome("seat_publication_failed", event_ref=event_ref, reason=st)
     run_ctx.pending_driver_request_index.discard(dr.DriverRequestID)
+    return Outcome("seat_committed", event_ref=event_ref)
 
 
 def _seat_live(run_ctx: RunContext, key: Any):
@@ -86,6 +119,7 @@ def SeatMinerRegister(run_ctx: RunContext, driver_request: Any,
         return Outcome("miner_register_already_seated",
                        DriverRequestID=dr.DriverRequestID, event_ref=live)
     jr = dr.payload["join_request"]
+    rid_at_seat = run_ctx.current_round_context.RoundID
     if admission_mode == "IN_DISPATCH_GENESIS":
         target = eq.current_event_time
         origin = ordinary_dispatch_origin(eq)
@@ -98,14 +132,15 @@ def SeatMinerRegister(run_ctx: RunContext, driver_request: Any,
                         target_event_time=target,
                         intended_round_scope=dr.round_scope,
                         run_ctx=run_ctx, eq=eq)
-    r = ScheduleEvent(eq, run_ctx.current_round_context, "MinerRegisterEvent",
-                      target, "REGISTRATION", {"join_request": jr}, origin)
-    if r.kind == "scheduled":
-        _publish_seat(run_ctx, key, dr, r.event_ref)
+    payload = {"join_request": jr, "DriverRequestID": dr.DriverRequestID,   # S2A-4 binding
+               "round_scope": dr.round_scope, "RoundID_at_seat": rid_at_seat}
+    tx = SeatDriverEventTransaction(run_ctx, key, dr, "MinerRegisterEvent", target,
+                                    "REGISTRATION", payload, origin)
+    if tx.kind == "seat_committed":
         return Outcome("miner_register_seated", DriverRequestID=dr.DriverRequestID,
-                       event_ref=r.event_ref)
+                       event_ref=tx.event_ref)
     return Outcome("miner_register_seat_failed", DriverRequestID=dr.DriverRequestID,
-                   reason=r)
+                   reason=tx)
 
 
 # --------------------------------------------------------------------- SeatReserveActivate
@@ -127,17 +162,17 @@ def SeatReserveActivate(run_ctx: RunContext, driver_request: Any) -> Outcome:
                     source_event_time=dr.driver_admission_time,
                     target_event_time=target, intended_round_scope=dr.round_scope,
                     run_ctx=run_ctx, eq=eq)
-    r = ScheduleEvent(eq, rc, "ReserveActivateEvent", target, "RECOVERY_ACTIVATE",
-                      {"RoundID_at_seat": dr.payload["RoundID_at_seat"],
-                       "deficit": dr.payload["deficit"], "activation_seq": activation_seq},
-                      origin)
-    if r.kind == "scheduled":
-        _publish_seat(run_ctx, key, dr, r.event_ref)
+    payload = {"RoundID_at_seat": dr.payload["RoundID_at_seat"],
+               "deficit": dr.payload["deficit"], "activation_seq": activation_seq,
+               "DriverRequestID": dr.DriverRequestID, "round_scope": dr.round_scope}  # S2A-4 binding
+    tx = SeatDriverEventTransaction(run_ctx, key, dr, "ReserveActivateEvent", target,
+                                    "RECOVERY_ACTIVATE", payload, origin)
+    if tx.kind == "seat_committed":
         rc.reserve_activation_seq = activation_seq + 1
         return Outcome("reserve_activate_seated", DriverRequestID=dr.DriverRequestID,
-                       event_ref=r.event_ref)
+                       event_ref=tx.event_ref)
     return Outcome("reserve_activate_seat_failed", DriverRequestID=dr.DriverRequestID,
-                   reason=r)
+                   reason=tx)
 
 
 # --------------------------------------------------------------------- SeatNextRoundBootstrap

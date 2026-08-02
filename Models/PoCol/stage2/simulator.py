@@ -23,7 +23,9 @@ from .events import (CancelQueuedEvent, EventQueue, Outcome, ScheduleEvent,
                      candidate_template_id)
 from .context import (BootstrapRequest, RunContext, RoundContext, EXACT_ROUND,
                       NEXT_AVAILABLE_ROUND)
-from .driver import (SeatNextRoundBootstrap, SeatPendingDriverRequests, SeatMinerRegister)
+from .driver import (SeatNextRoundBootstrap, SeatPendingDriverRequests, SeatMinerRegister,
+                     scope_admits)
+from .search import make_template, partition_domain, MinerSearchState, sha256_int
 
 
 # ============================================================ RunInitialise
@@ -109,6 +111,9 @@ def _seat_template_commit(run_ctx: RunContext, rid: Any) -> Outcome:
     key = ("TEMPLATE_COMMIT", rid)
     if key in run_ctx.driver_event_seat:
         return Outcome("template_commit_already_seated")
+    if getattr(run_ctx, "force_template_commit_seat_failure", False):   # TV326 injection
+        return Outcome("template_commit_seat_failed",
+                       reason=Outcome("forced_template_commit_seat_failure"))
     template = {"id": f"tpl-{rid}"}
     r = ScheduleEvent(eq, run_ctx.current_round_context, "TemplateCommitEvent",
                       eq.current_event_time, "TEMPLATE_COMMIT",
@@ -120,9 +125,34 @@ def _seat_template_commit(run_ctx: RunContext, rid: Any) -> Outcome:
     return Outcome("template_commit_seat_failed", reason=r)
 
 
+def _verify_driver_binding(run_ctx: RunContext, rc: RoundContext, payload: Dict[str, Any],
+                           er: Any, kind: str) -> Outcome:
+    """S2A-4: verify exact request / round ownership BEFORE any domain mutation."""
+    drid = payload.get("DriverRequestID")
+    dr = run_ctx.driver_request_registry.get(drid)
+    if dr is None:
+        return Outcome("driver_binding_unknown_request", DriverRequestID=drid)
+    if dr.status != "SEATED":
+        return Outcome("driver_binding_not_seated", DriverRequestID=drid, status=dr.status)
+    if run_ctx.driver_request_by_seat_event_ref.get(er) != drid:
+        return Outcome("driver_binding_reverse_mismatch", DriverRequestID=drid, event_ref=er)
+    if scope_admits(payload.get("round_scope"), kind, rc) != "SCOPE_ADMIT":
+        return Outcome("driver_binding_scope_stale", round_scope=payload.get("round_scope"),
+                       RoundID=rc.RoundID)
+    if payload.get("RoundID_at_seat") != rc.RoundID:
+        return Outcome("driver_binding_round_mismatch",
+                       RoundID_at_seat=payload.get("RoundID_at_seat"), RoundID=rc.RoundID)
+    return Outcome("driver_binding_ok", DriverRequestID=drid)
+
+
 def _handle_miner_register(run_ctx: RunContext, payload: Dict[str, Any],
                            envelope: Dict[str, Any]) -> Outcome:
     rc = run_ctx.current_round_context
+    er = run_ctx.event_queue.current_event_ref
+    # S2A-4: a stale / cancelled / mismatched request performs NO domain effect.
+    guard = _verify_driver_binding(run_ctx, rc, payload, er, kind="MINER_JOIN")
+    if guard.kind != "driver_binding_ok":
+        return Outcome("miner_register_no_effect", reason=guard)
     jr = payload["join_request"]
     mid = jr["MinerID"]
     t = run_ctx.event_queue.current_event_time
@@ -150,7 +180,12 @@ def _handle_template_commit(run_ctx: RunContext, payload: Dict[str, Any],
     rc = run_ctx.current_round_context
     if payload["RoundID_at_seat"] != rc.RoundID:
         return Outcome("template_commit_stale_noop")
-    rc.TemplateID_committed = candidate_template_id(payload["candidate_template"])
+    cfg = run_ctx.config
+    # S2A-1: commit the IMMUTABLE common block template + explicit finite nonce domain.
+    rc.template = make_template(RoundID=rc.RoundID, difficulty=cfg.difficulty,
+                                nonce_domain_size=cfg.nonce_domain_size,
+                                seed=cfg.template_seed + run_ctx.round_seq)
+    rc.TemplateID_committed = rc.template.TemplateID
     rc.transition("ASSIGNMENT")
     if not rc.barrier_satisfied:
         return Outcome("template_committed_participant_setup_deferred", RoundID=rc.RoundID)
@@ -184,7 +219,9 @@ def _handle_prepare_participants(run_ctx: RunContext, payload: Dict[str, Any],
         return Outcome("participant_setup_stale_noop")
     rc.participant_setup_seated = True
     cfg = run_ctx.config
-    # designate the reserve pool once (idle policy: reserve draws P_listen, never hashes).
+    # participation/reserve policy (SEPARATE from the idle policy): a fixed reserve pool
+    # is held in RESERVE (low-power standby); every other registered miner is an ACTIVE
+    # participant that is assigned a disjoint nonce range and MUST hash.
     all_ids = sorted(run_ctx.miners.keys())
     if not hasattr(run_ctx, "reserve_miner_ids"):
         n_reserve = int(math.floor(cfg.reserve_fraction * len(all_ids)))
@@ -192,24 +229,29 @@ def _handle_prepare_participants(run_ctx: RunContext, payload: Dict[str, Any],
     participants = [mid for mid in all_ids if mid not in run_ctx.reserve_miner_ids]
     if not participants:
         participants = all_ids[:1]
-    rc.leader_miner_id = participants[0]
     t = run_ctx.event_queue.current_event_time
-    # reserve miners -> RESERVE (low-power standby); participants -> WAKING then wake-complete.
     for mid in run_ctx.reserve_miner_ids:
-        m = run_ctx.miners[mid]
-        if m.state != "RESERVE":
+        if run_ctx.miners[mid].state != "RESERVE":
             run_ctx.apply_miner_state_transition(mid, "RESERVE", t)
-    aseq = 0
-    for mid in participants:
+    # S2A-1: partition the finite nonce domain into DISJOINT per-miner ranges + search state.
+    ranges = partition_domain(cfg.nonce_domain_size, participants)
+    rc.search_states = {}
+    for idx, mid in enumerate(sorted(participants)):
+        start, end = ranges[mid]
         aid = f"A-{rc.RoundID}-{mid}"
         version = 1
+        st = MinerSearchState(MinerID=mid, AssignmentID=aid, assignment_version=version,
+                              hash_rate=cfg.hash_rate_for(idx), range_start=start,
+                              range_end=end, active_power=cfg.P_hash, idle_power=cfg.P_listen)
+        rc.search_states[mid] = st
         rc.assignments[aid] = {"MinerID": mid, "AssignmentID": aid,
-                               "assignment_version": version, "coverage_state": "OPEN"}
+                               "assignment_version": version, "range": (start, end),
+                               "coverage_state": "OPEN"}
         run_ctx.apply_miner_state_transition(mid, "WAKING", t)
         _start_wake(run_ctx, rc, mid, aid, version)
-        aseq += 1
     rc.transition("SOLUTION_PROPAGATION")
-    return Outcome("participant_set_prepared", participants=len(participants))
+    return Outcome("participant_set_prepared", participants=len(participants),
+                   nonce_domain_size=cfg.nonce_domain_size)
 
 
 def _start_wake(run_ctx: RunContext, rc: RoundContext, mid: Any, aid: Any,
@@ -218,72 +260,109 @@ def _start_wake(run_ctx: RunContext, rc: RoundContext, mid: Any, aid: Any,
     eq = run_ctx.event_queue
     cfg = run_ctx.config
     target = eq.current_event_time + cfg.wake_latency
-    r = ScheduleEvent(eq, rc, "WakeCompleteEvent", target, "WAKE_COMPLETE",
-                      {"MinerID": mid, "AssignmentID": aid, "assignment_version": version},
-                      ordinary_dispatch_origin(eq))
-    return r
+    return ScheduleEvent(eq, rc, "WakeCompleteEvent", target, "WAKE_COMPLETE",
+                         {"MinerID": mid, "AssignmentID": aid,
+                          "assignment_version": version}, ordinary_dispatch_origin(eq))
 
 
 def _handle_wake_complete(run_ctx: RunContext, payload: Dict[str, Any],
                           envelope: Dict[str, Any]) -> Outcome:
     rc = run_ctx.current_round_context
     mid = payload["MinerID"]
-    aid = payload["AssignmentID"]
     if rc.round_state in ("ROUND_ACCEPTED", "ROUND_ABORTED"):
         return Outcome("wake_complete_stale_noop", MinerID=mid)
-    if aid not in rc.assignments or run_ctx.miners[mid].state != "WAKING":
+    st = rc.search_states.get(mid)
+    if st is None or run_ctx.miners[mid].state != "WAKING":
         return Outcome("wake_complete_stale_noop", MinerID=mid)
     t = run_ctx.event_queue.current_event_time
     run_ctx.apply_miner_state_transition(mid, "ACTIVE_HASHING", t)
-    if mid == rc.leader_miner_id:
-        _seat_hash_work(run_ctx, rc, mid, aid, unit_index=0, at_time=t)
+    st.active_start = t
+    # S2A-1: EVERY active miner schedules hash work (not just one leader).
+    _seat_hash_work(run_ctx, rc, st, at_time=t)
     return Outcome("wake_completed", MinerID=mid)
 
 
-def _seat_hash_work(run_ctx: RunContext, rc: RoundContext, mid: Any, aid: Any,
-                    unit_index: int, at_time: float) -> Outcome:
+def _seat_hash_work(run_ctx: RunContext, rc: RoundContext, st: Any,
+                    at_time: float) -> Outcome:
     eq = run_ctx.event_queue
-    r = ScheduleEvent(eq, rc, "HashWorkEvent", at_time, "HASH_WORK",
-                      {"MinerID": mid, "AssignmentID": aid, "unit_index": unit_index},
-                      ordinary_dispatch_origin(eq) if eq.current_event_ref is not None
-                      else _post_wake_origin(run_ctx, at_time))
-    return r
-
-
-def _post_wake_origin(run_ctx: RunContext, at_time: float):  # pragma: no cover
-    # HashWork is always seated from inside a dispatch (WakeComplete or a prior HashWork),
-    # so this fallback is unused; kept for defensive clarity.
-    from .events import PostEpilogue
-    return PostEpilogue(source_event_time=at_time - 1e-9, run_ctx=run_ctx,
-                        eq=run_ctx.event_queue)
+    return ScheduleEvent(eq, rc, "HashWorkEvent", at_time, "HASH_WORK",
+                         {"MinerID": st.MinerID, "AssignmentID": st.AssignmentID,
+                          "unit_index": st.searched_count}, ordinary_dispatch_origin(eq))
 
 
 def _handle_hash_work(run_ctx: RunContext, payload: Dict[str, Any],
                       envelope: Dict[str, Any]) -> Outcome:
+    """S2A-1/S2A-2: real batched nonce search under the immutable template."""
     rc = run_ctx.current_round_context
     if rc.round_state in ("ROUND_ACCEPTED", "ROUND_ABORTED"):
         return Outcome("hash_work_stale_noop")
     cfg = run_ctx.config
     mid = payload["MinerID"]
-    aid = payload["AssignmentID"]
-    idx = payload["unit_index"]
+    st = rc.search_states.get(mid)
+    if st is None or st.completed:
+        return Outcome("hash_work_stale_noop", MinerID=mid)
+    tpl = rc.template
+    batch_end = min(st.cursor + cfg.batch_size, st.range_end)
+    for offset in range(0, batch_end - st.cursor):
+        nonce = st.cursor + offset
+        _ = sha256_int(tpl.header_bytes, nonce)          # real per-nonce work primitive (counted)
+        if tpl.is_solution(nonce):                        # success model B (sampled winner)
+            st.searched_count += offset + 1
+            st.cursor += offset + 1
+            st.completed = True
+            st.completion_kind = "SOLUTION"
+            sol_time = st.active_start + st.searched_count / st.hash_rate
+            if run_ctx.round_seq in cfg.abort_round_seqs:  # E2E-2 injection
+                return RoundAbort(run_ctx, rc, reason="forced_abort_scenario", envelope={})
+            return _seat_acceptance(run_ctx, rc, at_time=sol_time, winner=mid,
+                                    winning_nonce=nonce)
+    searched_this = batch_end - st.cursor
+    st.searched_count += searched_this
+    st.cursor = batch_end
+    if st.cursor >= st.range_end:                          # range exhaustion -> post-range idle
+        st.completed = True
+        st.completion_kind = "EXHAUSTED"
+        exhaust_time = st.active_start + st.searched_count / st.hash_rate
+        _seat_range_exhaust(run_ctx, rc, st, at_time=exhaust_time)
+        return Outcome("range_exhaust_seated", MinerID=mid, searched=st.searched_count)
+    next_time = st.active_start + st.searched_count / st.hash_rate
+    _seat_hash_work(run_ctx, rc, st, at_time=next_time)    # continuation
+    return Outcome("hash_work_continued", MinerID=mid, searched=st.searched_count)
+
+
+def _seat_range_exhaust(run_ctx: RunContext, rc: RoundContext, st: Any,
+                        at_time: float) -> Outcome:
+    eq = run_ctx.event_queue
+    return ScheduleEvent(eq, rc, "RangeExhaustEvent", at_time, "RANGE_EXHAUST_ADJUDICATE",
+                         {"MinerID": st.MinerID, "AssignmentID": st.AssignmentID,
+                          "RoundID_at_seat": rc.RoundID,
+                          "TemplateID_at_seat": rc.TemplateID_committed},
+                         ordinary_dispatch_origin(eq))
+
+
+def _handle_range_exhaust(run_ctx: RunContext, payload: Dict[str, Any],
+                          envelope: Dict[str, Any]) -> Outcome:
+    """POST-RANGE IDLE POLICY: a miner that exhausted its range moves to idle power."""
+    rc = run_ctx.current_round_context
+    mid = payload["MinerID"]
+    if rc.round_state in ("ROUND_ACCEPTED", "ROUND_ABORTED"):
+        return Outcome("range_exhaust_stale_noop", MinerID=mid)
+    m = run_ctx.miners.get(mid)
     t = run_ctx.event_queue.current_event_time
-    if idx + 1 >= cfg.solution_after_units:
-        # scenario injection: a designated round aborts instead of accepting (E2E-2).
-        if run_ctx.round_seq in cfg.abort_round_seqs:
-            return RoundAbort(run_ctx, rc, reason="forced_abort_scenario", envelope={})
-        # solution discovered: seat AcceptanceEvent at a strictly-later time.
-        return _seat_acceptance(run_ctx, rc, at_time=t + cfg.hash_step_time)
-    return _seat_hash_work(run_ctx, rc, mid, aid, unit_index=idx + 1,
-                           at_time=t + cfg.hash_step_time)
+    if m is not None and m.state == "ACTIVE_HASHING":
+        run_ctx.apply_miner_state_transition(mid, "LOW_POWER_LISTEN", t)   # idle policy
+    return Outcome("range_exhausted_idle", MinerID=mid)
 
 
-def _seat_acceptance(run_ctx: RunContext, rc: RoundContext, at_time: float) -> Outcome:
+def _seat_acceptance(run_ctx: RunContext, rc: RoundContext, at_time: float,
+                     winner: Any = None, winning_nonce: Any = None) -> Outcome:
     if rc.block_accepted or rc.acceptance_seq > 0:
         return Outcome("acceptance_already_seated")
     eq = run_ctx.event_queue
     seq = rc.acceptance_seq
     rc.acceptance_seq += 1
+    rc.winner_miner_id = winner
+    rc.winning_nonce = winning_nonce
     r = ScheduleEvent(eq, rc, "AcceptanceEvent", at_time, "ACCEPTANCE_FINALIZE",
                       {"RoundID_at_seat": rc.RoundID, "acceptance_seq": seq},
                       ordinary_dispatch_origin(eq))
@@ -419,6 +498,7 @@ _HANDLERS = {
     "PrepareParticipantsEvent": _handle_prepare_participants,
     "WakeCompleteEvent": _handle_wake_complete,
     "HashWorkEvent": _handle_hash_work,
+    "RangeExhaustEvent": _handle_range_exhaust,
     "AcceptanceEvent": _handle_acceptance,
 }
 
@@ -496,6 +576,56 @@ def FinalizeSimulationRunNoRound(run_ctx: RunContext, reason: str) -> Outcome:
     return Outcome("run_finalised_no_round", reason=reason)
 
 
+def FinalizeSimulationRunPartial(run_ctx: RunContext, partial_end_time: float,
+                                 reason: str) -> Outcome:
+    """S2A-6: a legal partial-run finalizer — leaves NO future live event/request.
+
+    Cancels every remaining QUEUED event (reconciling any bound driver request via the
+    queue owner), terminalises every non-terminal driver request, closes current
+    assignments, settles residency ONLY through ``partial_end_time``, asserts no live
+    event/request remains, and records a partial-run disposition (never a full-horizon run).
+    """
+    if run_ctx.run_finalised:
+        return Outcome("run_already_finalised")
+    eq = run_ctx.event_queue
+    # cancel every remaining QUEUED event through the ONE queue owner (reconciles bindings).
+    cancelled = 0
+    for ref in list(eq.queued_event_registry.keys()):
+        if eq.queued_event_registry[ref].queue_status == "QUEUED":
+            res = CancelQueuedEvent(eq, run_ctx, ref, cancellation_reason="partial_finalization")
+            if res.kind == "event_cancelled":
+                cancelled += 1
+    # terminalise every still-live driver request (PENDING -> CANCELLED; SEATED -> CANCELLED).
+    for drid, dr in list(run_ctx.driver_request_registry.items()):
+        if dr.status == "PENDING":
+            run_ctx.set_driver_request_status(drid, "PENDING", "CANCELLED",
+                                              Outcome("driver_request_partial_finalized"))
+            run_ctx.pending_driver_request_index.discard(drid)
+        elif dr.status == "SEATED":
+            run_ctx.set_driver_request_status(drid, "SEATED", "CANCELLED",
+                                              Outcome("driver_request_partial_finalized"))
+    # close the current round's assignments (any still-active miner -> idle at partial end).
+    rc = run_ctx.current_round_context
+    if rc is not None:
+        for a in rc.assignments.values():
+            m = run_ctx.miners.get(a["MinerID"])
+            if m is not None and m.state in ("ACTIVE_HASHING", "WAKING", "EXHAUSTED_PENDING"):
+                run_ctx.apply_miner_state_transition(a["MinerID"], "LOW_POWER_LISTEN",
+                                                     partial_end_time)
+    # settle residency + attribute energy ONLY through partial_end_time.
+    run_ctx.settle_residency_to(partial_end_time)
+    # assertions: no live event/request remains.
+    assert not any(r.queue_status in ("QUEUED", "DISPATCHING")
+                   for r in eq.queued_event_registry.values()), "live queued event after partial"
+    assert not any(dr.status in ("PENDING", "SEATED")
+                   for dr in run_ctx.driver_request_registry.values()), "live request after partial"
+    run_ctx.run_finalised = True
+    run_ctx.run_end_time = partial_end_time
+    run_ctx.run_disposition = reason
+    return Outcome("run_finalised_partial", partial_end_time=partial_end_time, reason=reason,
+                   cancelled_events=cancelled)
+
+
 # ============================================================ RunEventLoopToHorizon
 def RunEventLoopToHorizon(run_ctx: RunContext) -> Outcome:
     """The RUN-LEVEL driver (O1/P1/AH4/AH6/AI6)."""
@@ -508,11 +638,11 @@ def RunEventLoopToHorizon(run_ctx: RunContext) -> Outcome:
     while True:
         SeatPendingDriverRequests(run_ctx)
         if run_ctx.next_round_bootstrap_status == "NEXT_ROUND_BOOTSTRAP_FAILED":
-            # AI6: deterministic terminate-partial at the declared partial end time.
+            # AI6/S2A-6: deterministic terminate-partial at the declared partial end time.
             partial_end = (run_ctx.prior_round_terminal_state or {}).get(
                 "round_terminal_time", eq.earliest_time() or T)
-            FinalizeSimulationRun(run_ctx, end_time=partial_end,
-                                  disposition="next_round_bootstrap_failed")
+            FinalizeSimulationRunPartial(run_ctx, partial_end_time=partial_end,
+                                         reason="next_round_bootstrap_failed")
             return Outcome("run_completed_partial",
                            partial_end_time=partial_end,
                            terminal_publication_result=run_ctx.terminal_publication_result)

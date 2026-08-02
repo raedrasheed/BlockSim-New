@@ -18,10 +18,17 @@ from .context import (RunContext, RoundContext, BootstrapRequest, DriverRequest,
                       MinerRecord, EXACT_ROUND, NEXT_AVAILABLE_ROUND, RUN_LEVEL,
                       MINER_STATES, DRIVER_REQUEST_STATUSES)
 from .driver import (SeatMinerRegister, SeatReserveActivate, SeatNextRoundBootstrap,
-                     SeatPendingDriverRequests, scope_admits)
+                     SeatPendingDriverRequests, SeatDriverEventTransaction, scope_admits)
+from .search import (Template, MinerSearchState, make_template, partition_domain,
+                     sha256_int, target_for_difficulty, WithoutReplacementSampler,
+                     SUCCESS_MODEL, WORK_PRIMITIVE)
 from .simulator import (RunInitialise, RunEventLoopToHorizon, ProcessEventTime,
                         RoundAbort, FinalizeSimulationRun, FinalizeSimulationRunNoRound,
-                        run_simulation)
+                        FinalizeSimulationRunPartial, run_simulation)
+from .energy_experiment import (run_energy_experiment, EnergyExperimentResult,
+                                MinerEnergyRow)
+from .adapter import (run_pocol_stage2, stage2config_from_blocksim, results_schema,
+                      RESULT_SCHEMA_VERSION)
 
 __all__ = [
     "Stage2Config", "A1_BASELINE_KWH", "JOULES_PER_KWH", "a1_continuous_control_kwh",
@@ -35,5 +42,12 @@ __all__ = [
     "SeatMinerRegister", "SeatReserveActivate", "SeatNextRoundBootstrap",
     "SeatPendingDriverRequests", "scope_admits",
     "RunInitialise", "RunEventLoopToHorizon", "ProcessEventTime", "RoundAbort",
-    "FinalizeSimulationRun", "FinalizeSimulationRunNoRound", "run_simulation",
+    "FinalizeSimulationRun", "FinalizeSimulationRunNoRound", "FinalizeSimulationRunPartial",
+    "run_simulation",
+    "SeatDriverEventTransaction",
+    "Template", "MinerSearchState", "make_template", "partition_domain", "sha256_int",
+    "target_for_difficulty", "WithoutReplacementSampler", "SUCCESS_MODEL", "WORK_PRIMITIVE",
+    "run_energy_experiment", "EnergyExperimentResult", "MinerEnergyRow",
+    "run_pocol_stage2", "stage2config_from_blocksim", "results_schema",
+    "RESULT_SCHEMA_VERSION",
 ]

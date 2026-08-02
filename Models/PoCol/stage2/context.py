@@ -106,6 +106,7 @@ class RunContext:
         self.RunID = run_id
         self.config = config
         self.event_queue = EventQueue(config.horizon_T)
+        self.event_queue.owner_run_context = self   # exact-ownership check (S2A-4/backlog-11)
         self.last_finalised_event_time: Optional[float] = None   # AI2 frontier
         self.run_horizon_T = config.horizon_T
         self.run_finalised = False

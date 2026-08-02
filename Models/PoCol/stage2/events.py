@@ -87,10 +87,16 @@ DESCRIPTORS: Dict[str, EventDescriptor] = {
                         ("RoundID_at_seat", "TemplateID_at_seat"),
                         ("RoundID_at_seat", "TemplateID_at_seat"), recv_env=True),
         EventDescriptor("MinerRegisterEvent", "REGISTRATION", ("join_request_id",),
-                        ("join_request",), recv_env=True),
+                        ("join_request", "DriverRequestID", "round_scope",
+                         "RoundID_at_seat"), recv_env=True),
         EventDescriptor("ReserveActivateEvent", "RECOVERY_ACTIVATE",
                         ("RoundID_at_seat", "activation_seq"),
-                        ("RoundID_at_seat", "deficit", "activation_seq"), recv_env=True),
+                        ("RoundID_at_seat", "deficit", "activation_seq",
+                         "DriverRequestID", "round_scope"), recv_env=True),
+        EventDescriptor("RangeExhaustEvent", "RANGE_EXHAUST_ADJUDICATE",
+                        ("MinerID", "AssignmentID"),
+                        ("MinerID", "AssignmentID", "RoundID_at_seat",
+                         "TemplateID_at_seat"), recv_env=True),
         EventDescriptor("WakeCompleteEvent", "WAKE_COMPLETE",
                         ("MinerID", "AssignmentID", "assignment_version"),
                         ("MinerID", "AssignmentID", "assignment_version"), recv_env=True),
@@ -221,6 +227,7 @@ class EventQueue:
     """The sole dispatch/scheduling state (STAGE_01 s.0.7e)."""
 
     def __init__(self, run_horizon_T: float):
+        self.owner_run_context: Any = None   # set by the owning RunContext (exact-ownership check)
         self.event_queue: Dict[EventRef, Tuple] = {}   # ref -> total-order key
         self.queued_event_registry: Dict[EventRef, QueuedEventRecord] = {}
         self.current_event_time: Optional[float] = None
@@ -285,7 +292,10 @@ def ScheduleEvent(eq: EventQueue, round_context: Any, event_type: str,
         dc = 0
     elif isinstance(scheduling_origin, Driver):
         d = scheduling_origin
-        if (d.eq is not eq) or (getattr(d.run_ctx, "event_queue", None) is not eq):
+        # S2A-4/backlog-11: EXACT ownership — the carried EQ must be this EQ and the carried
+        # RunContext must be the EQ's OWNER (a foreign RunContext sharing the same EQ is rejected).
+        if (d.eq is not eq) or (d.run_ctx is not eq.owner_run_context) \
+                or (getattr(d.run_ctx, "event_queue", None) is not eq):
             return Outcome("rejected_driver_context_mismatch", event_type=event_type)
         if not driver_kind_may_seat(d.driver_source_kind, event_type):
             return Outcome("rejected_driver_kind_event_type_mismatch",
@@ -306,7 +316,8 @@ def ScheduleEvent(eq: EventQueue, round_context: Any, event_type: str,
         dc = 0
     elif isinstance(scheduling_origin, TerminalRotation):
         tr = scheduling_origin
-        if (tr.eq is not eq) or (getattr(tr.run_ctx, "event_queue", None) is not eq):
+        if (tr.eq is not eq) or (tr.run_ctx is not eq.owner_run_context) \
+                or (getattr(tr.run_ctx, "event_queue", None) is not eq):
             return Outcome("rejected_driver_context_mismatch", event_type=event_type)
         if not driver_kind_may_seat("ROUND_ROTATION_BOOTSTRAP", event_type):
             return Outcome("rejected_driver_kind_event_type_mismatch",
@@ -388,13 +399,17 @@ def CancelQueuedEvent(eq: EventQueue, run_ctx: Any, event_ref: EventRef,
         eq.event_queue.pop(event_ref, None)
         rec.queue_status = "CANCELLED"
         # AI4: reconcile a cancelled sim-driver seat to CANCELLED via the reverse binding.
+        # The reconcile RESULT is captured (S2A-5): a coherent commit returns
+        # driver_request_status_set; a declared integrity failure (e.g. the request already
+        # terminal) returns a status_mismatch that the caller can record.
         drid = run_ctx.driver_request_by_seat_event_ref.get(event_ref)
+        reconcile = None
         if drid is not None:
-            run_ctx.set_driver_request_status(
+            reconcile = run_ctx.set_driver_request_status(
                 drid, expected_status="SEATED", new_status="CANCELLED",
                 disposition=Outcome("driver_request_seat_cancelled",
                                      event_ref=event_ref, reason=cancellation_reason))
-        return Outcome("event_cancelled", event_ref=event_ref)
+        return Outcome("event_cancelled", event_ref=event_ref, reconcile=reconcile)
     if rec.queue_status == "DISPATCHING":
         return Outcome("event_already_dispatching", event_ref=event_ref)
     return Outcome("cancellation_terminal_noop", event_ref=event_ref)

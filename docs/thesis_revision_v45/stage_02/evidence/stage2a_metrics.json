@@ -1,0 +1,53 @@
+{
+  "success_model": "B_EXACT_WITHOUT_REPLACEMENT_SAMPLER",
+  "work_primitive": "SHA256(header||nonce)",
+  "A1_kwh": 8.420833333333333,
+  "A1_target": 8.420833333,
+  "A1_params": {
+    "num_miners": 141,
+    "P_hash": 21.5,
+    "horizon_T": 10000.0
+  },
+  "confirmatory": {
+    "num_miners": 8,
+    "horizon_T": 600.0,
+    "nonce_domain_size": 1600,
+    "rounds_executed": 343,
+    "rounds_accepted": 342,
+    "rounds_aborted": 0,
+    "loop_result": "run_completed",
+    "run_end_time": 600.0,
+    "residency_reconciles": true,
+    "energy_kwh": 0.014748989548610886,
+    "matched_control_kwh": 0.028666666666666667,
+    "queue_terminal": {
+      "CONSUMED": 10099,
+      "CANCELLED": 1357
+    },
+    "request_terminal": {
+      "CONSUMED": 8
+    }
+  },
+  "energy_experiment": {
+    "winner": "M000",
+    "winning_nonce": 50,
+    "round_end": 0.51,
+    "n_idlers": 7,
+    "total_control_j": 87.72000000000001,
+    "total_idle_j": 52.50299999999999,
+    "saving_j": 35.21700000000002,
+    "max_abs_residual_j": 8.881784197001252e-16,
+    "P_active": 21.5,
+    "P_idle": 2.15
+  },
+  "energy_experiment_zero_saving": {
+    "P_idle": 21.5,
+    "P_active": 21.5,
+    "saving_j": 0.0
+  },
+  "coverage": {
+    "domain_size": 800,
+    "exact_cover": true,
+    "duplicate_nonces": 0
+  }
+}

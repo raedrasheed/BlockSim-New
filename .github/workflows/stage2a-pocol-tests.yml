@@ -1,0 +1,51 @@
+name: Stage 2A PoCol tests
+
+# Machine-generated evidence for S2A-9: runs the Stage-2A executable PoCol test suite
+# (TV325-TV338, E2E-1..E2E-5, SCI-1..SCI-7, adapter) and uploads the pytest log + JUnit XML.
+
+on:
+  push:
+    branches:
+      - "thesis-v45-pocol-stage2a-executable-scientific-core-remediation"
+    paths:
+      - "Models/PoCol/stage2/**"
+      - "tests/thesis_revision_v45/stage2/**"
+      - ".github/workflows/stage2a-pocol-tests.yml"
+  pull_request:
+    paths:
+      - "Models/PoCol/stage2/**"
+      - "tests/thesis_revision_v45/stage2/**"
+  workflow_dispatch: {}
+
+jobs:
+  stage2a-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pytest
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Run Stage 2A PoCol test suite
+        run: |
+          python -m pytest tests/thesis_revision_v45/stage2/ -v --durations=0 \
+            -p no:cacheprovider \
+            --junitxml=stage2a_ci.junit.xml | tee stage2a_ci.log
+
+      - name: Run standalone demo (smoke)
+        run: python -m Models.PoCol.stage2.demo
+
+      - name: Upload pytest evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage2a-pytest-evidence
+          path: |
+            stage2a_ci.log
+            stage2a_ci.junit.xml
