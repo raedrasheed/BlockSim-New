@@ -188,6 +188,48 @@ the security decision is scheduled at a **strictly later** `event_time`, so a re
 change `H_active` after the final decision at `t`.
 
 ```
+PROCEDURE BuildHandlerInvocation                                 # AF2: the named dispatcher adapter — binds the EXACT handler arguments
+  INPUTS: event_descriptor d, queued_event_record record, RoundContext, RunContext, OrdinaryDispatchContext ctx
+  PRECONDITIONS: called by ProcessEventTime AFTER the record is POPped and moved QUEUED -> DISPATCHING (AF5).
+                 record.event_type = d.event_type; record.immutable_payload was validated against d at seating (AF3), so
+                 every d.allowed_payload_keys value is present and well-typed (a corrupt record never reaches here — it
+                 takes the AF9 integrity path). ctx = OrdinaryDispatchContext(dispatch_envelope = record.dispatch_envelope,
+                 dispatched_event_ref = record.event_ref).
+  EFFECTS:
+    # AF2: construct the EXACT named argument set d.handler_procedure declares — (1) each payload key mapped through
+    #   d.payload_to_param_map (some via a resolver, e.g. version(...)), and (2) each runtime parameter from
+    #   d.runtime_injected, gated by d.recv_env / d.recv_ref. NO undeclared argument, NO unresolved alias, NO derived
+    #   output substituted for an input. For AF4 driver types, d.handler_procedure is the WRAPPER (which itself resolves
+    #   config/prior_state from RunContext and builds scheduling_context for its domain call); for direct types it is the
+    #   domain handler.
+    SET args <- empty named-argument map
+    # (1) payload-derived arguments (category 1 bound from category 3), through the descriptor map + declared resolvers
+    FOR EACH map_entry IN d.payload_to_param_map:
+      IF map_entry is the version resolver `(AssignmentID, assignment_version) -> P`:   # WakeCompleteEvent -> target_assignment; LeaseExpiry -> assignment
+        SET args[P] <- version(record.immutable_payload.AssignmentID, record.immutable_payload.assignment_version)
+      ELSE:                                                       # a direct 1:1 bind (e.g. from_cursor -> cursor; recipient -> r; deficit -> deficit)
+        SET (payload_key -> handler_param) <- map_entry
+        SET args[handler_param] <- record.immutable_payload[payload_key]
+    # (2) runtime-injected arguments (category 2), driven ENTIRELY by the descriptor (never ambient)
+    FOR EACH (runtime_source -> handler_param) IN d.runtime_injected:
+      SWITCH runtime_source:
+        CASE RoundContext:          SET args[handler_param] <- RoundContext
+        CASE RunContext:            SET args[handler_param] <- RunContext                 # RoundInitialiseEvent only
+        CASE dispatch_envelope:     SET args[handler_param] <- ctx.dispatch_envelope       # AE5 Design B: appears in d.runtime_injected IFF d.recv_env = yes
+        CASE dispatched_event_ref:  SET args[handler_param] <- ctx.dispatched_event_ref    # appears IFF d.recv_ref = yes — currently ONLY SetupRetryEvent
+    # AF2 (defensive): d.recv_env / d.recv_ref MUST agree with what was injected — no envelope/ref for a handler that omits it.
+    ASSERT (dispatch_envelope in args) = (d.recv_env = yes)        # BlockAcceptancePoint / ActiveHashRateUpdate: FALSE both sides
+    ASSERT (dispatched_event_ref in args) = (d.recv_ref = yes)     # SetupRetryEvent: TRUE both sides; all others FALSE
+    RETURN handler_invocation(procedure = d.handler_procedure, args = args)
+  RETURNS: handler_invocation(procedure, args)
+  NOTE: AF2: the SOLE place ordinary-dispatch handler arguments are bound. WakeCompleteEvent receives
+        target_assignment = version(payload.AssignmentID, payload.assignment_version); ReserveActivateEvent receives
+        dispatch_envelope and builds scheduling_context = ORDINARY_DISPATCH(dispatch_envelope) for its ReserveActivate
+        call (never a bare envelope reaches ReserveActivate); BlockAcceptancePoint receives NO dispatch_envelope and NO
+        dispatched_event_ref; SetupRetryEvent receives both; RoundInitialiseEvent receives RunContext (from which it
+        resolves config/prior_state). A handler never receives an undeclared argument, an unresolved alias, or a derived
+        output in place of an input (`STAGE_01AF_DISPATCH_ADAPTER_AUDIT.md`).
+
 PROCEDURE ProcessEventTime
   INPUTS: RoundContext, event_time t, is_horizon = (t == run_horizon_T), allow_empty_horizon = false,
           RunHookContext = null
@@ -204,52 +246,54 @@ PROCEDURE ProcessEventTime
   EFFECTS:
     # I-02/P1: DRAIN t to quiescence in deterministic order, INCLUDING handler-generated same-t events. The
     #          drain may be EMPTY (no ordinary event at t) for a synthetic horizon invocation — that is legal.
+    SET RunContext <- RoundContext.RunContext                     # AF6: RoundContext binds RunContext by reference (Q5); BuildHandlerInvocation needs it
     LOOP:
-      IF no QUEUED ordinary event remains at event_time = t: BREAK   # AD4: quiescent (all delta-cycles drained; empty at a synthetic horizon)
-      SET current_delta_cycle <- smallest delta_cycle with a QUEUED event at t
-      # AE3: do NOT iterate a STALE snapshot of all QUEUED events at (t, current_delta_cycle) — a handler may CANCEL a LATER
-      #      same-cycle event mid-batch (via CancelQueuedEvent, AE1), and a snapshot would try to dispatch that now-CANCELLED
-      #      event and trip the QUEUED assertion. Instead RE-SELECT and RE-READ the smallest current QUEUED EventRef each
-      #      iteration, dispatch EXACTLY ONE, and RE-QUERY the queue.
-      WHILE a QUEUED EventRef exists at (t, current_delta_cycle):
+      IF no QUEUED ordinary event remains at event_time = t on EQ.event_queue: BREAK   # AF5: quiescent (EQ.event_queue holds pending QUEUED events ONLY)
+      SET current_delta_cycle <- smallest delta_cycle with a QUEUED event at t on EQ.event_queue   # AF5: the ONE representation
+      # AF5: ATOMIC POP-BEFORE-DISPATCH. EQ.event_queue is the ONE representation of the pending frontier: it holds ONLY
+      #      QUEUED events; a DISPATCHING / CONSUMED / CANCELLED event is NOT on it (the earlier ambiguous "by projection"
+      #      convention is REMOVED). Because CancelQueuedEvent (AE1) ATOMICALLY removes a cancelled event from EQ.event_queue,
+      #      a cancelled event can never be POPped — no stale-snapshot skip guard is needed. RE-POP the smallest each
+      #      iteration so a handler's same-cycle cancellation (removal) or addition is observed immediately (AE3).
+      WHILE a QUEUED EventRef exists at (t, current_delta_cycle) on EQ.event_queue:
         ASSERT t not in finalised_event_times                     # never dispatch into a finalised time
-        SET er <- the SMALLEST QUEUED EventRef at (t, current_delta_cycle) by (er.microphase, stable_tie_key, er.seq)  # AE3: re-selected
-        SET record <- queued_event_registry[er]                   # AD1/AE3: RE-READ the ONE central authoritative record
-        # AE3: a handler earlier this cycle may have CANCELLED this event (CancelQueuedEvent set CANCELLED + removed it from
-        #      EQ). If it is no longer dispatchable, SKIP it — do NOT assert, do NOT dispatch — and re-query. (In the
-        #      single-threaded model a non-QUEUED event is never re-selected; this guard makes that structural.)
-        IF record does not exist OR record.queue_status != QUEUED OR er is NOT pending on EQ.event_queue:
-          CONTINUE                                                # AE3: reconcile — a cancelled/absent event is never dispatched
-        # AD4/AE3: ProcessEventTime is the SOLE queue-status owner. Dispatch EXACTLY ONE event; move QUEUED -> DISPATCHING
-        #      BEFORE the handler. No handler writes queue_status.
-        SET queued_event_registry[er].queue_status <- DISPATCHING # AD4: QUEUED -> DISPATCHING (dispatcher-owned)
-        # L1: MATERIALISE the dispatch identity from the STORED record (er + record.dispatch_envelope), never from ambient state.
-        SET EQ.current_microphase <- er.microphase; SET EQ.current_event_seq <- er.seq
-        SET EQ.current_event_ref <- er                            # AC2/AD4: the dispatcher owns the EventRef of e
-        # AD8: the STORED dispatch_envelope is COMPLETE by construction (ScheduleEvent rejected an incomplete record); the
-        #      dispatcher builds the COMPLETE OrdinaryDispatchContext from the trusted record — never from untrusted input.
+        # AF5: POP + take ownership + set the COMPLETE current context, INDIVISIBLY. ProcessEventTime is the SOLE queue-status
+        #      owner (AD4); no handler writes queue_status. The event LEAVES the pending frontier here (QUEUED -> DISPATCHING).
+        ATOMICALLY:
+          POP er FROM EQ.event_queue                              # the FRONT at (t, current_delta_cycle): EQ is kept in (event_time, delta_cycle, microphase, stable_tie_key(record), seq) order by ScheduleEvent's INSERT (AF3)
+          SET record <- queued_event_registry[er]                 # AD1: the ONE central authoritative record
+          ASSERT record EXISTS AND record.queue_status = QUEUED    # AF5/AE10(f): an EQ entry ALWAYS has a QUEUED registry entry — the two never diverge
+          SET queued_event_registry[er].queue_status <- DISPATCHING   # AF5: QUEUED -> DISPATCHING; er is now OFF the pending frontier
+          SET EQ.current_event_time  <- er.event_time            # AF5: set the COMPLETE dispatch context from er.* (never ambient)
+          SET EQ.current_delta_cycle <- er.delta_cycle
+          SET EQ.current_microphase  <- er.microphase
+          SET EQ.current_event_seq   <- er.seq
+          SET EQ.current_event_ref   <- er                        # AC2/AD4: the dispatcher owns the EventRef of e
+        # AD8: the STORED dispatch_envelope is COMPLETE by construction (ScheduleEvent rejected an incomplete record); build
+        #      the COMPLETE OrdinaryDispatchContext from the TRUSTED record — never from ambient / untrusted input.
         SET ctx <- OrdinaryDispatchContext(dispatch_envelope = record.dispatch_envelope, dispatched_event_ref = er)   # AD5
-        # AD8 (defensive): if the registry entry is nevertheless detected CORRUPT (missing a required payload field / an
-        #      incomplete envelope), DO NOT dispatch it into a handler; take the declared dispatcher integrity path
-        #      (record an integrity terminal disposition; if the payload's OWNER — resolved from er, AE6 — is a current
-        #      nonterminal-round SEATED retry, terminalise via a COMPLETE dispatcher-integrity context; NEVER pass an
-        #      incomplete envelope onward), then consume it and re-query.
+        # AF9 (defensive): if the POPped registry entry is nevertheless detected CORRUPT (an incomplete immutable_payload for
+        #      its event_type OR an incomplete dispatch_envelope), DO NOT dispatch it and do NOT call BuildHandlerInvocation;
+        #      take the NON-ASSERTING integrity path (AF9 — owner resolved from er via the AE6 reverse binding; a corrupt
+        #      ownership binding is recorded, not asserted), then CONSUME it and re-POP.
         IF record is detected corrupt (immutable_payload incomplete for record.event_type OR dispatch_envelope incomplete):
-          CALL HandleDispatchIntegrityFailure(RoundContext, er, record)   # AD8/AE6: dispatcher-owned; owner resolved from er
-          SET queued_event_registry[er].queue_status <- CONSUMED  # AD4: DISPATCHING -> CONSUMED (the corrupt event is drained, never re-QUEUED)
-          SET EQ.current_event_ref <- null
+          CALL HandleDispatchIntegrityFailure(RoundContext, er, record)   # AF9/AE6: dispatcher-owned; owner resolved from er; NEVER raw-asserts
+          ATOMICALLY:                                             # AF5: complete the lifecycle indivisibly
+            SET queued_event_registry[er].queue_status <- CONSUMED   # DISPATCHING -> CONSUMED (drained, never re-QUEUED)
+            CLEAR EQ.current_event_time, EQ.current_delta_cycle, EQ.current_microphase, EQ.current_event_seq, EQ.current_event_ref
           CONTINUE
-        # AE5 (Design B): dispatch ONLY the arguments the §0.7g-schema DECLARES for record.event_type — always the STORED
-        #      immutable_payload (AD2: payload at dispatch = payload at seating); dispatch_envelope IFF recv env = yes;
-        #      dispatched_event_ref IFF recv ref = yes. No undeclared named argument is injected into any handler.
-        DISPATCH record.event_type WITH immutable_payload = record.immutable_payload,
-                 (AND dispatch_envelope = ctx.dispatch_envelope IFF §0.7g-schema[record.event_type].recv_env = yes),
-                 (AND dispatched_event_ref = ctx.dispatched_event_ref IFF §0.7g-schema[record.event_type].recv_ref = yes)   # AE5
-        # AD4: after the handler returns, the dispatcher completes the lifecycle. DISPATCHING -> CONSUMED, clear the EventRef.
-        SET queued_event_registry[er].queue_status <- CONSUMED    # AD4: DISPATCHING -> CONSUMED (no handler wrote it)
-        SET EQ.current_event_ref <- null                          # AC2/AD4: cleared after the handler returns
-        # AE3: the WHILE RE-QUERIES the queue — a handler may have CANCELLED a later same-cycle event (never dispatched) or
-        #      added a (t, current_delta_cycle+1) event (forward only; handled by the outer LOOP, §0.7-H2).
+        # AF2/AE5 (Design B): bind the EXACT named handler arguments via BuildHandlerInvocation (payload through the descriptor
+        #      map + resolvers; runtime context gated by recv env / recv ref), then invoke. No undeclared argument, no
+        #      unresolved alias, and no derived output in place of an input reaches any handler.
+        SET inv <- CALL BuildHandlerInvocation(descriptor(record.event_type), record, RoundContext, RunContext, ctx)   # AF2
+        CALL inv.procedure WITH inv.args                          # AF2/AF4: dispatch the handler (a wrapper for AF4 types) with the exact args
+        # AF5: after the handler returns, complete the lifecycle ATOMICALLY — DISPATCHING -> CONSUMED and CLEAR all EQ.current_*.
+        ATOMICALLY:
+          SET queued_event_registry[er].queue_status <- CONSUMED    # AD4: DISPATCHING -> CONSUMED (no handler wrote it)
+          CLEAR EQ.current_event_time, EQ.current_delta_cycle, EQ.current_microphase, EQ.current_event_seq, EQ.current_event_ref
+        # AE3/AF5: the WHILE RE-POPS EQ.event_queue — a handler may have CANCELLED a later same-cycle event (already removed
+        #      from EQ.event_queue by CancelQueuedEvent, so never POPped) or added a (t, current_delta_cycle+1) event
+        #      (forward only; handled by the outer LOOP, §0.7-H2).
     # ---- HORIZON CLOSURE (O1/P1: run-level hook, ONLY at t = T, interposed BETWEEN drain and epilogue) ----
     # After T is drained to quiescence (possibly an EMPTY drain for a synthetic horizon invocation, P1), if the
     # run's current round is still NONTERMINAL, close it at the horizon through the named CloseRoundAtHorizon
@@ -318,9 +362,10 @@ PROCEDURE ProcessEventTime
 PROCEDURE HandleDispatchIntegrityFailure                         # AD8/AE6: dispatcher-owned integrity path for a CORRUPT queued record
   INPUTS: RoundContext, er, record   # er = the dispatched EventRef; record = queued_event_registry[er] detected corrupt
   PRECONDITIONS: called by ProcessEventTime ONLY when a registry entry is detected corrupt (an incomplete immutable_payload
-                 for record.event_type or an incomplete dispatch_envelope). ScheduleEvent validates completeness at seating
-                 (AE7), so this is a DEFENSIVE last resort; it NEVER passes an incomplete envelope onward, and (AE6) NEVER
-                 trusts the corrupt payload's SetupRetryID to choose which record is aborted.
+                 for record.event_type or an incomplete dispatch_envelope). ScheduleEvent enforces the full schema at seating
+                 (AF3), so this is a DEFENSIVE last resort; it NEVER passes an incomplete envelope onward, NEVER trusts the
+                 corrupt payload's SetupRetryID to choose which record is aborted (AE6), and NEVER raw-asserts on a corrupt
+                 reverse binding (AF9).
   EFFECTS:
     # AD8: mark the event through a declared integrity TERMINAL disposition (audit) and build a COMPLETE dispatcher-owned
     #   integrity context from the TRUSTED EventRef fields (never from the corrupt payload) — er alone yields a complete
@@ -334,10 +379,20 @@ PROCEDURE HandleDispatchIntegrityFailure                         # AD8/AE6: disp
     IF record.event_type = SetupRetryEvent:
       IF er is a key of setup_retry_by_seat_event_ref:
         SET owner_id <- setup_retry_by_seat_event_ref[er]                                      # AE6: owner from the TRUSTED er
-        ASSERT setup_retry_records[owner_id] EXISTS AND setup_retry_records[owner_id].seat_event_ref = er   # AE6: verify the binding
-        # AE6 (mismatch audit): if the corrupt payload happens to NAME a different (foreign) SetupRetryID, DO NOT touch that
-        #   foreign record — audit the mismatch and disposition ONLY the actual owner resolved from er. A MISSING payload
-        #   SetupRetryID is fine: the owner is still resolved from er.
+        # AF9: the reverse binding ITSELF may be corrupt. NEVER raw-ASSERT it (an ASSERT here would crash the run on corrupted
+        #   ownership metadata). Verify it and, on ANY inconsistency — the owner record missing, its seat_event_ref != er, or
+        #   MORE THAN ONE retry record claiming er as its seat — RECORD dispatch_integrity_owner_binding_corrupt(er), mutate NO
+        #   retry record, abort NO round, and return. ProcessEventTime then CONSUMES the queued event (AF5). Safe under
+        #   corrupted ownership metadata. (Supersedes the AE6 raw ASSERT — STAGE_01AF_SUPERSESSION_REGISTER.md.)
+        IF setup_retry_records[owner_id] does NOT exist
+           OR setup_retry_records[owner_id].seat_event_ref != er
+           OR MORE THAN ONE setup_retry_records entry has seat_event_ref = er:
+          RECORD dispatch_integrity_owner_binding_corrupt(er, owner_id)                        # AF9: corrupt reverse binding — AUDITED, not asserted
+          RETURN dispatch_integrity_owner_binding_corrupt(er)                                  # AF9: no unverified retry mutated; no unrelated round aborted
+        # AE6 (mismatch audit): the binding is verified (owner_id names a real record whose seat_event_ref = er, uniquely). If
+        #   the corrupt payload happens to NAME a different (foreign) SetupRetryID, DO NOT touch that foreign record — audit the
+        #   mismatch and disposition ONLY the actual owner resolved from er. A MISSING payload SetupRetryID is fine: the owner
+        #   is still resolved from er.
         IF the payload's SetupRetryID is PRESENT AND the payload's SetupRetryID != owner_id:
           RECORD setup_retry_owner_mismatch(er, owner_id, payload_setup_retry_id = the payload's SetupRetryID)   # AE6: foreign id IGNORED
         SET rec <- setup_retry_records[owner_id]
@@ -357,14 +412,17 @@ PROCEDURE HandleDispatchIntegrityFailure                         # AD8/AE6: disp
         #   CONSUMES the queued event; do NOT mutate ANY unrelated retry record.
         RECORD dispatch_integrity_no_owner(er)
     RETURN dispatch_integrity_handled(er)
-  RETURNS: dispatch_integrity_handled(er)
-  NOTE: AD8/AE6: the ONE dispatcher-owned integrity path. A malformed/corrupt queued record NEVER reaches a handler and its
-        untrusted payload/envelope NEVER becomes the transition identity for round closure; any abort uses the COMPLETE
-        integrity_envelope built from the trusted EventRef, scoped to the OWNER's own round. AE6: the owner is resolved from
-        the trusted EventRef via setup_retry_by_seat_event_ref (verified against seat_event_ref), never from the corrupt
-        payload — a corrupt payload naming a FOREIGN SetupRetryID leaves that foreign record untouched (mismatch audited) and
-        an event with NO reverse-bound owner mutates nothing. ProcessEventTime marks the corrupt event CONSUMED (never
-        re-QUEUED) after this returns.
+  RETURNS: dispatch_integrity_handled(er) | dispatch_integrity_owner_binding_corrupt(er)
+  NOTE: AD8/AE6/AF9: the ONE dispatcher-owned integrity path, and it NEVER raw-asserts. A malformed/corrupt queued record
+        NEVER reaches a handler and its untrusted payload/envelope NEVER becomes the transition identity for round closure;
+        any abort uses the COMPLETE integrity_envelope built from the trusted EventRef, scoped to the OWNER's own round. AE6:
+        the owner is resolved from the trusted EventRef via setup_retry_by_seat_event_ref, never from the corrupt payload — a
+        corrupt payload naming a FOREIGN SetupRetryID leaves that foreign record untouched (mismatch audited) and an event with
+        NO reverse-bound owner mutates nothing. AF9: the reverse binding is TREATED AS UNTRUSTED — if it points to a missing
+        record, disagrees with the record's seat_event_ref, or more than one record claims the same seat EventRef, the handler
+        RECORDS dispatch_integrity_owner_binding_corrupt(er) and returns WITHOUT mutating any retry record or aborting any
+        round (safe under corrupted ownership metadata). In every branch ProcessEventTime marks the corrupt event CONSUMED
+        (never re-QUEUED) after this returns.
 
 PROCEDURE RunEventLoopToHorizon                                   # O1/P1: the RUN-LEVEL driver (top-level loop)
   INPUTS: RunContext, RoundContext
@@ -536,12 +594,13 @@ STRUCTURE queued_event_record (AD1 — the ONE central record of a queued ordina
 # A setup_retry_record keeps its IMMUTABLE seat_event_ref (never destroyed, used for ownership/audit) and a SetupRetryStatus,
 #   but NO writable event_queue_status field (AD1: the Stage-1AC per-record mirror is REMOVED — the central registry is
 #   authoritative). Cancellation/consumption change queued_event_registry[seat_event_ref].queue_status only.
-# AE10 QUEUE/REGISTRY COHERENCE INVARIANTS (see STAGE_01_INVARIANT_CATALOGUE I16 Stage-1AE clause / new I21):
-#   CONVENTION: EQ.event_queue is the QUEUED PROJECTION of the registry — "present/pending in EQ" == queue_status = QUEUED.
-#     A status change to DISPATCHING (dispatch, ProcessEventTime), CONSUMED (dispatch completion), or CANCELLED
-#     (CancelQueuedEvent) therefore REMOVES the EventRef from the pending frontier by construction. CancelQueuedEvent is the
-#     sole operation that removes a QUEUED event from the frontier by CANCELLATION (never by dispatch); dispatch removes it by
-#     CONSUMPTION (QUEUED -> DISPATCHING -> CONSUMED). So (a)-(c) hold literally under this projection.
+# AE10/AF5 QUEUE/REGISTRY COHERENCE INVARIANTS (see STAGE_01_INVARIANT_CATALOGUE I16 Stage-1AF clause / I21):
+#   ONE REPRESENTATION (AF5): EQ.event_queue holds EXACTLY the pending QUEUED events — nothing else. It is NOT a "projection"
+#     of the registry (that ambiguous convention is REMOVED). An EventRef LEAVES EQ.event_queue by exactly one of two explicit
+#     operations: ProcessEventTime POPs it (QUEUED -> DISPATCHING, then -> CONSUMED after the handler), or CancelQueuedEvent
+#     REMOVES it (QUEUED -> CANCELLED). A DISPATCHING / CONSUMED / CANCELLED EventRef is therefore NEVER on EQ.event_queue.
+#     CancelQueuedEvent is the sole operation that removes a QUEUED event by CANCELLATION (never by dispatch); dispatch removes
+#     it by the atomic POP + CONSUMPTION (QUEUED -> DISPATCHING -> CONSUMED). So (a)-(f) below hold literally by construction.
 #   (a) an EventRef is present in EQ.event_queue IFF its registry queue_status = QUEUED;
 #   (b) the currently-executing EventRef (EQ.current_event_ref) is ABSENT from pending EQ and has queue_status = DISPATCHING;
 #   (c) a CONSUMED or CANCELLED EventRef is NOT pending in EQ;
@@ -596,18 +655,38 @@ PROCEDURE ScheduleEvent
       ELSE:                                          SET dc <- EQ.current_delta_cycle + 1   # never backward
     ELSE:                                    # target_event_time < current_event_time
       RETURN rejected_backward_time          # K8: never schedule into the past
-    # AE7 (3): VALIDATE event_type + immutable_payload against the AUTHORITATIVE dispatch schema (§0.7g-schema) BEFORE any
-    #     state mutation — BEFORE the seq is minted, the EventRef derived, the record registered, or the queue inserted. A
-    #     malformed request is a STRUCTURED rejection, NEVER a raw assertion that terminates the simulation. (AE7 supersedes
-    #     the AD8 construction ASSERT: assemble the payload, then validate it here.)
-    SET immutable_payload <- the COMPLETE caller-supplied argument set for event_type (from envelope_fields), e.g. for
-                             #   SetupRetryEvent EXACTLY { RoundID, setup_kind, SetupRetryID, TemplateID_at_seat,
-                             #   TemplateRefreshSetupID, retry_generation, reason }
-    SET missing_or_invalid_fields <- the required immutable_payload fields of event_type (per §0.7g-schema) that are ABSENT
-                                     from immutable_payload OR fail their declared type
-    IF event_type is NOT declared in §0.7g-schema OR missing_or_invalid_fields is non-empty:
-      RECORD payload_schema_mismatch(event_type, missing_or_invalid_fields)               # audit-only log
-      RETURN rejected_payload_schema_mismatch(event_type, missing_or_invalid_fields)      # AE7: STRUCTURED; NO state mutated yet
+    # AF3 (3): ENFORCE THE FULL DESCRIPTOR SCHEMA (§0.7g-schema) BEFORE any state mutation — BEFORE the seq is minted, the
+    #     EventRef derived, the record registered, or the queue inserted. Each check is a STRUCTURED rejection, NEVER a raw
+    #     assertion that terminates the simulation. (Supersedes the AE7 required-fields-only check, which validated neither the
+    #     target microphase, the EXACT no-extra-key closed set, nor tie-key derivability — STAGE_01AF_SUPERSESSION_REGISTER.md.)
+    # (3a) the event_type MUST have a descriptor.
+    IF event_type is NOT declared in §0.7g-schema:
+      RECORD event_type_unknown(event_type)                                                # audit-only log
+      RETURN rejected_event_type_unknown(event_type)                                       # AF3: no descriptor -> reject; NO state mutated
+    SET d <- descriptor(event_type)                                                        # the authoritative event_descriptor
+    # (3b) the target microphase MUST equal the descriptor's FIXED microphase (no seat into the wrong microphase).
+    IF target_microphase != d.target_microphase:
+      RECORD microphase_mismatch(event_type, target_microphase, d.target_microphase)       # audit-only log
+      RETURN rejected_microphase_mismatch(event_type, target_microphase, d.target_microphase)   # AF3
+    # (3c) assemble the payload and validate it against the EXACT CLOSED key set + declared types: a MISSING key, an EXTRA key
+    #     (not in d.allowed_payload_keys), or a value failing d.payload_field_types is a schema mismatch. This covers the
+    #     exact-version fields (HashWorkEvent/WakeCompleteEvent assignment_version; LeaseExpiry assignment_version;
+    #     SetupRetryEvent retry_generation) — an absent or wrong-typed version field is rejected here, before any mutation.
+    SET immutable_payload  <- the caller-supplied argument set for event_type (from envelope_fields)
+    SET missing_fields     <- keys in d.allowed_payload_keys ABSENT from immutable_payload
+    SET extra_fields       <- keys in immutable_payload NOT in d.allowed_payload_keys        # AF3: EXACT set — no extra key permitted
+    SET type_invalid_fields <- keys k in immutable_payload whose value fails d.payload_field_types[k]
+    IF any of missing_fields / extra_fields / type_invalid_fields is non-empty:
+      RECORD payload_schema_mismatch(event_type, missing_fields, extra_fields, type_invalid_fields)   # audit-only log
+      RETURN rejected_payload_schema_mismatch(event_type, missing_fields, extra_fields, type_invalid_fields)   # AF3: STRUCTURED; NO state mutated
+    # (3d) the DESCRIPTOR-DERIVED stable_tie_key MUST be computable from the validated payload (every payload key it names is
+    #     present). This replaces the generic (CandidateID, MinerID, AssignmentID) ordering tuple with the exact per-descriptor
+    #     tie key (recovery -> episode/decision/generation; acceptance batch -> timestamp/point; wake -> MinerID/AssignmentID/
+    #     assignment_version; setup retry -> full identity), so no event is ordered by a key that does not identify it.
+    IF d.stable_tie_key names a payload key ABSENT from immutable_payload:
+      RECORD stable_tie_key_unavailable(event_type, d.stable_tie_key)                       # audit-only log
+      RETURN rejected_stable_tie_key_unavailable(event_type)                                # AF3: cannot totally order it -> reject
+    SET tie_key <- d.stable_tie_key(immutable_payload)                                      # AF3: the descriptor-derived tie key (NOT the generic tuple)
     # AE8 (4): ATOMIC REGISTRATION. From here the seat is ONE atomic transaction — mint seq + EventRef, create the QUEUED
     #     queued_event_record, add the registry entry, AND insert the EventRef into EQ, committing BOTH-OR-NEITHER. There is
     #     no observable intermediate state, so a partial seat is impossible by construction: no registry entry is ever left
@@ -628,27 +707,37 @@ PROCEDURE ScheduleEvent
       #      TOTAL-ORDER key. If the enqueue cannot complete, the whole transaction rolls back — neither the registry entry
       #      nor an EQ entry persists — so the two structures never diverge.
       SET queued_event_registry[event_ref] <- record
-      INSERT event_ref INTO EQ.event_queue ORDERED BY (event_time, delta_cycle, microphase,
-                                                      (CandidateID, MinerID, AssignmentID), seq)   # keys from queued_event_registry[event_ref]
+      INSERT event_ref INTO EQ.event_queue ORDERED BY (event_time, delta_cycle, microphase, tie_key, seq)   # AF3: descriptor-derived stable_tie_key (NOT the generic (CandidateID, MinerID, AssignmentID) tuple)
   RETURNS: scheduled(event_ref, record) | rejected_finalised_time | post_horizon_event_rejected |
-           rejected_post_epilogue_not_strictly_later | rejected_backward_time | rejected_payload_schema_mismatch(event_type, missing_or_invalid_fields)
-           # AD3/AE7: the COMPLETE result union — every success and rejection variant ScheduleEvent can return. scheduled
-           #   carries the canonical EventRef AND the central queued_event_record; AE7 adds the structured
-           #   rejected_payload_schema_mismatch (returned BEFORE any state mutation).
-  NOTE: K8/J9/AD1/AD2/AD3/AE7/AE8: the SOLE enqueue interface. It DERIVES delta_cycle (caller supplies only event_time +
+           rejected_post_epilogue_not_strictly_later | rejected_backward_time |
+           rejected_event_type_unknown(event_type) |
+           rejected_microphase_mismatch(event_type, target_microphase, expected_microphase) |
+           rejected_payload_schema_mismatch(event_type, missing_fields, extra_fields, type_invalid_fields) |
+           rejected_stable_tie_key_unavailable(event_type)
+           # AD3/AE7/AF3: the COMPLETE result union — every success and rejection variant ScheduleEvent can return. scheduled
+           #   carries the canonical EventRef AND the central queued_event_record; AF3 replaces the AE7 single
+           #   rejected_payload_schema_mismatch(event_type, missing_or_invalid_fields) with the FULL schema-enforcement set
+           #   (event-type-unknown / microphase-mismatch / exact-key-set-or-type mismatch / tie-key-unavailable), all
+           #   returned BEFORE any state mutation.
+  NOTE: K8/J9/AD1/AD2/AD3/AE7/AE8/AF3: the SOLE enqueue interface. It DERIVES delta_cycle (caller supplies only event_time +
         microphase), owns event_creation_seq (J4), rejects finalised (I-02), post-horizon (O2: target_event_time > T), and
-        backward event_times, then VALIDATES the payload against §0.7g-schema and returns a STRUCTURED
-        rejected_payload_schema_mismatch on a malformed request BEFORE any mutation (AE7 — no raw assertion). The successful
-        seat is ONE atomic transaction (AE8): mint seq + EventRef, create the QUEUED queued_event_record, add the registry
-        entry, and insert the EventRef into EQ together (both-or-neither), so the registry and EQ never diverge (AE10). Every
-        `SCHEDULE` elsewhere is shorthand for a call here. O2: because this is the ONLY enqueue path and it rejects
-        target_event_time > T, the queue can never hold an ordinary event beyond the horizon T.
+        backward event_times, then ENFORCES THE FULL DESCRIPTOR SCHEMA against §0.7g-schema BEFORE any mutation (AF3): the
+        event_type must have a descriptor (else rejected_event_type_unknown), target_microphase must equal the descriptor's
+        fixed microphase (else rejected_microphase_mismatch), the payload key set must EQUAL the descriptor's exact closed set
+        with every declared type (else rejected_payload_schema_mismatch — missing, EXTRA, or wrong-typed), and the
+        descriptor-derived stable_tie_key must be computable (else rejected_stable_tie_key_unavailable). Every rejection is
+        STRUCTURED — no raw assertion. The successful seat is ONE atomic transaction (AE8): mint seq + EventRef, create the
+        QUEUED queued_event_record, add the registry entry, and insert the EventRef into EQ ordered by the descriptor-derived
+        stable_tie_key (AF3), together (both-or-neither), so the registry and EQ never diverge (AE10). Every `SCHEDULE`
+        elsewhere is shorthand for a call here. O2: because this is the ONLY enqueue path and it rejects target_event_time > T,
+        the queue can never hold an ordinary event beyond the horizon T.
 
 PROCEDURE CancelQueuedEvent                                     # AE1: the SOLE queue-owner cancellation operation
   INPUTS: EventRef, cancellation_reason, cancellation_context
           # cancellation_context: the cancelling procedure's dispatch / run-hook / closure envelope (audit provenance only).
   PRECONDITIONS: the ONLY operation that removes a QUEUED event from the pending frontier by CANCELLATION (dispatch removes a
-                 QUEUED event by CONSUMPTION, ProcessEventTime; §0.7e projection convention). NO procedure executes a raw
+                 QUEUED event by the atomic POP + CONSUMPTION, ProcessEventTime; AF5 ONE-representation model — EQ.event_queue
+                 holds pending QUEUED events only). NO procedure executes a raw
                  `CANCEL <ref> on EQ`; every wake / resume / certificate-arrival / block-arrival / hash-work / recovery /
                  setup-retry / acceptance-batch / round-or-template-closure cancellation routes through here (AE2). It owns the
                  ATOMIC EQ-removal + central queued_event_registry state update for cancellation (AE1/AE10), so EQ membership
@@ -756,18 +845,23 @@ and dirties the census — it selects NO outcome and seats NO completion; the ev
 
 | Driver entry point | Event type | Target microphase | Stable tie key | Required envelope fields | May create same-time delta-cycle events? |
 |--------------------|-----------|-------------------|----------------|--------------------------|:--:|
-| `RoundInitialise` | `RoundInitialise` | `ROUND_SETUP` | `(RoundID)` | `event_time, delta_cycle, event_seq` | no (round setup is a fresh event_time) |
-| `TemplateCommit` | `TemplateCommit` | `TEMPLATE_COMMIT` | `(RoundID, TemplateID)` | `event_time, delta_cycle, event_seq` | no |
-| `PrepareParticipantsForNewRound` | `PrepareParticipants` | `ASSIGNMENT_SETUP` | `(RoundID, TemplateID)` | `event_time, delta_cycle, event_seq` | yes — its `StartWake`s may seat same-time `WakeCompleteEvent`s (H2/H5) |
-| `MinerRegister` | `MinerRegister` | `REGISTRATION` | `(MinerID)` | `event_time, delta_cycle, event_seq` | no |
-| `ReserveActivate` | `ReserveActivate` | `RECOVERY_ACTIVATE` | `(MinerID)` | `event_time, delta_cycle, event_seq` | yes — its `StartWake` may seat a same-time `WakeCompleteEvent` (H5) |
-| `FullRangeExhaustNoSolution` | `FullRangeExhaust` | `RANGE_EXHAUST_ADJUDICATE` | `(RoundID, TemplateID)` | `event_time, delta_cycle, event_seq` | no |
+| `RoundInitialiseEvent` (AF4 wrapper -> `RoundInitialise`) | `RoundInitialiseEvent` | `ROUND_SETUP` | `(round_setup_seq)` | `event_time, delta_cycle, event_seq` | no (round setup is a fresh event_time) |
+| `TemplateCommitEvent` (AF4 wrapper -> `TemplateCommit`) | `TemplateCommitEvent` | `TEMPLATE_COMMIT` | `(RoundID_at_seat, candidate_template_id)` | `event_time, delta_cycle, event_seq` | no |
+| `PrepareParticipantsEvent` (AF4 wrapper -> `PrepareParticipantsForNewRound`) | `PrepareParticipantsEvent` | `ASSIGNMENT_SETUP` | `(RoundID_at_seat, TemplateID_at_seat)` | `event_time, delta_cycle, event_seq` | yes — its `StartWake`s may seat same-time `WakeCompleteEvent`s (H2/H5) |
+| `MinerRegisterEvent` (AF4 wrapper -> `MinerRegister`) | `MinerRegisterEvent` | `REGISTRATION` | `(join_request_id)` | `event_time, delta_cycle, event_seq` | no |
+| `ReserveActivateEvent` (AF4 wrapper -> `ReserveActivate`) | `ReserveActivateEvent` | `RECOVERY_ACTIVATE` | `(RoundID_at_seat, activation_seq)` | `event_time, delta_cycle, event_seq` | yes — its `StartWake` may seat a same-time `WakeCompleteEvent` (H5) |
+| `FullRangeExhaustEvent` (AF4 wrapper -> `FullRangeExhaustNoSolution`) | `FullRangeExhaustEvent` | `RANGE_EXHAUST_ADJUDICATE` | `(RoundID_at_seat, TemplateID_at_seat)` | `event_time, delta_cycle, event_seq` | no |
 | `RecoveryDeadlineEvent` | `RecoveryDeadlineEvent` | `RECOVERY_DEADLINE` | `(RoundID, RecoveryEpisodeID)` | `event_time, delta_cycle, event_seq` | no (P3: records the deadline fact + refreshes the census; seats nothing) |
 | `RecoveryCompletionDueEvent` | `RecoveryCompletionDueEvent` | `RECOVERY_COMPLETION_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryDecisionID)` | `event_time, delta_cycle, event_seq` | no (Q2: records due + refreshes census; NO transition — the application is the post-epilogue hook) |
 | `RecoveryAssignmentContinuationDueEvent` | `RecoveryAssignmentContinuationDueEvent` | `RECOVERY_ASSIGNMENT_CONTINUATION_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryDecisionID, ContinuationGeneration)` | `event_time, delta_cycle, event_seq` | no (T1: records the continuation DUE fact + refreshes the census; NO transition / NO assignment / NO APPLIED — the branch-C rebuild is the post-epilogue hook `ApplyRecoveryAssignmentContinuationAfterEpilogue`). It carries the full recovery identity + `ContinuationGeneration`; it is seated via the S7 PostEpilogueSchedulingContext (strictly-later) |
 | `RecoveryWorkDueEvent` | `RecoveryWorkDueEvent` | `RECOVERY_WORK_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryWorkID, WorkGeneration)` | `event_time, delta_cycle, event_seq` | no (U1: records the recovery-WORK DUE fact + refreshes the census; NO reserve activation / NO transition / NO APPLIED — the WORK is the post-epilogue hook `ApplyRecoveryWorkAfterEpilogue`). It carries the full recovery identity + `WorkGeneration`; it is seated via the U3 atomic seat (published only after a successful enqueue) |
 | `SetupRetryEvent` | `SetupRetryEvent` | `ROUND_SETUP` | `(RoundID, setup_kind, SetupRetryID, TemplateID_at_seat, TemplateRefreshSetupID, retry_generation)` | `event_time, delta_cycle, event_seq` + `dispatched_event_ref` (AC2: ProcessEventTime injects `EQ.current_event_ref = EventRef(e)`; a MANDATORY input, never read from the payload) | no (V8/X3/X4/Y1/Y2/Y3/AC3: at a strictly-later event_time after a rolled-back setup, re-invokes the KIND-SPECIFIC target — `PrepareParticipantsForNewRound` for `PARTICIPANT_SETUP`, `ContinueTemplateRefreshAssignmentSetup` (NEVER `TemplateRefresh`, so no re-close / re-commit) for `TEMPLATE_REFRESH_SETUP`; both require `round_state = ASSIGNMENT`; Y1: EXACT-replay idempotence is checked BEFORE the terminal/wrong-state guards (a post-success replay is duplicate-suppressed, never aborted); Y2: the EXACT `TemplateID_at_seat` / `TemplateRefreshSetupID` are verified against the committed marker; Y3: `retry_generation` is the SCALAR generation; an over-budget or state-incompatible retry is a declared `RoundAbort`) |
-| `RoundAbort` | `RoundAbort` | `TERMINAL_ABORT` (§21 item 1) | `(RoundID)` | `event_time, delta_cycle, event_seq` | no |
+
+`RoundAbort` is **NOT** in this seating table (AF1): it is a SYNCHRONOUS procedure invoked only by a direct `CALL`,
+never seated through `ScheduleEvent` and never dispatched by `ProcessEventTime` (confirmed: no `ScheduleEvent(EQ,
+RoundContext, RoundAbort, ...)` seat exists). The `TERMINAL_ABORT` §21 ordinal is retained as the terminal-state
+priority slot only; it is not a queued microphase. (Supersedes the earlier `RoundAbort` seating row — see
+`STAGE_01AF_SUPERSESSION_REGISTER.md`.)
 
 Run-level hooks (NOT in the seating table, O1/Q2/R2): `CloseRoundAtHorizon` (§20b, invoked inside
 `ProcessEventTime(T)` with ONE deterministic run-hook envelope, Q6), `FinalizeSimulationRun` (§20a, invoked by
@@ -793,48 +887,217 @@ A driver entry point that performs a miner transition or a `StartWake` THREADS i
 `dispatch_envelope` INPUT — their dispatched event still carries the standard envelope, and no entry point
 ever receives an envelope without the `ScheduleEvent` seating rule above.
 
-**(0.7g-schema) Authoritative event-type dispatch schema (AE4).** This table is the SINGLE authoritative schema for every
-queued event type. It is the source of truth that `ScheduleEvent` validates a request's `immutable_payload` against (AE7 —
-a request whose `event_type` is absent here, or whose payload omits a required field or fails its declared type, is a
-structured `rejected_payload_schema_mismatch`), and that `ProcessEventTime` uses to dispatch to each handler ONLY the
-declared arguments (AE5 Design B). The "recv env" column = the handler receives `dispatch_envelope`; the "recv ref" column
-= the handler receives `dispatched_event_ref`. Design B (AE5): the dispatcher passes `dispatch_envelope` to a handler IFF
-`recv env` = yes, and `dispatched_event_ref` IFF `recv ref` = yes — it NEVER injects an argument the handler does not
-declare. (`ReserveActivate` receives the envelope wrapped as `scheduling_context = ORDINARY_DISPATCH(dispatch_envelope)`,
-its declared parameter — the dispatcher supplies that wrapper, not a bare `dispatch_envelope`.) The §0.7g microphase map and
-the §0.7g-driver seating table remain consistent VIEWS of this schema (target microphase, stable tie key). Run-level hooks
-(`CloseRoundAtHorizon`, `FinalizeSimulationRun`, the post-epilogue application hooks) are NOT queued and do NOT appear here.
+**(0.7g-schema) Authoritative executable event-descriptor set (AF1, supersedes the AE4 descriptive schema).**
+This section is the SINGLE authoritative, EXECUTABLE schema for every queued event type. It replaces the earlier
+AE4 descriptive table (which conflated derived values and stable-tie-key identities with handler payload — see
+`STAGE_01AF_SUPERSESSION_REGISTER.md`). It defines one `event_descriptor` per queued event type. `ScheduleEvent`
+validates a request's `immutable_payload` against the descriptor of its `event_type` (AF3), `BuildHandlerInvocation`
+(AF2) binds the exact named handler arguments from the descriptor + the stored record + the runtime context, and
+`ProcessEventTime` (AF5) dispatches through that adapter. A domain procedure that ProcessEventTime cannot supply
+with its REAL inputs is NOT listed as a queued handler here; instead an executable driver-event WRAPPER (AF4) is the
+queued handler, and the wrapper calls the domain procedure with the exact arguments.
 
-| Event type | Handler procedure | Required immutable_payload fields | recv env | recv ref | Target microphase | Stable tie key |
-|-----------|-------------------|-----------------------------------|:--:|:--:|-------------------|----------------|
-| `RoundInitialise` | `RoundInitialise` | `RoundID` | no | no | `ROUND_SETUP` | `(RoundID)` |
-| `TemplateCommit` | `TemplateCommit` | `RoundID, TemplateID` | no | no | `TEMPLATE_COMMIT` | `(RoundID, TemplateID)` |
-| `PrepareParticipants` | `PrepareParticipantsForNewRound` | `RoundID, TemplateID` | yes | no | `ASSIGNMENT_SETUP` | `(RoundID, TemplateID)` |
-| `MinerRegister` | `MinerRegister` | `MinerID` | yes | no | `REGISTRATION` | `(MinerID)` |
-| `ReserveActivate` | `ReserveActivate` | `deficit` | yes (as `scheduling_context`) | no | `RECOVERY_ACTIVATE` | `(MinerID)` |
-| `FullRangeExhaust` | `FullRangeExhaustNoSolution` | `RoundID, TemplateID` | yes | no | `RANGE_EXHAUST_ADJUDICATE` | `(RoundID, TemplateID)` |
-| `HashWorkEvent` | `HashWorkEvent` | `MinerID, AssignmentID, assignment_version, RoundID, TemplateID, from_cursor` (the handler binds `from_cursor` locally as `cursor`) | yes | no | `HASH_WORK` | `(MinerID, AssignmentID, assignment_version)` |
-| `CertificateArrival` | `CertificateArrival` | `recipient, certificate, snapshot, CandidateID, PropagationID` | yes | no | `CERTIFICATE_ARRIVAL` | `(recipient, CandidateID, PropagationID)` |
-| `BlockAcceptancePoint` | `BlockAcceptancePoint` | `certificate, snapshot, CandidateID, PropagationID, outcome` | no | no | `FULL_BLOCK_ARRIVAL` | `(CandidateID, PropagationID)` |
-| `AcceptanceBatchFinalize` | `AcceptanceBatchFinalize` | `acceptance_timestamp, acceptance_point` | yes | no | `ACCEPTANCE_ARBITRATION` | `(acceptance_timestamp, acceptance_point)` |
-| `WakeCompleteEvent` | `WakeCompleteEvent` | `MinerID, AssignmentID` | yes | no | `WAKE_COMPLETE` | `(MinerID, AssignmentID, assignment_version)` |
-| `ResumeFromPause` | `ResumeFromPause` | `MinerID, trigger, pause_cause_candidate_id, pause_cause_propagation_id` | yes | no | `RESUME` | `(MinerID, CandidateID, PropagationID)` |
-| `LeaseExpiry` | `LeaseExpiry` | `assignment (AssignmentID, assignment_version), time t` | yes | no | `LEASE_EXPIRY` | `(MinerID, AssignmentID, assignment_version)` |
-| `AdversarialParticipationChangeEvent` | `AdversarialParticipationChangeEvent` | `MinerID, direction` | yes | no | `PARTICIPATION_CHANGE` | `(MinerID)` |
-| `ActiveHashRateUpdate` | `ActiveHashRateUpdate` | `time t` | no | no | `MONITORING` | `(RoundID)` |
-| `RecoveryDeadlineEvent` | `RecoveryDeadlineEvent` | `RecoveryEpisodeID, RoundID_at_entry, TemplateID_at_entry, state_version_at_entry` | yes | no | `RECOVERY_DEADLINE` | `(RoundID, RecoveryEpisodeID)` |
-| `RecoveryCompletionDueEvent` | `RecoveryCompletionDueEvent` | `RecoveryEpisodeID, RecoveryDecisionID, RecoveryOutcome, RecoveryCensusVersion, RoundID_at_decision, TemplateID_at_decision, state_version_at_decision` | yes | no | `RECOVERY_COMPLETION_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryDecisionID)` |
-| `RecoveryAssignmentContinuationDueEvent` | `RecoveryAssignmentContinuationDueEvent` | `RecoveryEpisodeID, RecoveryDecisionID, ContinuationGeneration, RecoveryOutcome, RoundID_at_decision, TemplateID_at_decision, state_version_at_decision` | yes | no | `RECOVERY_ASSIGNMENT_CONTINUATION_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryDecisionID, ContinuationGeneration)` |
-| `RecoveryWorkDueEvent` | `RecoveryWorkDueEvent` | `RecoveryEpisodeID, RecoveryWorkID, WorkGeneration, RecoveryWorkAction, RecoveryCensusVersion, RoundID_at_work, TemplateID_at_work, state_version_at_work` | yes | no | `RECOVERY_WORK_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryWorkID, WorkGeneration)` |
-| `SetupRetryEvent` | `SetupRetryEvent` | `RoundID, setup_kind, SetupRetryID, TemplateID_at_seat, TemplateRefreshSetupID, retry_generation, reason` | yes | **yes** | `ROUND_SETUP` | `(RoundID, setup_kind, SetupRetryID, TemplateID_at_seat, TemplateRefreshSetupID, retry_generation)` |
-| `RoundAbort` | `RoundAbort` | `RoundID` | yes | no | `TERMINAL_ABORT` | `(RoundID)` |
+```
+STRUCTURE event_descriptor (AF1 — the executable schema for ONE queued event type)
+  event_type            : the queued event-type tag (the registry key)
+  handler_procedure     : the EXACT procedure ProcessEventTime dispatches (a driver-event wrapper for AF4 types,
+                          #   the domain procedure for a direct handler); its declared INPUTS are the authority
+  allowed_payload_keys  : the EXACT, CLOSED set of immutable_payload keys — NOT merely the required subset. A request
+                          #   whose payload key set != this set EXACTLY (any missing OR any extra key) is rejected (AF3)
+  payload_field_types   : allowed_payload_keys -> declared type (a key whose value fails its type is rejected, AF3)
+  payload_to_param_map  : allowed_payload_keys -> the handler parameter each payload key binds (some via a resolver,
+                          #   e.g. (AssignmentID, assignment_version) -> target_assignment via version(...))
+  runtime_injected      : the handler parameters BuildHandlerInvocation supplies from the runtime context (NOT payload):
+                          #   RoundContext / RunContext / dispatch_envelope / dispatched_event_ref /
+                          #   scheduling_context = ORDINARY_DISPATCH(dispatch_envelope). Gated by recv_env / recv_ref.
+  derived_by_handler    : values the HANDLER mints or resolves at dispatch (NOT payload, NOT a tie key):
+                          #   e.g. RoundInitialise mints RoundID; TemplateCommit mints TemplateID; MinerRegister derives
+                          #   MinerID; ReserveActivate SELECTs its reserve MinerID; a version(...) resolver yields an assignment
+  target_microphase     : the FIXED microphase (ScheduleEvent rejects a request whose target_microphase != this, AF3)
+  stable_tie_key(record): the DESCRIPTOR-DERIVED total-order tie key, computed from THIS descriptor's payload keys
+                          #   ONLY (never the generic (CandidateID, MinerID, AssignmentID) tuple). Rejected as
+                          #   unavailable if any key it names is absent from the validated payload (AF3)
+  cancellation_identity : the stored EventRef is the sole CancelQueuedEvent handle; the payload keys a canceller uses to
+                          #   LOCATE that EventRef are listed (e.g. CandidateID/PropagationID for arrival events, the
+                          #   AE6 reverse binding setup_retry_by_seat_event_ref[er] for SetupRetryEvent)
+  recv_env              : yes IFF handler_procedure declares dispatch_envelope (or, for ReserveActivateEvent, needs it to
+                          #   build scheduling_context); ProcessEventTime injects it ONLY when yes (AF2 Design B)
+  recv_ref              : yes IFF handler_procedure declares dispatched_event_ref (currently ONLY SetupRetryEvent)
+```
 
-`SetupRetryEvent` is the ONLY handler with `recv ref` = yes (AC2/AD5: `dispatched_event_ref` is a mandatory input the
-dispatcher injects). `BlockAcceptancePoint`, `RoundInitialise`, `TemplateCommit`, and `ActiveHashRateUpdate` are the
-handlers with `recv env` = no — the dispatcher does NOT pass them a `dispatch_envelope` (AE5: this closes the AD5 defect
-whereby `dispatch_envelope` was passed to every ordinary handler including ones, like `BlockAcceptancePoint`, that do not
-declare it). Every handler's declared INPUTS agree with this row (`STAGE_01AE_EVENT_HANDLER_SCHEMA_AUDIT.md`,
-`STAGE_01AE_DISPATCH_SIGNATURE_AUDIT.md`).
+**The FIVE distinct categories (AF1 — never conflated).** For every descriptor the schema keeps these APART:
+(1) **handler input parameters** — the named parameters the handler_procedure declares (`payload_to_param_map` targets
++ `runtime_injected`); (2) **runtime context injected** — `RoundContext` / `RunContext` / `dispatch_envelope` /
+`dispatched_event_ref` / the `scheduling_context` wrapper, supplied by `BuildHandlerInvocation`, NEVER stored in the
+payload; (3) **payload fields stored at seating** — `allowed_payload_keys` with `payload_field_types`, the ONLY thing
+`ScheduleEvent` validates and the ONLY thing carried on the record; (4) **values derived by the handler** —
+`derived_by_handler` (minted ids, SELECTed miners, `version(...)`-resolved assignments), which are NOT payload and NOT
+tie keys; (5) **stable ordering keys** — `stable_tie_key(record)`, derived from the payload keys for total ordering
+ONLY. A minted/derived id (RoundID, TemplateID, MinerID) or a tie-key value is NEVER counted as a handler payload
+field.
+
+**Descriptor core (category 3 payload + 4/5/microphase/cancellation).** `allowed_payload_keys` below is the EXACT
+closed set (AF3): a request missing a key OR carrying an extra key is `rejected_payload_schema_mismatch`.
+
+| Event type | Handler procedure | `allowed_payload_keys : type` (EXACT closed set) | Target microphase | `stable_tie_key(record)` (descriptor-derived) | Derived by handler (NOT payload) | recv env | recv ref |
+|-----------|-------------------|--------------------------------------------------|-------------------|-----------------------------------------------|----------------------------------|:--:|:--:|
+| `RoundInitialiseEvent` (AF4) | `RoundInitialiseEvent` -> `RoundInitialise` | `{ round_setup_seq : Integer }` | `ROUND_SETUP` | `(round_setup_seq)` | `RoundID` (minted), `config`/`prior_state` (resolved from RunContext) | no | no |
+| `TemplateCommitEvent` (AF4) | `TemplateCommitEvent` -> `TemplateCommit` | `{ RoundID_at_seat : RoundID, candidate_template : CandidateTemplate }` | `TEMPLATE_COMMIT` | `(RoundID_at_seat, candidate_template_id(candidate_template))` | `TemplateID` (minted from candidate_template) | no | no |
+| `PrepareParticipantsEvent` (AF4) | `PrepareParticipantsEvent` -> `PrepareParticipantsForNewRound` | `{ RoundID_at_seat : RoundID, TemplateID_at_seat : TemplateID }` | `ASSIGNMENT_SETUP` | `(RoundID_at_seat, TemplateID_at_seat)` | — | yes | no |
+| `MinerRegisterEvent` (AF4) | `MinerRegisterEvent` -> `MinerRegister` | `{ join_request : JoinRequest }` | `REGISTRATION` | `(join_request_id(join_request))` | `MinerID` (derived from join_request) | yes | no |
+| `ReserveActivateEvent` (AF4) | `ReserveActivateEvent` -> `ReserveActivate` | `{ RoundID_at_seat : RoundID, deficit : Rate, activation_seq : Integer }` | `RECOVERY_ACTIVATE` | `(RoundID_at_seat, activation_seq)` | reserve `MinerID` (SELECTed by ReserveActivate); the wrapper builds `scheduling_context = ORDINARY_DISPATCH(dispatch_envelope)` for the ReserveActivate call | yes (wrapper receives `dispatch_envelope`) | no |
+| `FullRangeExhaustEvent` (AF4) | `FullRangeExhaustEvent` -> `FullRangeExhaustNoSolution` | `{ RoundID_at_seat : RoundID, TemplateID_at_seat : TemplateID }` | `RANGE_EXHAUST_ADJUDICATE` | `(RoundID_at_seat, TemplateID_at_seat)` | — | yes | no |
+| `HashWorkEvent` | `HashWorkEvent` | `{ MinerID : MinerID, AssignmentID : AssignmentID, assignment_version : Integer, RoundID : RoundID, TemplateID : TemplateID, from_cursor : NoncePosition }` | `HASH_WORK` | `(MinerID, AssignmentID, assignment_version)` | `assignment` = `version(AssignmentID, assignment_version)` | yes | no |
+| `CertificateArrival` | `CertificateArrival` | `{ recipient : MinerID, certificate : EarlyStopCertificate, snapshot : SolutionEligibilitySnapshot, CandidateID : CandidateID, PropagationID : PropagationID }` | `CERTIFICATE_ARRIVAL` | `(recipient, CandidateID, PropagationID)` | — | yes | no |
+| `BlockAcceptancePoint` | `BlockAcceptancePoint` | `{ certificate : EarlyStopCertificate, snapshot : SolutionEligibilitySnapshot, CandidateID : CandidateID, PropagationID : PropagationID, outcome : AcceptanceOutcome }` | `FULL_BLOCK_ARRIVAL` | `(CandidateID, PropagationID)` | — | **no** | no |
+| `AcceptanceBatchFinalize` | `AcceptanceBatchFinalize` | `{ acceptance_timestamp : SimulationTime, acceptance_point : AcceptancePoint }` | `ACCEPTANCE_ARBITRATION` | `(acceptance_timestamp, acceptance_point)` | — | yes | no |
+| `WakeCompleteEvent` | `WakeCompleteEvent` | `{ MinerID : MinerID, AssignmentID : AssignmentID, assignment_version : Integer }` | `WAKE_COMPLETE` | `(MinerID, AssignmentID, assignment_version)` | `target_assignment` = `version(AssignmentID, assignment_version)` | yes | no |
+| `ResumeFromPause` | `ResumeFromPause` | `{ MinerID : MinerID, trigger : ResumeTrigger, pause_cause_candidate_id : CandidateID, pause_cause_propagation_id : PropagationID }` | `RESUME` | `(MinerID, pause_cause_candidate_id, pause_cause_propagation_id)` | — | yes | no |
+| `LeaseExpiry` | `LeaseExpiry` | `{ AssignmentID : AssignmentID, assignment_version : Integer, t : SimulationTime }` | `LEASE_EXPIRY` | `(AssignmentID, assignment_version)` | `assignment` = `version(AssignmentID, assignment_version)` | yes | no |
+| `AdversarialParticipationChangeEvent` | `AdversarialParticipationChangeEvent` | `{ MinerID : MinerID, direction : ParticipationDirection }` | `PARTICIPATION_CHANGE` | `(MinerID, direction)` | — | yes | no |
+| `ActiveHashRateUpdate` | `ActiveHashRateUpdate` | `{ t : SimulationTime }` | `MONITORING` | `(t)` | — | **no** | no |
+| `RecoveryDeadlineEvent` | `RecoveryDeadlineEvent` | `{ RecoveryEpisodeID : RecoveryEpisodeID, RoundID_at_entry : RoundID, TemplateID_at_entry : TemplateID, state_version_at_entry : Integer }` | `RECOVERY_DEADLINE` | `(RoundID_at_entry, RecoveryEpisodeID)` | — | yes | no |
+| `RecoveryCompletionDueEvent` | `RecoveryCompletionDueEvent` | `{ RecoveryEpisodeID : RecoveryEpisodeID, RecoveryDecisionID : RecoveryDecisionID, RecoveryOutcome : RecoveryOutcome, RecoveryCensusVersion : Integer, RoundID_at_decision : RoundID, TemplateID_at_decision : TemplateID, state_version_at_decision : Integer }` | `RECOVERY_COMPLETION_DUE` | `(RoundID_at_decision, RecoveryEpisodeID, RecoveryDecisionID)` | — | yes | no |
+| `RecoveryAssignmentContinuationDueEvent` | `RecoveryAssignmentContinuationDueEvent` | `{ RecoveryEpisodeID : RecoveryEpisodeID, RecoveryDecisionID : RecoveryDecisionID, ContinuationGeneration : Integer, RecoveryOutcome : RecoveryOutcome, RoundID_at_decision : RoundID, TemplateID_at_decision : TemplateID, state_version_at_decision : Integer }` | `RECOVERY_ASSIGNMENT_CONTINUATION_DUE` | `(RoundID_at_decision, RecoveryEpisodeID, RecoveryDecisionID, ContinuationGeneration)` | — | yes | no |
+| `RecoveryWorkDueEvent` | `RecoveryWorkDueEvent` | `{ RecoveryEpisodeID : RecoveryEpisodeID, RecoveryWorkID : RecoveryWorkID, WorkGeneration : Integer, RecoveryWorkAction : RecoveryWorkAction, RecoveryCensusVersion : Integer, RoundID_at_work : RoundID, TemplateID_at_work : TemplateID, state_version_at_work : Integer }` | `RECOVERY_WORK_DUE` | `(RoundID_at_work, RecoveryEpisodeID, RecoveryWorkID, WorkGeneration)` | — | yes | no |
+| `SetupRetryEvent` | `SetupRetryEvent` | `{ RoundID : RoundID, setup_kind : SetupKind, SetupRetryID : SetupRetryID, TemplateID_at_seat : TemplateID, TemplateRefreshSetupID : (TemplateRefreshSetupID | null), retry_generation : Integer, reason : SetupRetryReason }` | `ROUND_SETUP` | `(RoundID, setup_kind, SetupRetryID, TemplateID_at_seat, TemplateRefreshSetupID, retry_generation)` | — | yes | **yes** |
+
+**Descriptor binding (categories 1/2 — the exact `payload_to_param_map` + `runtime_injected`; AF2).**
+`BuildHandlerInvocation` (§0.7g-adapter, AF2) constructs the named handler arguments from THIS map; no handler ever
+receives an undeclared argument, an unresolved alias, or a derived output in place of an input.
+
+| Event type | `payload_to_param_map` (payload key -> handler parameter) | `runtime_injected` (context -> handler parameter) |
+|-----------|-----------------------------------------------------------|----------------------------------------------------|
+| `RoundInitialiseEvent` | (none — `round_setup_seq` is the seat identity / idempotence key only) | `RunContext -> RunContext`; wrapper resolves `config <- RunContext.config`, `prior_state <- RunContext.prior_round_terminal_state` |
+| `TemplateCommitEvent` | `candidate_template -> candidate_template` | `RoundContext -> RoundContext` |
+| `PrepareParticipantsEvent` | (none — `RoundID_at_seat`/`TemplateID_at_seat` are the staleness / tie-key context) | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope` |
+| `MinerRegisterEvent` | `join_request -> join_request` | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope` |
+| `ReserveActivateEvent` | `deficit -> deficit` (`RoundID_at_seat`/`activation_seq` = staleness / tie-key context) | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope` (the wrapper then builds `scheduling_context = ORDINARY_DISPATCH(dispatch_envelope)` for the ReserveActivate call — AF2: never a bare envelope reaches ReserveActivate) |
+| `FullRangeExhaustEvent` | (none — `RoundID_at_seat`/`TemplateID_at_seat` are the staleness / tie-key context) | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope` |
+| `HashWorkEvent` | `MinerID -> MinerID`; `AssignmentID -> AssignmentID`; `assignment_version -> assignment_version`; `RoundID -> RoundID`; `TemplateID -> TemplateID`; `from_cursor -> cursor` | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope` |
+| `CertificateArrival` | `recipient -> r`; `certificate -> certificate`; `snapshot -> snapshot`; `CandidateID -> CandidateID`; `PropagationID -> PropagationID` | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope` |
+| `BlockAcceptancePoint` | `certificate -> certificate`; `snapshot -> snapshot`; `CandidateID -> CandidateID`; `PropagationID -> PropagationID`; `outcome -> outcome` | `RoundContext -> RoundContext` (AF2: NO `dispatch_envelope`, NO `dispatched_event_ref`) |
+| `AcceptanceBatchFinalize` | `acceptance_timestamp -> acceptance_timestamp`; `acceptance_point -> acceptance_point` | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope` |
+| `WakeCompleteEvent` | `MinerID -> MinerID`; `(AssignmentID, assignment_version) -> target_assignment` via `version(AssignmentID, assignment_version)` (AF2) | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope` |
+| `ResumeFromPause` | `MinerID -> MinerID`; `trigger -> trigger`; `pause_cause_candidate_id -> pause_cause_candidate_id`; `pause_cause_propagation_id -> pause_cause_propagation_id` | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope` |
+| `LeaseExpiry` | `(AssignmentID, assignment_version) -> assignment` via `version(AssignmentID, assignment_version)`; `t -> t` | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope` |
+| `AdversarialParticipationChangeEvent` | `MinerID -> MinerID`; `direction -> direction` | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope` |
+| `ActiveHashRateUpdate` | `t -> t` | `RoundContext -> RoundContext` (no envelope) |
+| `RecoveryDeadlineEvent` | `RecoveryEpisodeID -> RecoveryEpisodeID`; `RoundID_at_entry -> RoundID_at_entry`; `TemplateID_at_entry -> TemplateID_at_entry`; `state_version_at_entry -> state_version_at_entry` | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope` |
+| `RecoveryCompletionDueEvent` | each payload key -> the identically-named handler parameter | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope` |
+| `RecoveryAssignmentContinuationDueEvent` | each payload key -> the identically-named handler parameter | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope` |
+| `RecoveryWorkDueEvent` | each payload key -> the identically-named handler parameter | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope` |
+| `SetupRetryEvent` | each payload key -> the identically-named handler parameter | `RoundContext -> RoundContext`; `dispatch_envelope -> dispatch_envelope`; `dispatched_event_ref <- ctx.dispatched_event_ref` (recv ref = yes) |
+
+**Cancellation identity (per descriptor).** The stored `event_ref` is the SOLE `CancelQueuedEvent` handle (AE1); the
+payload keys a canceller uses to LOCATE that `event_ref` are: `CertificateArrival`/`BlockAcceptancePoint` — the owning
+CPC's `(CandidateID, PropagationID)` (the CPC stores the arrival `EventRef`s, F1); `WakeCompleteEvent` — the wake
+transaction's returned `WakeEventRef` (StartWake, V3), keyed by `(MinerID, AssignmentID, assignment_version)`;
+`SetupRetryEvent` — the AE6 reverse binding `setup_retry_by_seat_event_ref[er]` (never the payload `SetupRetryID`);
+`HashWorkEvent`/`ResumeFromPause`/recovery-due events — the stored `EventRef` recorded at their seat site. A canceller
+never reconstructs an `EventRef` from ambient state; it cancels the STORED handle.
+
+**RoundAbort is NOT a queued event (AF1).** `RoundAbort` is a SYNCHRONOUS procedure invoked only by a DIRECT `CALL`
+(never through `ScheduleEvent`, never dispatched by `ProcessEventTime`); it therefore has NO `event_descriptor` and
+does not appear above. The `TERMINAL_ABORT` §21 ordinal is retained ONLY as the top same-timestamp priority slot for
+the terminal state; it is not a seated microphase. (Supersedes the AE4 `RoundAbort` schema row and the §0.7g-driver
+`RoundAbort` seating row — see `STAGE_01AF_SUPERSESSION_REGISTER.md`.)
+
+`SetupRetryEvent` is the ONLY descriptor with `recv ref` = yes (AC2/AD5: `dispatched_event_ref` is a mandatory input
+the dispatcher injects). `BlockAcceptancePoint` and `ActiveHashRateUpdate` are the ONLY descriptors with `recv env` =
+no — the dispatcher passes them NO `dispatch_envelope` (AE5/AF2: this closes the AD5 defect whereby an envelope was
+passed to a handler that does not declare it). Every handler's declared INPUTS agree with its descriptor row and its
+binding row (`STAGE_01AF_EVENT_DESCRIPTOR_AUDIT.md`, `STAGE_01AF_DISPATCH_ADAPTER_AUDIT.md`). The §0.7g microphase map
+and the §0.7g-driver seating table remain consistent VIEWS of this descriptor set (target microphase, stable tie key);
+the driver-seated types (rows marked AF4) are dispatched through their wrapper handlers (§0.7g-wrappers).
+
+**(0.7g-wrappers) Executable driver-event wrappers (AF4).** A domain procedure whose REAL inputs `ProcessEventTime`
+cannot supply from a stored `immutable_payload` (because it mints/derives an id, receives a `RunContext`, or needs the
+`scheduling_context` WRAPPER) is NOT dispatched directly. Instead the queued handler is a WRAPPER whose descriptor
+payload is exactly what the sim driver stores at seat time; the wrapper receives its declared runtime context, calls
+the domain procedure with the EXACT arguments, inspects the domain result, and RETURNS its own disposition. This
+closes the AE4 defect whereby `RoundInitialise`/`TemplateCommit`/`MinerRegister`/`ReserveActivate`/
+`FullRangeExhaustNoSolution`/`PrepareParticipantsForNewRound` were listed as queued handlers although
+`ProcessEventTime` could not supply their real inputs (`STAGE_01AF_SUPERSESSION_REGISTER.md`).
+
+```
+PROCEDURE RoundInitialiseEvent                                   # AF4: wrapper for ROUND_SETUP -> RoundInitialise
+  INPUTS: RunContext, round_setup_seq                            # AF1: RunContext is runtime context; round_setup_seq = seat identity / tie key
+  PRECONDITIONS: dispatched by ProcessEventTime for a RoundInitialiseEvent record (descriptor recv env = no, recv ref = no);
+                 no active round OR the prior round is dispositioned (RoundInitialise's own precondition)
+  EFFECTS:
+    # AF1/AF4: RoundInitialise MINTS RoundID and CREATES the RoundContext. config and prior_state are RUNTIME context
+    #   resolved from RunContext (AF6) — NEVER stored payload. round_setup_seq is the deterministic idempotence / tie key ONLY.
+    SET config      <- RunContext.config                          # AF6: config is owned by RunContext
+    SET prior_state <- RunContext.prior_round_terminal_state      # AF6: null for the first round; the prior terminal RoundContext otherwise
+    SET rc <- CALL RoundInitialise(config = config, RunContext = RunContext, prior_state = prior_state)   # mints RoundID; returns RoundContext
+    SET RunContext.current_round_context <- rc                    # AF6: publish the new RoundContext for the round's subsequent driver events
+    RETURN round_initialised(rc.RoundID)                          # AF4: inspect the domain result, return this wrapper's disposition
+  RETURNS: round_initialised(RoundID)
+
+PROCEDURE TemplateCommitEvent                                    # AF4: wrapper for TEMPLATE_COMMIT -> TemplateCommit
+  INPUTS: RoundContext, RoundID_at_seat, candidate_template      # AF1: TemplateCommit MINTS TemplateID from candidate_template
+  PRECONDITIONS: dispatched for a TemplateCommitEvent record (recv env = no, recv ref = no); round_state = TEMPLATE_COMMITMENT
+  EFFECTS:
+    IF RoundID_at_seat != RoundID_current:
+      RETURN template_commit_stale_noop(RoundID_at_seat)          # AF4: a commit seated for a superseded round is a no-op
+    SET TemplateID <- CALL TemplateCommit(RoundContext, candidate_template = candidate_template)   # mints TemplateID
+    RETURN template_committed(RoundID_current, TemplateID)        # AF4: TemplateID is DERIVED, never payload
+  RETURNS: template_committed(RoundID, TemplateID) | template_commit_stale_noop(RoundID_at_seat)
+
+PROCEDURE MinerRegisterEvent                                     # AF4: wrapper for REGISTRATION -> MinerRegister
+  INPUTS: RoundContext, join_request, dispatch_envelope          # AF1: MinerRegister DERIVES MinerID from join_request
+  PRECONDITIONS: dispatched for a MinerRegisterEvent record (recv env = yes, recv ref = no); round admits participation
+  EFFECTS:
+    SET MinerID <- CALL MinerRegister(RoundContext, join_request = join_request, dispatch_envelope = dispatch_envelope)  # derives MinerID
+    RETURN miner_registered(MinerID)                              # AF4: MinerID is DERIVED, never payload
+  RETURNS: miner_registered(MinerID)
+
+PROCEDURE PrepareParticipantsEvent                              # AF4: wrapper for ASSIGNMENT_SETUP -> PrepareParticipantsForNewRound
+  INPUTS: RoundContext, RoundID_at_seat, TemplateID_at_seat, dispatch_envelope
+  PRECONDITIONS: dispatched for a PrepareParticipantsEvent record (recv env = yes, recv ref = no); round_state = ASSIGNMENT
+  EFFECTS:
+    IF RoundID_at_seat != RoundID_current OR TemplateID_at_seat != TemplateID_committed:
+      RETURN participant_setup_stale_noop(RoundID_at_seat, TemplateID_at_seat)   # AF4: seated for a superseded round/template
+    RETURN CALL PrepareParticipantsForNewRound(RoundContext, dispatch_envelope = dispatch_envelope)   # AF4: propagate the domain disposition
+  RETURNS: participant_set_prepared | participant_set_setup_retry_seated(SetupRetryID, reason) | round_aborted(abort_record) |
+           participant_setup_stale_noop(RoundID_at_seat, TemplateID_at_seat)
+           # AF4: enumerates EVERY PrepareParticipantsForNewRound disposition it propagates (participant_set_prepared /
+           #   participant_set_setup_retry_seated / round_aborted) plus this wrapper's own stale-noop.
+
+PROCEDURE ReserveActivateEvent                                  # AF4: wrapper for RECOVERY_ACTIVATE -> ReserveActivate
+  INPUTS: RoundContext, RoundID_at_seat, deficit, activation_seq, dispatch_envelope
+  PRECONDITIONS: dispatched for a ReserveActivateEvent record (recv env = yes, recv ref = no); round_state in {SECURITY_RECOVERY, ASSIGNMENT}
+  EFFECTS:
+    IF RoundID_at_seat != RoundID_current:
+      RETURN reserve_activation_stale_noop(RoundID_at_seat)
+    # AF2: ReserveActivate receives a SchedulingSourceContext WRAPPER, NEVER a bare dispatch_envelope. A queued
+    #   (ordinary-dispatch) reserve activation is ORDINARY_DISPATCH(dispatch_envelope). The post-epilogue recovery-work /
+    #   continuation path calls ReserveActivate DIRECTLY with POST_EPILOGUE(pctx) (not a queued dispatch, §9c/§10a).
+    RETURN CALL ReserveActivate(RoundContext, deficit = deficit,
+                     scheduling_context = ORDINARY_DISPATCH(dispatch_envelope))   # AF2: the WRAPPER, not the bare envelope
+  RETURNS: reserve_activation_committed(MinerID, AssignmentID, assignment_version, WakeEventRef) |
+           reserve_activation_failed_before_mutation(reason) |
+           reserve_activation_failed_after_assignment(reason, AssignmentID, rollback_record) |
+           reserve_activation_stale_noop(RoundID_at_seat)
+
+PROCEDURE FullRangeExhaustEvent                                 # AF4: wrapper for RANGE_EXHAUST_ADJUDICATE -> FullRangeExhaustNoSolution
+  INPUTS: RoundContext, RoundID_at_seat, TemplateID_at_seat, dispatch_envelope
+  PRECONDITIONS: dispatched for a FullRangeExhaustEvent record (recv env = yes, recv ref = no); FullRangeExhaustNoSolution's
+                 own coverage preconditions (C9: full accepted-searched coverage; no live block)
+  EFFECTS:
+    IF RoundID_at_seat != RoundID_current OR TemplateID_at_seat != TemplateID_committed:
+      RETURN range_exhaust_stale_noop(RoundID_at_seat, TemplateID_at_seat)
+    RETURN CALL FullRangeExhaustNoSolution(RoundContext, dispatch_envelope = dispatch_envelope)   # AF4: propagate TemplateRefresh / round_aborted
+  RETURNS: (FullRangeExhaustNoSolution disposition: new_TemplateID | template_refresh_retry_seated(SetupRetryID, reason) |
+           template_refresh_retry_stale_noop(TemplateRefreshSetupID) | round_aborted(abort_record)) |
+           range_exhaust_stale_noop(RoundID_at_seat, TemplateID_at_seat)
+  NOTE: AF4: each wrapper stores EXACTLY its descriptor payload, receives its declared runtime context, calls the domain
+        procedure with the EXACT named arguments (BuildHandlerInvocation, AF2), inspects the domain result, and returns
+        its own disposition. No domain procedure is listed as a queued handler when ProcessEventTime cannot supply its
+        real inputs; the wrapper supplies them (config/RunContext/prior_state from RunContext; candidate_template /
+        join_request / deficit from the payload; scheduling_context = ORDINARY_DISPATCH(dispatch_envelope) built here).
+```
 
 ### 0.8 Core data model (Stage 1F)
 
@@ -1750,7 +2013,9 @@ PROCEDURE WakeCompleteEvent
       CALL ApplyMinerStateTransition(MinerID, WAKING, ACTIVE_HASHING,
                                      transition_envelope = dispatch_envelope, reason = ramp_complete,   # S1: ONE envelope object
                                      assignment_ref = target_assignment, candidate_id = null, propagation_id = null)   # F6 (M1)
-      # G9: begin EVENT-SCHEDULED hashing (NOT a blocking loop); identical for a fresh or resumed range.
+      # G9/AF7: begin EVENT-SCHEDULED hashing (NOT a blocking loop); identical for a fresh or resumed range. The success
+      #   disposition IS StartHashing's result — hashing_started(event_ref) when the first unit seated, or
+      #   hashing_not_started(reason) at the horizon (AF7: StartHashing now RETURNs both explicitly).
       RETURN CALL StartHashing(RoundContext, MinerID, target_assignment)
     ELSE:
       # G4: STATUS-AWARE wake failure. Move the miner OFFLINE via the hook, then branch on the target
@@ -1786,7 +2051,9 @@ PROCEDURE WakeCompleteEvent
           RECORD wake_failure_energy_and_provenance(MinerID, target_assignment, resumed = true)
 
       RETURN activation_failure
-  RETURNS: activation_record | activation_failure
+  RETURNS: hashing_started(event_ref) | hashing_not_started(reason) | stale_wake_noop | activation_failure
+           # AF7: the success path RETURNs StartHashing's disposition (hashing_started(event_ref) | hashing_not_started(reason));
+           #   the stale-target guard returns stale_wake_noop; a wake-deadline failure returns activation_failure.
   NOTE: M3: WakeCompleteEvent BEGINS with an explicit stale-target guard (status in {PENDING, PAUSED},
         current round/template epoch, the miner's own live head); a wake for a CLOSED/superseded/reassigned
         target returns stale_wake_noop and CANNOT activate the miner. This guard is independent of the
@@ -1929,14 +2196,31 @@ PROCEDURE RunInitialise                                         # Q5: creates AL
     INITIALISE setup_retry_by_seat_event_ref <- empty map   # AE6: EventRef -> SetupRetryID (IMMUTABLE reverse binding; corrupt-retry owner is resolved from the trusted seat EventRef, never the payload)
     INITIALISE waking_origin_assignment_ref <- empty map    # Z5: MinerID -> assignment_version_ref (set on WAKING entry, cleared on WAKING exit)
     SET        maximum_setup_retries       <- config.maximum_setup_retries   # W8/Y3: bounded retry budget per scope
+    # AF6: store the per-run driver context RoundInitialiseEvent (AF4) needs, so config/prior_state are RunContext-owned
+    #   runtime context (never stored payload) and the current RoundContext is publishable across a round's driver events.
+    SET        config                      <- config          # AF6: the per-run config (owned by RunContext; RoundInitialise reads RunContext.config)
+    INITIALISE prior_round_terminal_state  <- null            # AF6: the prior terminal RoundContext for the next RoundInitialise (null at run start)
+    INITIALISE current_round_context       <- null            # AF6: the active RoundContext, published by RoundInitialiseEvent (null until the first round)
   RETURNS: RunContext(RunID, EventQueueContext = EQ, RunHookContext, rebased_boundaries, run_finalised,
                       run_horizon_T = config.horizon_T, security_census_dirty, latest_security_census,
                       security_census_write_seq_by_event_time,   # R5
                       applied_transition_registry, transition_rejection_log,
-                      setup_retry_records, waking_origin_assignment_ref, maximum_setup_retries)   # Z1/Z5
-  NOTE: Q5: the ONE-TIME owner of every per-run field. RoundInitialise NEVER (re)creates these; it receives the
-        RunContext, preserves it, and reuses it. RunEventLoopToHorizon obtains RunHookContext through
-        RunContext.RunHookContext (never an implicitly created local object).
+                      setup_retry_records, queued_event_registry, setup_retry_by_seat_event_ref,   # AF6: ADDED to RETURNS (were INITIALISEd but not returned)
+                      waking_origin_assignment_ref, maximum_setup_retries,
+                      config, prior_round_terminal_state, current_round_context)   # Z1/Z5/AF6
+  NOTE: Q5/AF6: the ONE-TIME owner of EVERY per-run field. RunContext CONTAINS and RunInitialise RETURNS all of them —
+        EventQueueContext (EQ), queued_event_registry, setup_retry_records, setup_retry_by_seat_event_ref,
+        applied_transition_registry, transition_rejection_log, the security-census maps/counters
+        (security_census_dirty, latest_security_census, security_census_write_seq_by_event_time),
+        waking_origin_assignment_ref, maximum_setup_retries, RunHookContext, rebased_boundaries, run_finalised,
+        run_horizon_T, config, prior_round_terminal_state, current_round_context. AF6 ACCESS CONVENTION: every bare
+        per-run registry name in this document (`EQ`, `queued_event_registry`, `setup_retry_by_seat_event_ref`,
+        `setup_retry_records`, `applied_transition_registry`, `transition_rejection_log`, the security-census maps,
+        `waking_origin_assignment_ref`) denotes the corresponding FIELD of the bound RunContext (reached as
+        `RoundContext.RunContext.<field>`), NOT an implicit global — so no procedure reads or writes any of them as an
+        undeclared global. RoundInitialise NEVER (re)creates these; it receives the RunContext, preserves it, and reuses
+        it. RunEventLoopToHorizon obtains RunHookContext through RunContext.RunHookContext, and ProcessEventTime obtains
+        RunContext through RoundContext.RunContext (never an implicitly created local object).
 ```
 
 ### 1.1 Round initialisation
@@ -1957,6 +2241,7 @@ PROCEDURE RoundInitialise
     # I-04: PER-ROUND registries -- reset FRESH every round (G8). No field below is an implicit global.
     INITIALISE active_propagation_set    <- empty
     INITIALISE acceptance_batch_registry <- empty
+    INITIALISE acceptance_batch_finalize_seat <- empty map   # AF8: (acceptance_timestamp, acceptance_point) -> the one live AcceptanceBatchFinalize EventRef
     SET        candidate_discovery_seq   <- 0        # G7: deterministic CandidateID counter
     SET        block_accepted            <- false
     SET        state_version             <- 0        # G10: round-state epoch
@@ -1996,7 +2281,7 @@ PROCEDURE RoundInitialise
     TRANSITION round_state -> TEMPLATE_COMMITMENT
   RETURNS: RoundContext(RoundID, D, nonce_domain, ledgers, RunContext,   # Q5: RunContext bound by reference
                         # per-round registries:
-                        active_propagation_set, acceptance_batch_registry,
+                        active_propagation_set, acceptance_batch_registry, acceptance_batch_finalize_seat,   # AF8
                         candidate_discovery_seq, block_accepted, state_version, residency_ledger,
                         # per-round recovery registries (Q5: returned EXPLICITLY):
                         recovery_episode_seq, current_recovery_episode, recovery_deadline_reached,
@@ -2811,13 +3096,17 @@ PROCEDURE StartHashing
   PRECONDITIONS: miner_state(MinerID) = ACTIVE_HASHING; assignment VALID and CURRENT
   EFFECTS:
     # G9: begin EVENT-SCHEDULED hashing; do NOT loop. Schedule the first unit and return.
-    # AE9: CAPTURE the result and report it truthfully. The only reachable rejection is post_horizon_event_rejected (O2:
-    #   the first unit at now + modeled_hash_step_time falls beyond the horizon T) — then hashing does NOT begin.
+    # AE9/AF7: CAPTURE the result and report it truthfully. EVERY path RETURNs explicitly — there is no fall-through success
+    #   (the AE9 body left the hash_work_seated case with no RETURN, so the declared hashing_started was unreachable; AF7 fixes
+    #   this — see STAGE_01AF_SUPERSESSION_REGISTER.md). The only reachable rejection is post_horizon_event_rejected (O2: the
+    #   first unit at now + modeled_hash_step_time falls beyond the horizon T) — then hashing does NOT begin.
     SET hw <- CALL ScheduleNextHashWork(RoundContext, MinerID, assignment,
                               from_cursor = next unsearched nonce in range(assignment))
+    IF hw = hash_work_seated(event_ref):
+      RETURN hashing_started(event_ref)                        # AF7: EXPLICIT success return carrying the seated first-unit EventRef
     IF hw = hash_work_not_seated(reason):
       RETURN hashing_not_started(reason)                       # AE9/O2: at the horizon — deterministic terminal, not an error
-  RETURNS: hashing_started | hashing_not_started(reason)
+  RETURNS: hashing_started(event_ref) | hashing_not_started(reason)
 
 PROCEDURE ScheduleNextHashWork
   INPUTS: RoundContext, MinerID, assignment, from_cursor
@@ -2887,10 +3176,12 @@ PROCEDURE HashWorkEvent
       RETURN CALL ExhaustionAdjudicate(RoundContext, assignment, MinerID, mode,
                                        dispatch_envelope = dispatch_envelope)   # M1: threaded envelope
     # G9: schedule the NEXT unit and return to the loop (non-blocking; other miners/events interleave).
-    # AE9: the continuation disposition IS the ScheduleNextHashWork result — hash_work_seated(EventRef) for a scheduled next
-    #   unit, or hash_work_not_seated(post_horizon_event_rejected) when the next unit would fall beyond T (hashing ends at
-    #   the horizon). It is never reported as a bare `scheduled`.
-    RETURN CALL ScheduleNextHashWork(RoundContext, MinerID, assignment, from_cursor = cursor)
+    # AE9/AF7: the continuation disposition WRAPS the ScheduleNextHashWork result in continued(...) so the body's returned
+    #   SHAPE matches the RETURNS union EXACTLY (Option B): continued(hash_work_seated(EventRef)) for a scheduled next unit, or
+    #   continued(hash_work_not_seated(post_horizon_event_rejected)) when the next unit would fall beyond T (hashing ends at the
+    #   horizon). The AE9 body returned a BARE hash_work_seated/hash_work_not_seated while the RETURNS declared it wrapped in
+    #   continued(...) — that shape mismatch is fixed here (STAGE_01AF_SUPERSESSION_REGISTER.md). Never a bare `scheduled`.
+    RETURN continued(CALL ScheduleNextHashWork(RoundContext, MinerID, assignment, from_cursor = cursor))   # AF7: continued(...) wrapper
   RETURNS: hash_work_result (solution | exhausted | continued(hash_work_seated(EventRef) | hash_work_not_seated(reason)) | noop)
   NOTE: G9: hashing is a chain of discrete units, so a certificate-arrival (or any event) scheduled
         between two units is processed in queue order -- no blocking loop delays it (TV48). Multiple
@@ -5185,16 +5476,54 @@ PROCEDURE BlockAcceptancePoint
     # register into the acceptance batch for (this timestamp, this acceptance point).
     APPEND (certificate, snapshot, CandidateID, PropagationID, outcome)
            to acceptance_batch_registry[(now, RoundContext.acceptance_point)]
-    ENSURE exactly one AcceptanceBatchFinalize(RoundContext, acceptance_timestamp = now,
-           acceptance_point = RoundContext.acceptance_point) is scheduled for microphase 4 of THIS
-           (timestamp, acceptance point)                         # G5: single finalize per (ts, point)
+    # AF8: seat the SINGLE AcceptanceBatchFinalize for (now, acceptance_point) through the NAMED owner (was raw ENSURE prose).
+    #   ScheduleEvent reads this dispatched BlockAcceptancePoint's EQ.current_* (source 1, S7) to derive the seat.
+    CALL SeatAcceptanceBatchFinalize(RoundContext, acceptance_timestamp = now,
+                     acceptance_point = RoundContext.acceptance_point,
+                     source_context = ORDINARY_DISPATCH(EQ.current_event_ref))   # AF8: named single-seat owner
     RETURN registered
   RETURNS: registered | ignored_stale_candidate
-  NOTE: G5: a block arrival never accepts or fails a candidate directly. ALL same-timestamp arrivals
+  NOTE: G5/AF8: a block arrival never accepts or fails a candidate directly. ALL same-timestamp arrivals
         (ACCEPTED_CANDIDATE and non-accept alike) are collected in acceptance_batch_registry; the ONE
-        AcceptanceBatchFinalize for the timestamp validates the accepted candidates, selects a winner,
-        commits acceptance and closes the round atomically, and dispositions the non-accept arrivals
+        AcceptanceBatchFinalize for the timestamp — seated through the named SeatAcceptanceBatchFinalize (exactly one live
+        seat per (ts, point), stored as a cancellable EventRef, never a raw enqueue) — validates the accepted candidates,
+        selects a winner, commits acceptance and closes the round atomically, and dispositions the non-accept arrivals
         candidate-scoped. No event inspects unknown future timestamps.
+
+PROCEDURE SeatAcceptanceBatchFinalize                          # AF8: the NAMED single-seat owner for the AcceptanceBatchFinalize of a (timestamp, acceptance point)
+  INPUTS: RoundContext, acceptance_timestamp, acceptance_point, source_context
+          # source_context: the SchedulingSourceContext of the seating caller (ORDINARY_DISPATCH(EQ.current_event_ref) from
+          #   the dispatched BlockAcceptancePoint, whose EQ.current_* ScheduleEvent reads to derive the seat). Audit provenance.
+  PRECONDITIONS: called by BlockAcceptancePoint (microphase 3) while registering an arrival into
+                 acceptance_batch_registry[(acceptance_timestamp, acceptance_point)]; ProcessEventTime has EQ.current_* set for
+                 the dispatched BlockAcceptancePoint (ScheduleEvent source 1, S7).
+  EFFECTS:
+    # AF8: EXACTLY ONE live AcceptanceBatchFinalize seat per (acceptance_timestamp, acceptance_point). The stored EventRef is
+    #   kept in the per-round acceptance_batch_finalize_seat map (I-04). A second same-(ts, point) arrival finds the live seat
+    #   and is IDEMPOTENT (no second seat) — this procedure NEVER creates an unregistered or duplicate queued event.
+    SET key <- (acceptance_timestamp, acceptance_point)
+    IF acceptance_batch_finalize_seat[key] EXISTS:
+      SET existing <- acceptance_batch_finalize_seat[key]
+      IF queued_event_registry[existing].queue_status = QUEUED:
+        RETURN acceptance_batch_finalize_already_seated(existing)   # AF8: idempotent — exactly one LIVE seat (replay-safe)
+      # a prior seat now DISPATCHING/CONSUMED/CANCELLED is terminal for this (ts, point): AcceptanceBatchFinalize runs EXACTLY
+      #   ONCE per (ts, point) (G5), or the seat was cancelled at round/candidate closure — do NOT re-seat.
+      RETURN acceptance_batch_finalize_seat_terminal(existing, queued_event_registry[existing].queue_status)
+    # AF8: seat through the SOLE enqueue interface with the AUTHORITATIVE §0.7g descriptor payload — never a raw enqueue.
+    SET r <- CALL ScheduleEvent(EQ, RoundContext, AcceptanceBatchFinalize,
+                     target_event_time = acceptance_timestamp, target_microphase = ACCEPTANCE_ARBITRATION,
+                     {acceptance_timestamp = acceptance_timestamp, acceptance_point = acceptance_point})   # AF1 descriptor payload (exact key set)
+    IF r = scheduled(event_ref, record):
+      SET acceptance_batch_finalize_seat[key] <- event_ref       # AF8: store the seated EventRef (cancellable via CancelQueuedEvent)
+      RETURN acceptance_batch_finalize_seated(event_ref)
+    RETURN acceptance_batch_finalize_seat_failed(r)              # AF8: structured ScheduleEvent rejection (e.g. post_horizon_event_rejected)
+  RETURNS: acceptance_batch_finalize_seated(EventRef) | acceptance_batch_finalize_already_seated(EventRef) |
+           acceptance_batch_finalize_seat_terminal(EventRef, status) | acceptance_batch_finalize_seat_failed(reason)
+  NOTE: AF8: the ONE named owner that seats the AcceptanceBatchFinalize of a (timestamp, acceptance point) through
+        ScheduleEvent (replacing the raw prose "ENSURE ... is scheduled"). It enforces EXACTLY ONE live seat per (ts, point)
+        via the per-round acceptance_batch_finalize_seat map, stores the seated EventRef (so it is cancellable through
+        CancelQueuedEvent at round/candidate closure), NEVER creates an unregistered queued event, and is idempotent /
+        replay-safe when a live seat already exists.
 ```
 
 ## 16d-bis. Propagation-failure recovery (E3)
@@ -5774,6 +6103,10 @@ PROCEDURE RoundAbort
       FOR EACH er IN certificate_arrival_events(cpc) IN stable EventRef order: CALL CancelQueuedEvent(er, cancellation_reason = round_aborted_cleanup, cancellation_context = dispatch_envelope)   # AE2: set cancellation via the queue owner
       IF block_arrival_event(cpc) != null: CALL CancelQueuedEvent(block_arrival_event(cpc), cancellation_reason = round_aborted_cleanup, cancellation_context = dispatch_envelope)   # AE2 (null if the block seat was post-horizon rejected)
     CLEAR active_propagation_set
+    # AF8: cancel every LIVE AcceptanceBatchFinalize seat through the queue owner (stable order by key), then clear both maps.
+    FOR EACH key IN SORT(keys of acceptance_batch_finalize_seat BY (acceptance_timestamp, acceptance_point) ascending):
+      CALL CancelQueuedEvent(acceptance_batch_finalize_seat[key], cancellation_reason = round_aborted_cleanup, cancellation_context = dispatch_envelope)   # AE2/AF8: idempotent (no-op if already DISPATCHING/terminal)
+    CLEAR acceptance_batch_finalize_seat                        # AF8: no pending finalize seat survives closure
     CLEAR acceptance_batch_registry                             # cancel any pending acceptance batches
     # N1 (2)-(3): centralised closure of ALL open assignments and miner paths (D7; wires the ROUND_ABORTED
     #     EnterLowPowerListen disposition; cancels pending wake/resume/certificate/hash-work events). This

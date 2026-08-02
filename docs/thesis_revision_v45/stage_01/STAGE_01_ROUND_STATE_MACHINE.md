@@ -1089,6 +1089,78 @@ establish a complete payload/signature schema; the dispatch-integrity audit trus
 TV257–TV261 did not exercise cancellation of non-`SetupRetryEvent` events or mid-batch cancellation; `ScheduleNextHashWork`
 still returned `scheduled` after a rejection).
 
+### 3.10j Stage-1AF addendum (executable dispatch binding & queue-pop lock)
+
+Stage 1AF makes the AE dispatch schema EXECUTABLE: it replaces the descriptive §0.7g-schema with a per-type
+`event_descriptor` (payload fields AND types, exact payload-key→handler-parameter mapping, runtime-injected parameters,
+target microphase, descriptor-derived stable-tie-key function, cancellation identity, and the EXACT closed payload key
+set), keeping the five categories (handler inputs / runtime context / stored payload / handler-derived values / stable
+ordering keys) apart. These statements supersede the Stage-1AE ones they name; §3.10a–§3.10i are retained as the frozen
+W/X/Y/Z/AA/AB/AC/AD/AE layers.
+
+**AF1 (executable event_descriptor set).** Each queued type has one `event_descriptor`. The AE4 rows that conflated a
+DERIVED id with payload are corrected: `RoundInitialiseEvent` mints `RoundID` (payload is only `round_setup_seq`);
+`TemplateCommitEvent` mints `TemplateID` from `candidate_template`; `MinerRegisterEvent` derives `MinerID` from
+`join_request`; `WakeCompleteEvent` carries `{MinerID, AssignmentID, assignment_version}` and the dispatcher resolves
+`target_assignment`; `ReserveActivateEvent` carries `deficit` and receives a `scheduling_context` WRAPPER. `RoundAbort` is
+REMOVED from the queued schema — it is synchronous-only (a direct `CALL`, never seated).
+
+**AF2 (executable dispatch binding).** `BuildHandlerInvocation(event_descriptor, record, RoundContext, RunContext, ctx)`
+returns the EXACT named handler arguments: `WakeCompleteEvent`.`target_assignment ← version(payload.AssignmentID,
+payload.assignment_version)`; `ReserveActivateEvent` receives `dispatch_envelope` and builds `scheduling_context =
+ORDINARY_DISPATCH(...)` (never a bare envelope reaches `ReserveActivate`); `BlockAcceptancePoint` receives no
+envelope/ref; `SetupRetryEvent` receives both; `RoundInitialiseEvent` receives `RunContext`. No handler receives an
+undeclared argument, unresolved alias, or a derived output in place of an input.
+
+**AF3 (full schema enforcement before mutation).** `ScheduleEvent` rejects, before any state mutation and structurally:
+unknown event type (`rejected_event_type_unknown`), microphase ≠ descriptor microphase (`rejected_microphase_mismatch`),
+payload key set ≠ the exact closed set or a wrong-typed value (`rejected_payload_schema_mismatch` — missing, EXTRA, or
+type-invalid), and an underivable tie key (`rejected_stable_tie_key_unavailable`). The EQ insert orders by the
+descriptor-derived `stable_tie_key`, never the generic `(CandidateID, MinerID, AssignmentID)` tuple.
+
+**AF4 (driver-event wrappers).** `RoundInitialiseEvent`, `TemplateCommitEvent`, `MinerRegisterEvent`,
+`PrepareParticipantsEvent`, `ReserveActivateEvent`, and `FullRangeExhaustEvent` each store exactly their descriptor
+payload, receive their declared runtime context, call the domain procedure with the exact arguments, inspect the domain
+result, and return their own disposition. No domain procedure is a queued handler when `ProcessEventTime` cannot supply
+its real inputs.
+
+**AF5 (atomic queue-pop before dispatch).** `ProcessEventTime` ATOMICALLY POPs the front EventRef from `EQ.event_queue`,
+asserts its registry status is `QUEUED`, sets it `DISPATCHING`, and sets the COMPLETE current context
+(`EQ.current_event_time/current_delta_cycle/current_microphase/current_event_seq/current_event_ref`) from `er.*`; after the
+handler (or the integrity path) it ATOMICALLY sets `CONSUMED` and CLEARS every `EQ.current_*`. `EQ.event_queue` is the ONE
+representation (pending `QUEUED` only; `DISPATCHING`/`CONSUMED`/`CANCELLED` absent) — the ambiguous "by projection"
+convention is removed. It re-POPs after every single event (AE3 preserved: a cancelled event, already removed from
+`EQ.event_queue`, is never POPped).
+
+**AF6 (RunContext ownership).** `RunInitialise` returns EVERY per-run field in `RunContext` — `EventQueueContext`,
+`queued_event_registry`, `setup_retry_records`, `setup_retry_by_seat_event_ref`, `applied_transition_registry`,
+`transition_rejection_log`, the security-census maps/counters, `waking_origin_assignment_ref`, `maximum_setup_retries`,
+`config`, `prior_round_terminal_state`, `current_round_context`. Every bare per-run registry name denotes a field of the
+bound `RunContext` (`RoundContext.RunContext.<field>`), never an implicit global.
+
+**AF7 (hashing result contract).** `StartHashing` RETURNs `hashing_started(event_ref)` on success and
+`hashing_not_started(reason)` at the horizon — no successful fall-through without a RETURN. `HashWorkEvent`'s continuation
+RETURNs `continued(hash_work_seated(EventRef) | hash_work_not_seated(reason))`, matching its declared RETURNS shape exactly.
+
+**AF8 (acceptance-batch seating owner).** `SeatAcceptanceBatchFinalize(acceptance_timestamp, acceptance_point,
+source_context)` replaces the prose "ENSURE exactly one … is scheduled": it seats through `ScheduleEvent` with the
+authoritative descriptor, enforces exactly one LIVE seat per `(timestamp, point)` via the per-round
+`acceptance_batch_finalize_seat` map, stores the cancellable EventRef, is idempotent/replay-safe, and never creates an
+unregistered queued event; `RoundAbort` cancels any live seat via `CancelQueuedEvent`.
+
+**AF9 (non-asserting reverse-binding corruption).** `HandleDispatchIntegrityFailure` NEVER raw-asserts on a corrupt
+reverse binding: if `setup_retry_by_seat_event_ref[er]` points to a missing record, disagrees with the record's
+`seat_event_ref`, or more than one record claims `er`, it RECORDS `dispatch_integrity_owner_binding_corrupt(er)`, consumes
+the queued event, mutates no retry record, and aborts no round — safe under corrupted ownership metadata.
+
+**AF10 (supersession of inaccurate Stage-1AE audits).** `STAGE_01AF_SUPERSESSION_REGISTER.md` records the AE audit
+inaccuracies AF corrects (the AE schema audit treated derived/tie-key identities as handler payload and marked
+`RoundInitialise`/`TemplateCommit`/`MinerRegister`/`WakeCompleteEvent` matching despite non-matching INPUTS; the AE
+dispatch-signature audit claimed a `scheduling_context` wrapper while the executable line passed a bare envelope; the AE
+queue-coherence audit relied on an ambiguous QUEUED-projection convention without an executable POP; the AE
+fire-and-forget audit missed the absent `StartHashing` success RETURN and the `HashWorkEvent` result-shape mismatch; the AE
+cross-document audit therefore incorrectly marked gates 3, 5, 6, 10, 12, 13 PASS).
+
 ### 3.11 What causes a template refresh
 
 A template refresh (`TEMPLATE_REFRESH`) is caused by (a) exhaustion of the committed

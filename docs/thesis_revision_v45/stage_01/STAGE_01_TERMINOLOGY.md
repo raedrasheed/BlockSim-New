@@ -1141,3 +1141,43 @@ Catalogue" denotes the separate document defining I1..I19.
   `QUEUED`/`DISPATCHING` at `t` after `ProcessEventTime(t)`; atomic enqueue/cancellation.
 - **Historical freeze.** Stage-1A–1AD lettered artifacts are unchanged; Stage-1AE supersessions (including the incomplete
   Stage-1AD audit claims) are recorded in `STAGE_01AE_SUPERSESSION_REGISTER.md`.
+
+## Stage-1AF terminology addendum (executable dispatch binding & queue-pop lock)
+
+- **`event_descriptor` (AF1).** The executable schema for ONE queued event type: `event_type`; `handler_procedure`;
+  `allowed_payload_keys` (the EXACT closed key set, not merely the required subset); `payload_field_types`;
+  `payload_to_param_map` (payload key → handler parameter, some via a resolver such as `version(...)`); `runtime_injected`
+  (RoundContext / RunContext / dispatch_envelope / dispatched_event_ref, gated by `recv_env`/`recv_ref`);
+  `derived_by_handler` (minted/SELECTed/resolved values that are NOT payload and NOT tie keys); `target_microphase`;
+  `stable_tie_key(record)` (descriptor-derived total-order key); and `cancellation_identity`. It supersedes the AE4
+  descriptive schema. The FIVE categories — handler inputs, runtime context, stored payload, handler-derived values, stable
+  ordering keys — are kept apart.
+- **`BuildHandlerInvocation` (AF2).** The named dispatcher adapter
+  `BuildHandlerInvocation(event_descriptor, record, RoundContext, RunContext, ctx)` returning
+  `handler_invocation(procedure, args)` — the EXACT named arguments a handler declares. It resolves
+  `WakeCompleteEvent`.`target_assignment` via `version(...)`, gives `ReserveActivateEvent` the `dispatch_envelope` (the
+  wrapper then builds `scheduling_context = ORDINARY_DISPATCH(...)`), gives `BlockAcceptancePoint` no envelope/ref, gives
+  `SetupRetryEvent` both, and gives `RoundInitialiseEvent` the `RunContext`.
+- **Driver-event wrapper (AF4).** A queued handler — `RoundInitialiseEvent`, `TemplateCommitEvent`, `MinerRegisterEvent`,
+  `PrepareParticipantsEvent`, `ReserveActivateEvent`, `FullRangeExhaustEvent` — that stores exactly its descriptor payload,
+  receives its declared runtime context, calls the domain procedure with the exact arguments, inspects the result, and
+  returns its own disposition. Used when `ProcessEventTime` cannot supply the domain procedure's real inputs.
+- **`rejected_event_type_unknown` / `rejected_microphase_mismatch` / `rejected_payload_schema_mismatch` /
+  `rejected_stable_tie_key_unavailable` (AF3).** The full `ScheduleEvent` schema-enforcement rejection set, all returned
+  BEFORE any state mutation. `rejected_payload_schema_mismatch(event_type, missing_fields, extra_fields, type_invalid_fields)`
+  now rejects an EXTRA key as well as a missing/wrong-typed one (the exact closed key set), superseding the AE7
+  required-fields-only `rejected_payload_schema_mismatch(event_type, missing_or_invalid_fields)`.
+- **Atomic queue-pop / ONE representation (AF5).** `EQ.event_queue` holds EXACTLY the pending `QUEUED` events (the ONE
+  representation; no "projection" convention). `ProcessEventTime` ATOMICALLY POPs the front EventRef, asserts it is `QUEUED`,
+  sets it `DISPATCHING`, and sets the complete `EQ.current_*` from `er.*`; after the handler it ATOMICALLY sets `CONSUMED` and
+  clears every `EQ.current_*`. A `DISPATCHING`/`CONSUMED`/`CANCELLED` EventRef is never on `EQ.event_queue`.
+- **`SeatAcceptanceBatchFinalize` (AF8).** The named single-seat owner
+  `SeatAcceptanceBatchFinalize(acceptance_timestamp, acceptance_point, source_context)` that seats the one
+  `AcceptanceBatchFinalize` per `(timestamp, point)` through `ScheduleEvent`, stores the cancellable EventRef in the per-round
+  `acceptance_batch_finalize_seat` map, is idempotent/replay-safe, and never creates an unregistered queued event. Results:
+  `acceptance_batch_finalize_seated` | `..._already_seated` | `..._seat_terminal` | `..._seat_failed`.
+- **`dispatch_integrity_owner_binding_corrupt` (AF9).** The non-asserting `HandleDispatchIntegrityFailure` result recorded
+  when the reverse binding is corrupt (missing owner record, `seat_event_ref` mismatch, or more than one record claiming the
+  seat EventRef); the handler mutates no retry record and aborts no round.
+- **Historical freeze.** Stage-1A–1AE lettered artifacts are unchanged; Stage-1AF supersessions (including the inaccurate
+  Stage-1AE audit claims) are recorded in `STAGE_01AF_SUPERSESSION_REGISTER.md`.

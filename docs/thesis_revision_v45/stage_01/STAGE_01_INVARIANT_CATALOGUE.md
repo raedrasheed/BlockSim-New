@@ -456,6 +456,25 @@ point, planned test stage, and consequence of violation.
   (registry entry + EQ entry both-or-neither). **AE9:** `ScheduleNextHashWork` returns `hash_work_seated`/`hash_work_not_seated`
   truthfully. **AE10:** the queue/registry coherence invariants hold (I21). **AE11:** incomplete Stage-1AD audit claims are
   superseded in `STAGE_01AE_SUPERSESSION_REGISTER.md`.
+- **Stage-1AF clause (executable dispatch binding & queue-pop lock).**
+  **AF1:** each queued type has one executable `event_descriptor` (exact payload fields+types, payload-key→handler-parameter
+  mapping, runtime-injected parameters, target microphase, descriptor-derived stable-tie-key function, cancellation identity,
+  and the EXACT closed payload key set); the five categories (handler inputs / runtime context / stored payload /
+  handler-derived values / stable ordering keys) are never conflated; `RoundInitialise`/`TemplateCommit`/`MinerRegister` mint
+  or derive their id (not payload), `WakeCompleteEvent` carries `assignment_version`, and synchronous `RoundAbort` is removed
+  from the queued schema. **AF2:** `BuildHandlerInvocation` binds the exact named handler arguments (WakeComplete
+  `target_assignment ← version(...)`; ReserveActivate `scheduling_context = ORDINARY_DISPATCH(...)`, never a bare envelope;
+  BlockAcceptancePoint no env/ref; SetupRetry env+ref; RoundInitialise RunContext). **AF3:** `ScheduleEvent` enforces the full
+  schema before mutation (`rejected_event_type_unknown` / `rejected_microphase_mismatch` / `rejected_payload_schema_mismatch`
+  for a missing/EXTRA/wrong-typed key / `rejected_stable_tie_key_unavailable`) and orders EQ by the descriptor tie key.
+  **AF4:** six driver-event wrappers seat exactly their payload and call the domain procedure with exact args. **AF5:**
+  `ProcessEventTime` atomically POPs before dispatch, sets/clears the complete `EQ.current_*`, and treats `EQ.event_queue` as
+  the ONE representation of the pending `QUEUED` frontier (no "projection"). **AF6:** `RunInitialise` returns every per-run
+  field in `RunContext`; no per-run registry is an implicit global. **AF7:** `StartHashing` and `HashWorkEvent` RETURN
+  explicitly with matching result shapes. **AF8:** `SeatAcceptanceBatchFinalize` is the single named seat owner (exactly one
+  live seat per `(timestamp, point)`, cancellable, replay-safe). **AF9:** `HandleDispatchIntegrityFailure` never raw-asserts on
+  a corrupt reverse binding — it records `dispatch_integrity_owner_binding_corrupt(er)` and mutates nothing. **AF10:**
+  inaccurate Stage-1AE audit claims are superseded in `STAGE_01AF_SUPERSESSION_REGISTER.md`.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest
@@ -639,7 +658,7 @@ replaced by two consistent invariants** (the old form was impossible while a lin
   `original`/`reassigned`/searched by an assignment that was rolled back), so coverage/custody accounting diverges from
   the true pre-setup state.
 
-### I21 — The event queue and the queued-event registry are coherent at all times (Stage 1AE, AE10).
+### I21 — The event queue and the queued-event registry are coherent at all times (Stage 1AE, AE10; strengthened Stage 1AF, AF5).
 
 - **Formal statement.** Let `EQ.event_queue` be the pending priority queue and `queued_event_registry` the central
   queue-status registry (`AD1`). Then: **(a)** an `EventRef` is present in `EQ.event_queue` IFF
@@ -650,11 +669,20 @@ replaced by two consistent invariants** (the old form was impossible while a lin
   with `event_time = t` is `QUEUED` or `DISPATCHING`; **(f)** every enqueue (`ScheduleEvent`, AE8) and every cancellation
   (`CancelQueuedEvent`, AE1) changes `EQ` membership and `queue_status` ATOMICALLY (both-or-neither), so the two structures
   never diverge.
+- **Stage-1AF strengthening (AF5 — ONE representation + atomic pop).** `EQ.event_queue` holds EXACTLY the pending `QUEUED`
+  events and is the SINGLE representation of the frontier — there is no separate "projection" convention. An `EventRef`
+  leaves `EQ.event_queue` by exactly one explicit operation: `ProcessEventTime` ATOMICALLY POPs it (moving `QUEUED →
+  DISPATCHING` and setting the complete `EQ.current_*` in the same atomic step) or `CancelQueuedEvent` ATOMICALLY removes it
+  (`QUEUED → CANCELLED`). The dispatch completion (`DISPATCHING → CONSUMED`) and the CLEAR of every `EQ.current_*` are one
+  atomic step. Consequently a `DISPATCHING`/`CONSUMED`/`CANCELLED` `EventRef` is never on `EQ.event_queue` and is never
+  re-POPped, and the EQ order is the descriptor-derived `stable_tie_key` (AF3), so (a)–(f) hold by construction rather than
+  by a projection convention.
 - **Scope.** The scheduler/dispatcher (`ScheduleEvent`, `ProcessEventTime`, `CancelQueuedEvent`); a structural coherence
   invariant. It does not change the A1 baseline (`8.420833333 kWh`).
 - **Required inputs.** `EQ.event_queue`; `queued_event_registry`; `EQ.current_event_ref`.
-- **Enforcement point.** `ScheduleEvent` (atomic add of registry entry + EQ entry, AE8); `CancelQueuedEvent` (atomic
-  remove + `QUEUED → CANCELLED`, AE1); `ProcessEventTime` (`QUEUED → DISPATCHING → CONSUMED`, sole dispatch owner, AD4/AE3;
+- **Enforcement point.** `ScheduleEvent` (atomic add of registry entry + EQ entry ordered by the descriptor tie key, AE8/AF3);
+  `CancelQueuedEvent` (atomic remove + `QUEUED → CANCELLED`, AE1); `ProcessEventTime` (atomic POP + `QUEUED → DISPATCHING`
+  + set `EQ.current_*`, then atomic `DISPATCHING → CONSUMED` + clear `EQ.current_*`, sole dispatch owner, AF5/AD4/AE3;
   the drain-to-quiescence assertion that no event at `t` remains `QUEUED` or `DISPATCHING`, AE10(e)).
 - **Consequence of violation.** A `QUEUED` ghost in the registry with no pending EQ entry (or an EQ entry with no registry
   record); a cancelled event still dispatched from a stale batch; an event dispatched twice; or an event removed from EQ
