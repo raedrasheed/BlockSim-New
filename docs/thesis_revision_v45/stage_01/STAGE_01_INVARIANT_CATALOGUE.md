@@ -475,6 +475,23 @@ point, planned test stage, and consequence of violation.
   live seat per `(timestamp, point)`, cancellable, replay-safe). **AF9:** `HandleDispatchIntegrityFailure` never raw-asserts on
   a corrupt reverse binding — it records `dispatch_integrity_owner_binding_corrupt(er)` and mutates nothing. **AF10:**
   inaccurate Stage-1AE audit claims are superseded in `STAGE_01AF_SUPERSESSION_REGISTER.md`.
+- **Stage-1AG clause (dispatch-argument, run-bootstrap & wake-payload lock).**
+  **AG1:** every AF4 wrapper payload field has an EXPLICIT `payload_to_param_map` entry (no unwritten same-name fallback);
+  `BuildHandlerInvocation` verifies `keys(args) = handler_inputs` and returns `handler_invocation_built` /
+  `handler_invocation_binding_failed` (never a raw assert). **AG2:** `StartWake` seats `WakeCompleteEvent` with
+  `{MinerID, AssignmentID, assignment_version}` and `WakeCompleteEvent` verifies the exact wake-origin version before any
+  transition (a renewed version is never activated by an older wake). **AG3/AG5:** `RunEventLoopToHorizon`/`ProcessEventTime`
+  take `RunContext` and resolve `RoundContext <- RunContext.current_round_context` per dispatch; the first
+  `RoundInitialiseEvent` dispatches with no pre-existing RoundContext; no post-rotation event receives a stale RoundContext;
+  a missing required RoundContext is a structured `dispatch_context_unavailable`. **AG4:** every driver wrapper has a
+  reachable named seating owner using `ScheduleEvent` with a bounded idempotence identity (`driver_event_seat`); replay
+  cannot create two rounds or commit one template twice. **AG6:** the terminal-round closure owner publishes
+  `prior_round_terminal_state <- current_round_context`; `SettleResidencyBoundary(REBASE_TO_NEXT_ROUND)` receives the actual
+  prior terminal context. **AG7:** the acceptance-batch seat context is type-correct (no `ORDINARY_DISPATCH(EventRef)`),
+  `BlockAcceptancePoint` handles every seat result with no stranded batch, and a later-delta same-timestamp arrival opens a
+  new `batch_generation` + finalize. **AG8:** `stable_tie_key = descriptor(event_type).stable_tie_key(immutable_payload)`
+  everywhere; the universal `(CandidateID, MinerID, AssignmentID)` tie key is withdrawn. **AG9:** inaccurate Stage-1AF audit
+  claims are superseded in `STAGE_01AG_SUPERSESSION_REGISTER.md`.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest

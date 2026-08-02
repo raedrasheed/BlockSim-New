@@ -196,9 +196,12 @@ Catalogue" denotes the separate document defining I1..I19.
 
 ## Stage-1H terminology addendum (timestamp-causality lock)
 
-- **`delta_cycle` and the event total order (H2).** Each discrete event carries an envelope
+- **`delta_cycle` and the event total order (H2; ordering key superseded by AG8).** Each discrete event carries an envelope
   `(event_time, delta_cycle, microphase, stable_tie_key, seq)`, ordered lexicographically, where
-  `stable_tie_key = (CandidateID, MinerID, AssignmentID)`. `delta_cycle` is a same-`event_time`
+  `stable_tie_key = descriptor(event_type).stable_tie_key(immutable_payload)` — the DESCRIPTOR-DERIVED tie key of the
+  event's own type (§0.7g-schema), computed from its immutable handler payload (AG8). The H2-era universal
+  `stable_tie_key = (CandidateID, MinerID, AssignmentID)` is WITHDRAWN (AG8): different event types tie-break on different
+  descriptor keys (see the §0.7g-schema and the Stage-1AG terminology addendum). `delta_cycle` is a same-`event_time`
   causal layer: a handler in microphase `m` of `delta_cycle k` may schedule a same-`event_time` event
   into cycle `k` if its target microphase is later than `m`, else into cycle `k+1` — NEVER backward
   into a completed microphase. The loop finishes all microphases of cycle `k` before any event of
@@ -1181,3 +1184,35 @@ Catalogue" denotes the separate document defining I1..I19.
   seat EventRef); the handler mutates no retry record and aborts no round.
 - **Historical freeze.** Stage-1A–1AE lettered artifacts are unchanged; Stage-1AF supersessions (including the inaccurate
   Stage-1AE audit claims) are recorded in `STAGE_01AF_SUPERSESSION_REGISTER.md`.
+
+## Stage-1AG terminology addendum (dispatch-argument, run-bootstrap & wake-payload lock)
+
+- **`handler_inputs` (AG1).** The GROUND-TRUTH set of parameter names on a descriptor's `handler_procedure` INPUTS line.
+  `BuildHandlerInvocation` verifies `keys(args) = d.handler_inputs`; every member is produced by an EXPLICIT
+  `payload_to_param_map` or `runtime_injected` entry (no unwritten same-name fallback).
+- **`handler_invocation_built` / `handler_invocation_binding_failed` (AG1).** The structured `BuildHandlerInvocation`
+  results: `handler_invocation_built(procedure, args)` when the produced arg key set equals `handler_inputs`, else
+  `handler_invocation_binding_failed(event_type, missing_args, extra_args)` — returned instead of a raw assertion;
+  `ProcessEventTime` records it and does NOT call the handler.
+- **`dispatch_context_unavailable` (AG5).** The structured `ProcessEventTime` disposition when a dispatched event's
+  descriptor requires a `RoundContext` (`RoundContext` in `d.runtime_injected`) but `RunContext.current_round_context = null`;
+  the handler is not called and the event is consumed.
+- **Named driver-event seating owners (AG4).** `SeatNextRoundBootstrap`, `SeatTemplateCommit`, `SeatPrepareParticipants`,
+  `SeatMinerRegister`, `SeatReserveActivate`, `SeatFullRangeExhaust`, and the `SeatPendingDriverRequests` intake — each
+  enqueues its wrapper through `ScheduleEvent` with a structured result and a bounded idempotence identity in
+  `RunContext.driver_event_seat`. The round-bootstrap chain is `SeatNextRoundBootstrap -> RoundInitialiseEvent ->
+  SeatTemplateCommit -> TemplateCommitEvent -> SeatPrepareParticipants -> PrepareParticipantsEvent`.
+- **`RunContext.current_round_context` / `RunContext.prior_round_terminal_state` (AG3/AG5/AG6).** The active RoundContext
+  (published by `RoundInitialiseEvent`, resolved per dispatch) and the most-recent terminal RoundContext (published by
+  `CloseRoundAssignments`, carrying RoundID, round_terminal_time, residency_ledger, terminal disposition), read by the next
+  `RoundInitialise` for `SettleResidencyBoundary(REBASE_TO_NEXT_ROUND)`.
+- **`batch_generation` (AG7).** The per-`(acceptance_timestamp, acceptance_point)` generation ordinal in the
+  `AcceptanceBatchFinalize` payload and the `acceptance_batch_finalize_seat` map; a later-delta same-timestamp arrival after
+  a consumed finalize opens the next generation with its own finalize, so no batch is stranded. `SeatAcceptanceBatchFinalize`
+  takes NO `source_context` (ScheduleEvent uses the trusted dispatcher context).
+- **Descriptor-derived ordering rule (AG8).** `stable_tie_key = descriptor(event_type).stable_tie_key(immutable_payload)` —
+  the ONE authoritative ordering rule (§0.2, ScheduleEvent, I21). The universal `(CandidateID, MinerID, AssignmentID)` tie
+  key is withdrawn; `dispatch_envelope` identity, immutable handler payload, and descriptor-derived ordering key are kept
+  distinct.
+- **Historical freeze.** Stage-1A–1AF lettered artifacts are unchanged; Stage-1AG supersessions (including the inaccurate
+  Stage-1AF audit claims) are recorded in `STAGE_01AG_SUPERSESSION_REGISTER.md`.

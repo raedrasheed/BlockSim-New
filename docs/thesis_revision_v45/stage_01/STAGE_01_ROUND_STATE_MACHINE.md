@@ -1161,6 +1161,63 @@ queue-coherence audit relied on an ambiguous QUEUED-projection convention withou
 fire-and-forget audit missed the absent `StartHashing` success RETURN and the `HashWorkEvent` result-shape mismatch; the AE
 cross-document audit therefore incorrectly marked gates 3, 5, 6, 10, 12, 13 PASS).
 
+### 3.10k Stage-1AG addendum (dispatch-argument, run-bootstrap & wake-payload lock)
+
+Stage 1AG makes the AF driver-event machinery genuinely executable end-to-end: every wrapper payload binding is explicit,
+every WakeCompleteEvent seat carries the exact assignment_version, the first round bootstraps with no pre-existing
+RoundContext, every driver wrapper has a reachable named seating owner, the current RoundContext is resolved dynamically,
+the prior terminal round is published for cross-round continuity, the acceptance-batch seat context is type-correct with
+handled results and generations, and the root ordering rule is descriptor-derived everywhere. These statements supersede
+the Stage-1AF ones they name; §3.10a–§3.10j are retained as the frozen W…AF layers.
+
+**AG1 (explicit wrapper payload bindings).** Every AF4 wrapper's `payload_to_param_map` lists an EXPLICIT entry for each
+payload field (`round_setup_seq`; `RoundID_at_seat`/`candidate_template`; `RoundID_at_seat`/`TemplateID_at_seat`;
+`join_request`; `RoundID_at_seat`/`deficit`/`activation_seq`) — no `(none)`/prose bindings, no unwritten same-name fallback.
+`BuildHandlerInvocation` VERIFIES `keys(args) = d.handler_inputs` and returns `handler_invocation_built(...)` or
+`handler_invocation_binding_failed(event_type, missing_args, extra_args)` (never a raw assert); `ProcessEventTime` consumes
+`binding_failed` by recording it and NOT calling the handler.
+
+**AG2 (wake seat carries assignment_version).** `StartWake` seats `WakeCompleteEvent` with
+`{MinerID, AssignmentID, assignment_version}` and returns a `wake_seated` record retaining the exact `assignment_version`.
+`WakeCompleteEvent` resolves `target_assignment = version(AssignmentID, assignment_version)` and verifies it equals the
+miner's live-head version before any transition — a renewed/superseded version is never activated by an older wake.
+
+**AG3/AG5 (executable bootstrap & dynamic round context).** `RunEventLoopToHorizon` and `ProcessEventTime` take
+`RunContext`; each dispatch resolves `RoundContext <- RunContext.current_round_context`. `RoundInitialiseEvent` is
+dispatchable while `current_round_context = null` (it takes `RunContext`). No event after a round rotation receives a stale
+RoundContext; an event that requires a RoundContext while none is current is a structured `dispatch_context_unavailable`.
+
+**AG4 (named driver-event seating owners).** `SeatNextRoundBootstrap`, `SeatTemplateCommit`, `SeatPrepareParticipants`,
+`SeatMinerRegister`, `SeatReserveActivate`, `SeatFullRangeExhaust` each enqueue their wrapper through `ScheduleEvent` with a
+structured result and a bounded idempotence identity (`RunContext.driver_event_seat`), so replay cannot create two rounds or
+commit one template twice. The bootstrap chain is `SeatNextRoundBootstrap -> RoundInitialiseEvent -> SeatTemplateCommit ->
+TemplateCommitEvent -> SeatPrepareParticipants -> PrepareParticipantsEvent`; `SeatFullRangeExhaust` is reached from
+`ExhaustionAdjudicate`, and `SeatMinerRegister`/`SeatReserveActivate` from the named `SeatPendingDriverRequests` intake.
+
+**AG6 (publish prior terminal round).** `CloseRoundAssignments` (the single terminal-round closure owner) publishes
+`RunContext.prior_round_terminal_state <- current_round_context` (carrying RoundID, round_terminal_time, residency_ledger,
+terminal disposition) before the next bootstrap; `RoundInitialise` passes it to
+`SettleResidencyBoundary(REBASE_TO_NEXT_ROUND)`, preserving cross-round energy continuity; `prior_round_terminal_state` is
+never left permanently null once a round has ended.
+
+**AG7 (acceptance-batch context, result & generation).** The type-incorrect `ORDINARY_DISPATCH(EQ.current_event_ref)` is
+removed; `SeatAcceptanceBatchFinalize` takes no `source_context` (ScheduleEvent uses the trusted dispatcher context).
+`BlockAcceptancePoint` seats FIRST, captures the result (seated/already-seated → registered; seat_failed → a declared
+candidate failure with no stranded batch), and registers into the finalize's generation. A later-delta same-timestamp
+arrival after a consumed finalize opens a new `batch_generation` with its own finalize — no batch is stranded.
+
+**AG8 (root event-ordering rule).** `stable_tie_key = descriptor(event_type).stable_tie_key(immutable_payload)` everywhere
+(§0.2, ScheduleEvent, I21, terminology, traceability); the universal `(CandidateID, MinerID, AssignmentID)` claim is
+withdrawn. The `dispatch_envelope` identity, the immutable handler payload, and the descriptor-derived ordering key are kept
+distinct.
+
+**AG9 (supersession of inaccurate Stage-1AF audits).** `STAGE_01AG_SUPERSESSION_REGISTER.md` records the Stage-1AF audit
+inaccuracies AG corrects (the AF dispatch-adapter audit assumed same-name payload fields were auto-bound; the AF event-
+descriptor audit did not check every ScheduleEvent seating payload; the AF scheduler-schema audit missed that StartWake
+omitted assignment_version; the AF RunContext-ownership audit missed the first-round circular dependency, current-round
+consumption, and prior-round publication; TV273/TV276/TV286 rested on those gaps; the AF cross-document audit therefore
+marked the affected gates PASS).
+
 ### 3.11 What causes a template refresh
 
 A template refresh (`TEMPLATE_REFRESH`) is caused by (a) exhaustion of the committed
