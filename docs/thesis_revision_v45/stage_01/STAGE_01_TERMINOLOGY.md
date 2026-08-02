@@ -1047,10 +1047,10 @@ Catalogue" denotes the separate document defining I1..I19.
 
 - **`EventRef` (AC1).** The one canonical immutable reference to a queued ordinary event:
   `EventRef = (envelope_namespace, event_type, event_time, delta_cycle, microphase, seq)`. `ScheduleEvent` derives exactly
-  one from the envelope it creates and returns `scheduled(EventRef, envelope)`. The same type is used by cancellation,
-  stored retry ownership (`seat_event_ref`), and dispatch ownership (`dispatched_event_ref`). `event_ref`, `envelope`, and
-  `dispatched_event_ref` are not silently interchangeable — an envelope is the full queued record; an EventRef is its
-  canonical six-field identity.
+  one and returns `scheduled(EventRef, …)` (AC1 named the second slot `envelope`; AD3 replaces it with the central
+  `queued_event_record` — see the Stage-1AD addendum below). The same type is used by cancellation, stored retry ownership
+  (`seat_event_ref`), and dispatch ownership (`dispatched_event_ref`). `event_ref`, `envelope`, and `dispatched_event_ref`
+  are not silently interchangeable — an envelope is the full queued record; an EventRef is its canonical six-field identity.
 - **`current_event_ref` / dispatcher-owned `dispatched_event_ref` (AC2).** `EventQueueContext.current_event_ref : EventRef |
   null` is set by `ProcessEventTime` to `EventRef(e)` before dispatching `e`, injected as `dispatched_event_ref`, and
   cleared after the handler returns. A handler (e.g. `SetupRetryEvent`) receives `dispatched_event_ref` from this
@@ -1076,3 +1076,39 @@ Catalogue" denotes the separate document defining I1..I19.
   current owned SEATED record whose genuine dispatch envelope/payload is corrupt.
 - **Historical freeze.** Stage-1A–1AB lettered artifacts are unchanged; Stage-1AC supersessions are recorded in
   `STAGE_01AC_SUPERSESSION_REGISTER.md`.
+
+## Stage-1AD terminology addendum (queued-event lifecycle & payload lock)
+
+- **`queued_event_record` (AD1).** The central binding of a queued ordinary event:
+  `queued_event_record = (event_ref : EventRef immutable, event_type, dispatch_envelope : immutable complete
+  ordinary-event envelope, immutable_payload, queue_status : EventQueueStatus)`. Created by `ScheduleEvent` and stored in the
+  registry keyed by its `EventRef`. It is the single authoritative binding of a queued event's identity, envelope, handler
+  payload, and queue lifecycle state.
+- **`queued_event_registry` (AD1).** `map EventRef → queued_event_record` — the ONE authoritative queue-status source. A
+  `setup_retry_record` no longer stores its own queue state; its current queue state IS
+  `queued_event_registry[seat_event_ref].queue_status`. The Stage-1AC per-record `event_queue_status` mirror is removed.
+- **`EventQueueStatus` transition table (AD1, supersedes the AC8 enum's ownership).** `{ QUEUED, DISPATCHING, CONSUMED,
+  CANCELLED }` with transitions `QUEUED → {DISPATCHING, CANCELLED}`; `DISPATCHING → CONSUMED`; `CONSUMED` and `CANCELLED`
+  terminal. `ProcessEventTime` is the sole writer of the dispatch-lifecycle transitions (`DISPATCHING`, `CONSUMED`);
+  `CancelSetupRetriesForRound` performs the only `QUEUED → CANCELLED` cancellation (AD4/AD9).
+- **`immutable_payload` (AD2).** The complete set of caller-supplied handler arguments captured by `ScheduleEvent` at
+  seating (for a `SetupRetryEvent` exactly `RoundID`, `setup_kind`, `SetupRetryID`, `TemplateID_at_seat`,
+  `TemplateRefreshSetupID`, `retry_generation`, `reason`) and delivered verbatim by `ProcessEventTime` at dispatch — payload
+  at dispatch equals payload at seating.
+- **`OrdinaryDispatchContext` (AD5).** `(dispatch_envelope, dispatched_event_ref)`, constructed and owned by
+  `ProcessEventTime` from the `queued_event_record` and its `EventRef`. Design B delivery: every ordinary handler receives
+  `dispatch_envelope`; `dispatched_event_ref` is delivered only to a handler whose declared signature includes it (currently
+  only `SetupRetryEvent`). No undeclared named argument is injected into a handler that omits it.
+- **`ScheduleEvent` result union (AD3).** `scheduled(EventRef, queued_event_record) | rejected_finalised_time |
+  post_horizon_event_rejected | rejected_post_epilogue_not_strictly_later | rejected_backward_time` — the complete declared
+  set; the success variant carries the canonical `EventRef` and the central `queued_event_record` (was
+  `scheduled(EventRef, envelope)`).
+- **`HandleDispatchIntegrityFailure` / `dispatch_integrity_failure` (AD8).** The one dispatcher-owned integrity path, called
+  by `ProcessEventTime` only when a registry entry is detected corrupt. It records the declared terminal disposition
+  `dispatch_integrity_failure`, builds a COMPLETE integrity envelope from the trusted `EventRef` fields, and (for a
+  `SetupRetryEvent` whose `SetupRetryID` resolves) terminalises the record — a current nonterminal-round record via a
+  current-round integrity abort with that complete envelope, an old/terminal-round record without aborting the current round.
+  A malformed untrusted envelope never becomes the transition identity for round closure.
+- **Historical freeze.** Stage-1A–1AC lettered artifacts are unchanged; Stage-1AD supersessions (including the AC8
+  per-record `event_queue_status` mirror and the incomplete Stage-1AC audit claims) are recorded in
+  `STAGE_01AD_SUPERSESSION_REGISTER.md`.

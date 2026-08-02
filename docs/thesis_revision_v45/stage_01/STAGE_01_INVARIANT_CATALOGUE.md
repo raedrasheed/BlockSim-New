@@ -412,7 +412,34 @@ point, planned test stage, and consequence of violation.
   `SEATED → APPLYING` before `RoundAbort` and finishes `APPLYING → ABORTED`. **AC7:** `SetSetupRetryStatus` enforces the
   `SetupRetryStatus` transition table and rejects every terminal → terminal rewrite (e.g. `CANCELLED → ABORTED`) with no
   mutation. **AC8:** the record's immutable `seat_event_ref` is preserved for ownership/audit while cancellation changes only
-  `event_queue_status`.
+  `event_queue_status`. (Superseded by the Stage-1AD clause AD1: the per-record `event_queue_status` mirror is removed and
+  the queue state is held only in the central `queued_event_registry`.)
+- **Stage-1AD clause (queued-event lifecycle & payload lock).**
+  **AD1:** `queued_event_record = (event_ref : EventRef immutable, event_type, dispatch_envelope, immutable_payload,
+  queue_status)` in `queued_event_registry : map EventRef → queued_event_record` is the ONE authoritative queue-status source
+  (`QUEUED → {DISPATCHING, CANCELLED}`; `DISPATCHING → CONSUMED`; `CONSUMED`/`CANCELLED` terminal); a `setup_retry_record`
+  keeps only its immutable `seat_event_ref` and its queue state IS `queued_event_registry[seat_event_ref].queue_status` — no
+  independently-writable mirror. **AD2:** `ScheduleEvent` stores the complete immutable handler payload at seating and
+  `ProcessEventTime` dispatches that stored payload, so payload at dispatch = payload at seating. **AD3:** `ScheduleEvent`
+  RETURNS `scheduled(EventRef, queued_event_record) | rejected_finalised_time | post_horizon_event_rejected |
+  rejected_post_epilogue_not_strictly_later | rejected_backward_time`; every result-binding caller pattern-matches
+  `scheduled(event_ref, record)` and branches on each reachable rejection (a stored/cancellable reference is never a
+  rejection token), and a for-effect caller's only reachable rejection is the deterministic O2 post-horizon rejection. **AD4:**
+  `ProcessEventTime` is the sole queue-status owner (`QUEUED → DISPATCHING` before dispatch, `DISPATCHING → CONSUMED` after
+  the handler returns, `EQ.current_event_ref` set/cleared); the only cancellation is `QUEUED → CANCELLED` (AD9); no handler
+  writes `queue_status`. **AD5:** the dispatcher-owned `OrdinaryDispatchContext = (dispatch_envelope, dispatched_event_ref)`
+  is delivered by Design B (all handlers get `dispatch_envelope`; `dispatched_event_ref` only to a handler declaring it).
+  **AD6:** a guard-driven abort runs `SEATED → APPLYING → ABORTED` while the queue is `DISPATCHING`, so a round-closure
+  sweep during that abort sees `DISPATCHING` (never a stale `QUEUED`) and never trips a `QUEUED` assertion. **AD7:** a
+  stale/terminal dispatch still follows `QUEUED → DISPATCHING → CONSUMED`, so it never leaves the registry at `QUEUED`.
+  **AD8:** `ScheduleEvent` rejects an incomplete record; on detected corruption `HandleDispatchIntegrityFailure` terminalises
+  the record using a complete dispatcher-integrity envelope built from the trusted `EventRef`, scoped to the record's own
+  round, and a malformed untrusted envelope never becomes the transition identity for round closure. **AD9:**
+  `CancelSetupRetriesForRound` inspects the central registry (`QUEUED` → cancel + `QUEUED → CANCELLED` + `SEATED → CANCELLED`;
+  `DISPATCHING` → persist `terminal_closure_pending` only; `CONSUMED`/`CANCELLED` → no rewrite), so after closure no
+  closing-round event remains `QUEUED`, none remains `DISPATCHING` once its handler returns, every SEATED retry is
+  terminalised, and no terminal retry owns a live `QUEUED` event. **AD10:** the incomplete Stage-1AC audit claims are
+  superseded in `STAGE_01AD_SUPERSESSION_REGISTER.md`.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest

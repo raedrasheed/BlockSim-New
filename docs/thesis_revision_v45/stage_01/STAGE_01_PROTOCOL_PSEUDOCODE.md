@@ -205,29 +205,41 @@ PROCEDURE ProcessEventTime
     # I-02/P1: DRAIN t to quiescence in deterministic order, INCLUDING handler-generated same-t events. The
     #          drain may be EMPTY (no ordinary event at t) for a synthetic horizon invocation — that is legal.
     LOOP:
-      IF no ordinary event remains at event_time = t: BREAK       # quiescent (all delta-cycles drained; empty at a synthetic horizon)
-      SET current_delta_cycle <- smallest delta_cycle with a pending event at t
-      FOR EACH event e at (t, current_delta_cycle) IN ASCENDING (microphase, stable_tie_key, seq):
+      IF no QUEUED ordinary event remains at event_time = t: BREAK   # AD4: quiescent (all delta-cycles drained; empty at a synthetic horizon)
+      SET current_delta_cycle <- smallest delta_cycle with a QUEUED event at t
+      FOR EACH EventRef er of a QUEUED event at (t, current_delta_cycle) IN ASCENDING (er.microphase, stable_tie_key, er.seq):
         ASSERT t not in finalised_event_times                     # never dispatch into a finalised time
-        # L1: MATERIALISE the ONE dispatch envelope for e. Every miner transition and every StartWake done
-        #     synchronously while handling e binds ITS (event_time, delta_cycle, event_seq) from THIS record;
-        #     no handler reads an ambient/undeclared seq and none manually stamps EQ.event_creation_seq.
-        SET EQ.current_microphase <- microphase(e); SET EQ.current_event_seq <- seq(e)
-        # R3: MATERIALISE the full ORDINARY_EVENT identity. Every ordinary dispatch envelope carries
-        #     envelope_namespace = ORDINARY_EVENT and hook_id = null, so every miner transition done while handling
-        #     e threads the COMPLETE identity (namespace fields included) into ApplyMinerStateTransition (§0.9/R3),
-        #     never only the numeric (event_time, delta_cycle, event_seq).
-        SET dispatch_envelope <- { envelope_namespace = ORDINARY_EVENT, hook_id = null,      # R3: ORDINARY_EVENT identity
-                                   event_time = t, delta_cycle = current_delta_cycle, event_seq = seq(e),
-                                   microphase = microphase(e) }        # e's OWN enqueued envelope (§0.7f/L1/R3)
-        # AC2: the DISPATCHER owns the EventRef. Set EQ.current_event_ref to e's canonical EventRef and inject it as
-        #      dispatched_event_ref so a handler (e.g. SetupRetryEvent) verifies ownership against the ACTUAL dispatched
-        #      event — never from its own payload and never from an undocumented derivation. Cleared after the handler returns.
-        SET EQ.current_event_ref <- EventRef(e)                   # AC2: EventRef(e) = the six-field identity of e's envelope
-        DISPATCH e WITH dispatch_envelope = dispatch_envelope, dispatched_event_ref = EQ.current_event_ref   # AC2
-        SET EQ.current_event_ref <- null                          # AC2: cleared after the handler returns
-                                                                  # its handler threads dispatch_envelope onward,
-                                                                  #   may schedule further events at t per the
+        SET record <- queued_event_registry[er]                   # AD1: the ONE central authoritative record
+        # AD4: ProcessEventTime is the SOLE queue-status owner. ONLY a QUEUED event dispatches; move QUEUED -> DISPATCHING
+        #      BEFORE the handler. No handler writes queue_status.
+        ASSERT record.queue_status = QUEUED                       # AD4: only a QUEUED event may be dispatched
+        SET queued_event_registry[er].queue_status <- DISPATCHING # AD4: QUEUED -> DISPATCHING (dispatcher-owned)
+        # L1: MATERIALISE the dispatch identity from the STORED record (er + record.dispatch_envelope), never from ambient state.
+        SET EQ.current_microphase <- er.microphase; SET EQ.current_event_seq <- er.seq
+        SET EQ.current_event_ref <- er                            # AC2/AD4: the dispatcher owns the EventRef of e
+        # AD8: the STORED dispatch_envelope is COMPLETE by construction (ScheduleEvent rejected an incomplete record); the
+        #      dispatcher builds the COMPLETE OrdinaryDispatchContext from the trusted record — never from untrusted input.
+        SET ctx <- OrdinaryDispatchContext(dispatch_envelope = record.dispatch_envelope, dispatched_event_ref = er)   # AD5
+        # AD8 (defensive): if the registry entry is nevertheless detected CORRUPT (missing a required payload field / an
+        #      incomplete envelope), DO NOT dispatch it into a handler; take the declared dispatcher integrity path
+        #      (record an integrity terminal disposition; if the payload's SetupRetryID resolves and its record's round is the
+        #      current nonterminal round, terminalise via a COMPLETE dispatcher-integrity context; NEVER pass an incomplete
+        #      envelope onward), then continue the drain.
+        IF record is detected corrupt (immutable_payload incomplete for record.event_type OR dispatch_envelope incomplete):
+          CALL HandleDispatchIntegrityFailure(RoundContext, er, record)   # AD8: dispatcher-owned; uses a complete integrity context
+          SET queued_event_registry[er].queue_status <- CONSUMED  # AD4: DISPATCHING -> CONSUMED (the corrupt event is drained, never re-QUEUED)
+          SET EQ.current_event_ref <- null
+          CONTINUE
+        # AD2/AD5 (Design B): deliver the STORED immutable_payload (payload at dispatch = payload at seating) + the complete
+        #      dispatch_envelope to the handler; pass dispatched_event_ref ONLY to a handler whose declared signature includes
+        #      it (currently only SetupRetryEvent). No undeclared named argument is injected into a handler that omits it.
+        DISPATCH record.event_type WITH immutable_payload = record.immutable_payload, dispatch_envelope = ctx.dispatch_envelope,
+                 (AND dispatched_event_ref = ctx.dispatched_event_ref IFF record.event_type's signature declares it)   # AD2/AD5-B
+        # AD4: after the handler returns, the dispatcher completes the lifecycle. DISPATCHING -> CONSUMED, clear the EventRef.
+        SET queued_event_registry[er].queue_status <- CONSUMED    # AD4: DISPATCHING -> CONSUMED (no handler wrote it)
+        SET EQ.current_event_ref <- null                          # AC2/AD4: cleared after the handler returns
+                                                                  # its handler threaded dispatch_envelope onward,
+                                                                  #   may have scheduled further events at t per the
                                                                   #   delta-cycle rule (§0.7-H2) or at a later time
       # loop re-evaluates: a handler may have added a (t, current_delta_cycle+1) event (forward only)
     # ---- HORIZON CLOSURE (O1/P1: run-level hook, ONLY at t = T, interposed BETWEEN drain and epilogue) ----
@@ -275,7 +287,7 @@ PROCEDURE ProcessEventTime
     CALL FinalizePostRecoveryApplicationState(RoundContext, t)    # R2 step 3: single post-application settlement (NOT a 2nd decision)
     # (5) R1/R2/T7/U4 FINALISATION ASSERTION. t may be finalised ONLY when it is quiescent, its census is settled, and
     #     no recovery-continuation / recovery-work application remains due at t (checked via the EXPLICIT due status, U4).
-    ASSERT no ordinary event remains with event_time = t          # R1: the post-epilogue application enqueued NOTHING at t (T7: incl. StartWake/re-arm strictly later)
+    ASSERT no QUEUED ordinary event remains with event_time = t   # R1/AD4: the post-epilogue application enqueued NOTHING at t (T7: incl. StartWake/re-arm strictly later)
     ASSERT security_census_dirty[t] = false                       # R2: FinalizePostRecoveryApplicationState settled t (no dirty census left)
     ASSERT no recovery_decisions[*].continuation_due_status = DUE with continuation_due_at_event_time = t
                                                                   # U4/T7: every DUE continuation at t was explicitly CONSUMED/SUPERSEDED/CANCELLED (not inferred from a timestamp)
@@ -294,6 +306,42 @@ PROCEDURE ProcessEventTime
         run-level CloseRoundAtHorizon hook (§20b) BETWEEN the drain and the epilogue, so the horizon epilogue
         is a terminal_stale_noop; the run-level FinalizeSimulationRun (§20a) is then invoked by the RUN DRIVER
         (§0.7d-run) AFTER ProcessEventTime(T) returns — it is NOT a queued event.
+
+PROCEDURE HandleDispatchIntegrityFailure                         # AD8: dispatcher-owned integrity path for a CORRUPT queued record
+  INPUTS: RoundContext, er, record   # er = the dispatched EventRef; record = queued_event_registry[er] detected corrupt
+  PRECONDITIONS: called by ProcessEventTime ONLY when a registry entry is detected corrupt (an incomplete immutable_payload
+                 for record.event_type or an incomplete dispatch_envelope). ScheduleEvent asserts completeness at
+                 construction (AD8), so this is a DEFENSIVE last resort; it NEVER passes an incomplete envelope onward.
+  EFFECTS:
+    # AD8: mark the event through a declared integrity TERMINAL disposition (audit) and build a COMPLETE dispatcher-owned
+    #   integrity context from the TRUSTED EventRef fields (never from the corrupt payload) — er alone yields a complete
+    #   ordinary-event envelope, since (envelope_namespace, event_time, delta_cycle, seq) are all in the EventRef.
+    RECORD dispatch_integrity_failure(er, record.event_type)                                   # AD8: declared integrity terminal disposition
+    SET integrity_envelope <- { envelope_namespace = er.envelope_namespace, event_time = er.event_time,
+                                delta_cycle = er.delta_cycle, event_seq = er.seq, hook_id = null }   # AD8: COMPLETE, dispatcher-owned
+    # AD8: if the event_type is SetupRetryEvent AND its SetupRetryID resolves to a KNOWN retry record, terminalise that
+    #   record. Scope the abort to the record's OWN round (AC4): a current nonterminal-round record takes the declared
+    #   integrity abort with the COMPLETE integrity_envelope; a record of an older/terminal round is terminalised WITHOUT
+    #   aborting the current round.
+    IF record.event_type = SetupRetryEvent AND the payload's SetupRetryID resolves to setup_retry_records[SetupRetryID]:
+      SET rec <- setup_retry_records[SetupRetryID]
+      IF rec.status = SEATED AND rec.RoundID = RoundID_current AND round_state NOT in {ROUND_ACCEPTED, ROUND_ABORTED}:
+        CALL SetSetupRetryStatus(SetupRetryID, APPLYING)                                       # AC6: leave SEATED first
+        SET disp <- CALL RoundAbort(RoundContext, reason = setup_retry_payload_integrity_failure(SetupRetryEvent),
+                          dispatch_envelope = integrity_envelope, recovery_finalising = false) # AD8: COMPLETE envelope, never the corrupt one
+        UPDATE setup_retry_records[SetupRetryID].target_disposition <- disp
+        CALL SetSetupRetryStatus(SetupRetryID, ABORTED)                                        # AC6/AC7: APPLYING -> ABORTED
+      ELSE IF rec.status = SEATED:
+        # record belongs to an older / terminal round -> terminalise WITHOUT aborting the current round (AC4/AD8)
+        CALL SetSetupRetryStatus(SetupRetryID, SUPERSEDED)
+        UPDATE setup_retry_records[SetupRetryID].target_disposition <- setup_retry_stale_noop(SetupRetryID)
+      # a non-SEATED record is already terminal — left unchanged (AC7)
+    RETURN dispatch_integrity_handled(er)
+  RETURNS: dispatch_integrity_handled(er)
+  NOTE: AD8: the ONE dispatcher-owned integrity path. A malformed/corrupt queued record NEVER reaches a handler and its
+        untrusted payload/envelope NEVER becomes the transition identity for round closure; any abort uses the COMPLETE
+        integrity_envelope built from the trusted EventRef, scoped to the record's own round. ProcessEventTime marks the
+        corrupt event CONSUMED (never re-QUEUED) after this returns.
 
 PROCEDURE RunEventLoopToHorizon                                   # O1/P1: the RUN-LEVEL driver (top-level loop)
   INPUTS: RunContext, RoundContext
@@ -443,10 +491,34 @@ STRUCTURE EventRef (AC1 — the ONE canonical immutable reference to a queued or
   microphase
   seq
 
-# AC8 event-queue lifecycle state (kept SEPARATE from the immutable EventRef identity):
-# EventQueueStatus in { QUEUED, DISPATCHING, CONSUMED, CANCELLED }. A retry record stores its IMMUTABLE seat_event_ref
-#   (never destroyed) AND an event_queue_status; cancellation changes the status, it does NOT erase the seat EventRef used
-#   for replay-ownership auditing.
+STRUCTURE queued_event_record (AD1 — the ONE central record of a queued ordinary event)
+  # AD1: created by ScheduleEvent and stored in queued_event_registry keyed by its EventRef. It is the SINGLE authoritative
+  #   binding of a queued event's identity, envelope, handler payload, and queue lifecycle state. A retry record does NOT
+  #   keep an independently-writable queue-state mirror; its current queue state is queued_event_registry[seat_event_ref].queue_status.
+  event_ref          : EventRef                 # immutable canonical identity (AC1)
+  event_type
+  dispatch_envelope  : immutable complete ordinary-event envelope { envelope_namespace, event_time, delta_cycle, event_seq, hook_id }
+  immutable_payload  : the COMPLETE set of caller-supplied handler arguments for event_type (AD2), fixed at seating
+  queue_status       : EventQueueStatus
+
+# queued_event_registry : map EventRef -> queued_event_record (AD1). The ONE authoritative queue-status source. The priority
+#   queue orders EventRefs (equivalently records) by the total-order key; a record's fields index the registry entry.
+# EventQueueStatus in { QUEUED, DISPATCHING, CONSUMED, CANCELLED } (AC8/AD1). Transition table (AD1) — ProcessEventTime is
+#   the SOLE writer (AD4):
+#     QUEUED      -> DISPATCHING | CANCELLED
+#     DISPATCHING -> CONSUMED
+#     CONSUMED and CANCELLED are TERMINAL.
+# A setup_retry_record keeps its IMMUTABLE seat_event_ref (never destroyed, used for ownership/audit) and a SetupRetryStatus,
+#   but NO writable event_queue_status field (AD1: the Stage-1AC per-record mirror is REMOVED — the central registry is
+#   authoritative). Cancellation/consumption change queued_event_registry[seat_event_ref].queue_status only.
+
+STRUCTURE OrdinaryDispatchContext (AD5 — the complete dispatcher-owned context for one ordinary dispatch)
+  # AD5: ProcessEventTime CONSTRUCTS this from the queued_event_record + its EventRef; it is complete and dispatcher-owned.
+  #   Delivery discipline (Design B): EVERY ordinary queued handler receives dispatch_envelope; the dispatcher passes
+  #   dispatched_event_ref ONLY to a handler whose declared signature includes it (currently only SetupRetryEvent). No
+  #   undeclared named argument is injected into a handler that does not accept it.
+  dispatch_envelope     : the immutable complete ordinary-event envelope from the queued_event_record
+  dispatched_event_ref  : EventRef — the record's own event_ref (the ACTUAL event being dispatched)
 
 PROCEDURE ScheduleEvent
   INPUTS: EventQueueContext EQ, RoundContext, event_type, target_event_time, target_microphase,
@@ -489,28 +561,38 @@ PROCEDURE ScheduleEvent
     # J9 (3): assign the per-run monotonic seq ATOMICALLY, AFTER the deterministic ordering is established.
     SET EQ.event_creation_seq <- EQ.event_creation_seq + 1
     SET seq <- EQ.event_creation_seq
-    # J9 (4): attach the round/template epoch and the candidate envelope fields.
-    CREATE envelope = { envelope_namespace = ORDINARY_EVENT,   # Q6: every ScheduleEvent envelope is ORDINARY_EVENT
-                        event_type, event_time = target_event_time, delta_cycle = dc, microphase = target_microphase,
-                        RoundID = RoundID_current, TemplateID = TemplateID_committed,
-                        CandidateID?, PropagationID?, MinerID?, AssignmentID?, assignment_version?,
-                        seq }                                   # seq is EQ.event_creation_seq (J4)
-    # J9 (5): insert using the deterministic TOTAL-ORDER key.
-    INSERT envelope INTO EQ.event_queue ORDERED BY (event_time, delta_cycle, microphase,
-                                                    (CandidateID, MinerID, AssignmentID), seq)
-    # AC1 (6): DERIVE the ONE canonical EventRef from the envelope just created. seq is globally unique per run (J4), so
-    #     this EventRef identifies EXACTLY the queued envelope. It is the SAME type used by cancellation, stored retry
-    #     ownership (seat_event_ref), and dispatch ownership (dispatched_event_ref).
+    # AC1 (4): DERIVE the ONE canonical EventRef. seq is globally unique per run (J4), so it identifies EXACTLY one event.
     SET event_ref <- EventRef(envelope_namespace = ORDINARY_EVENT, event_type = event_type,
                               event_time = target_event_time, delta_cycle = dc, microphase = target_microphase, seq = seq)
-  RETURNS: scheduled(event_ref, envelope)   # AC1: the canonical EventRef AND the envelope (was scheduled(envelope)); NOT interchangeable
-  NOTE: K8/J9: the SOLE enqueue interface, over the explicit EventQueueContext. It DERIVES delta_cycle
-        (caller supplies only event_time + microphase), owns event_creation_seq (J4), rejects finalised
-        (I-02), post-horizon (O2: target_event_time > T), and backward event_times, and inserts by the
-        deterministic total-order key (G7/H2). Every `SCHEDULE` elsewhere is shorthand for a call here.
-        O2: because this is the ONLY enqueue path and it rejects target_event_time > T, the queue can never
-        hold an ordinary event beyond the horizon T — the run driver (§0.7d-run) drains every event_time <= T,
-        so nothing is stranded past T.
+    # AD2/AD8 (5): capture the COMPLETE immutable handler PAYLOAD — EVERY caller-supplied event argument required by the
+    #     target handler — plus the complete dispatch envelope. ScheduleEvent does NOT construct or insert an INCOMPLETE
+    #     queued_event_record (AD8): a missing required field is a construction-invariant violation, not a silent drop and
+    #     not a substitution with current global values.
+    SET immutable_payload <- the COMPLETE caller-supplied argument set for event_type (from envelope_fields), e.g. for
+                             #   SetupRetryEvent EXACTLY { RoundID, setup_kind, SetupRetryID, TemplateID_at_seat,
+                             #   TemplateRefreshSetupID, retry_generation, reason }
+    ASSERT immutable_payload contains EVERY required field of the declared payload schema for event_type   # AD8: reject incomplete construction
+    SET dispatch_envelope <- { envelope_namespace = ORDINARY_EVENT, event_time = target_event_time, delta_cycle = dc,
+                               event_seq = seq, hook_id = null }         # AD1/R3: the COMPLETE immutable ordinary-event envelope (§0.2)
+    # AD1 (6): CREATE the ONE central queued_event_record and REGISTER it with queue_status = QUEUED — the SINGLE
+    #     authoritative queue-status source. RoundID_current/TemplateID_committed epoch fields travel inside immutable_payload
+    #     / the total-order key derived below; no separate mutable envelope copy is kept.
+    SET record <- queued_event_record(event_ref = event_ref, event_type = event_type, dispatch_envelope = dispatch_envelope,
+                                      immutable_payload = immutable_payload, queue_status = QUEUED)
+    SET queued_event_registry[event_ref] <- record                       # AD1: the ONE authoritative registry
+    # J9 (7): insert the EventRef into the priority queue using the deterministic TOTAL-ORDER key (fields read from the record).
+    INSERT event_ref INTO EQ.event_queue ORDERED BY (event_time, delta_cycle, microphase,
+                                                    (CandidateID, MinerID, AssignmentID), seq)   # keys from queued_event_registry[event_ref]
+  RETURNS: scheduled(event_ref, record) | rejected_finalised_time | post_horizon_event_rejected |
+           rejected_post_epilogue_not_strictly_later | rejected_backward_time
+           # AD3: the COMPLETE result union — every success and rejection variant ScheduleEvent can return. scheduled carries
+           #   the canonical EventRef AND the central queued_event_record (was scheduled(event_ref, envelope)).
+  NOTE: K8/J9/AD1/AD2/AD3: the SOLE enqueue interface. It DERIVES delta_cycle (caller supplies only event_time + microphase),
+        owns event_creation_seq (J4), rejects finalised (I-02), post-horizon (O2: target_event_time > T), and backward
+        event_times, CAPTURES the complete immutable handler payload + dispatch envelope into the ONE central
+        queued_event_record (registered QUEUED), and inserts the EventRef by the deterministic total-order key (G7/H2).
+        Every `SCHEDULE` elsewhere is shorthand for a call here. O2: because this is the ONLY enqueue path and it rejects
+        target_event_time > T, the queue can never hold an ordinary event beyond the horizon T.
 ```
 
 **(0.7f) Driver event envelopes (K4; single sanctioned source L1).** A miner-state transition originated
@@ -635,7 +717,9 @@ STRUCTURE CandidatePropagationContext (CPC)   # F1: one per discovered candidate
   finder_MinerID
   discovery_time
   certificate_arrival_events  : set of scheduled per-recipient events (each carries CandidateID/PropagationID)
-  block_arrival_event         : the scheduled BlockAcceptancePoint event (carries CandidateID/PropagationID)
+  block_arrival_event         : the scheduled BlockAcceptancePoint EventRef (carries CandidateID/PropagationID), or null
+                                 # AD3: null when the block seat was rejected by ScheduleEvent (e.g. a post-horizon
+                                 #   target, O2 — the event was never enqueued); every CANCEL of it is null-guarded.
   acceptance_timestamp        : set when a block-arrival with outcome ACCEPTED_CANDIDATE registers (else null)
   status                      : one of the candidate statuses below
   failure_reason              : one of {REJECTED, BLOCK_UNAVAILABLE, PROPAGATION_TIMEOUT, NO_VALID_CANDIDATE} or null
@@ -981,18 +1065,23 @@ STRUCTURE RoundContext registries (initialised by RoundInitialise, cleared on cl
   #   (B) known id but dispatched_event_ref != rec.seat_event_ref -> FOREIGN replay -> stale no-op, leave the record SEATED
   #   for its genuine queued event; (C) the GENUINE event (dispatched_event_ref = rec.seat_event_ref) with a payload that
   #   mismatches the immutable record -> INTEGRITY corruption of the owning event -> terminalise the record (ABORTED via the
-  #   declared setup_retry_payload_integrity_failure abort), mark event_queue_status CONSUMED (AC8), store the exact
+  #   declared setup_retry_payload_integrity_failure abort); the event's queue state reaches CONSUMED via the DISPATCHER
+  #   (AD4: ProcessEventTime drives QUEUED -> DISPATCHING -> CONSUMED), NOT via the handler (AD1 REMOVES the AC8 per-record
+  #   event_queue_status mirror — the queue state lives ONLY in the central queued_event_registry), and store the exact
   #   integrity-abort disposition. The only event a SEATED record owns is never consumed while the record stays SEATED.
   #   (AC3 reorders the guard so the non-SEATED replay check precedes payload integrity; AC4 scopes integrity to the
   #   record's own round; AC6 makes the abort follow SEATED -> APPLYING -> ABORTED.)
   # --- AB6 round-closure terminalisation uses keyed persistent updates + post-conditions ---
-  # CancelSetupRetriesForRound uses keyed UPDATEs (AB3), marks a cancelled SEATED record's event_queue_status CANCELLED (AC8,
-  #   was "clear event_ref to null" in AB6), and after it completes for closing_RoundID: no record has status = SEATED; no
-  #   record of that round has event_queue_status = QUEUED; every terminalised (CANCELLED) record has a terminal
-  #   target_disposition; every APPLYING record has terminal_closure_pending persisted in the registry.
+  # CancelSetupRetriesForRound uses keyed UPDATEs (AB3), and for a cancelled SEATED record sets its CENTRAL queue state
+  #   CANCELLED (AD9: queued_event_registry[seat_event_ref].queue_status <- CANCELLED — was AC8's per-record
+  #   event_queue_status <- CANCELLED, itself the successor to AB6's "clear event_ref to null"; AD1 REMOVES the per-record
+  #   mirror). After it completes for closing_RoundID: no record has status = SEATED; no closing-round event's central queue
+  #   state is QUEUED; no terminal retry owns a QUEUED event; every terminalised (CANCELLED) record has a terminal
+  #   target_disposition; every APPLYING record has terminal_closure_pending persisted in the registry (AD9 post-conditions).
   # --- AC1 canonical EventRef type ---
   # EventRef = (envelope_namespace, event_type, event_time, delta_cycle, microphase, seq) — see STRUCTURE EventRef (§0.7e).
-  #   ScheduleEvent DERIVES exactly one EventRef from the envelope it creates and RETURNS scheduled(EventRef, envelope). The
+  #   ScheduleEvent DERIVES exactly one EventRef from the envelope it creates and RETURNS scheduled(EventRef, ...) (AC1 named
+  #   the second slot `envelope`; AD3 replaces it with the central queued_event_record — see the AD3 addendum below). The
   #   SAME EventRef type is used by cancellation, stored retry ownership (setup_retry_record.seat_event_ref), and dispatch
   #   ownership (dispatched_event_ref). `event_ref`, `envelope`, and `dispatched_event_ref` are NOT silently interchangeable.
   # --- AC2 dispatcher-owned EventRef threading ---
@@ -1025,11 +1114,66 @@ STRUCTURE RoundContext registries (initialised by RoundInitialise, cleared on cl
   # setup_retry_status_transitions: SEATED -> {APPLYING, CANCELLED, SUPERSEDED}; APPLYING -> {APPLIED, SUPERSEDED, CANCELLED,
   #   ABORTED}; APPLIED/SUPERSEDED/CANCELLED/ABORTED are TERMINAL. SetSetupRetryStatus is the SOLE status writer and REJECTS
   #   any illegal transition (especially terminal -> terminal) with no mutation. The seat CREATEs the record at SEATED.
-  # --- AC8 immutable event identity separate from queue state ---
-  # setup_rollback of the retry record: seat_event_ref : EventRef (IMMUTABLE, set at seat) + event_queue_status :
-  #   EventQueueStatus { QUEUED, DISPATCHING, CONSUMED, CANCELLED }. Ownership comparisons use the immutable seat_event_ref;
-  #   cancellation/consumption changes ONLY event_queue_status and NEVER erases the historical seat EventRef. The Z1-era
-  #   single `event_ref` field is REPLACED by this pair.
+  # --- AC8 immutable event identity separate from queue state (queue state RELOCATED to the central registry by AD1) ---
+  # The retry record carries seat_event_ref : EventRef (IMMUTABLE, set at seat). Ownership comparisons use the immutable
+  #   seat_event_ref. AC8 originally added an in-record event_queue_status : EventQueueStatus field alongside it; AD1
+  #   SUPERSEDES that split: the per-record queue mirror is REMOVED and the queue state now lives SOLELY in the central
+  #   queued_event_registry, keyed by seat_event_ref (queued_event_registry[seat_event_ref].queue_status). Cancellation /
+  #   consumption change ONLY that central queue_status and NEVER erase the historical seat EventRef. The Z1-era single
+  #   `event_ref` field is REPLACED by seat_event_ref; the record no longer stores queue state at all.
+  # --- AD1 central queued-event record + registry (single authoritative queue-status source) ---
+  # queued_event_record = (event_ref : EventRef IMMUTABLE, event_type, dispatch_envelope : immutable complete ordinary-event
+  #   envelope, immutable_payload : the complete stored payload, queue_status : EventQueueStatus). queued_event_registry :
+  #   map EventRef -> queued_event_record is the ONE authoritative queue-status source. EventQueueStatus transitions:
+  #   QUEUED -> {DISPATCHING, CANCELLED}; DISPATCHING -> CONSUMED; CONSUMED and CANCELLED are TERMINAL. setup_retry_record
+  #   keeps ONLY seat_event_ref (+ status : SetupRetryStatus, ...); its queue state IS queued_event_registry[seat_event_ref].queue_status.
+  # --- AD2 complete immutable payload stored at seating, delivered at dispatch ---
+  # ScheduleEvent stores the COMPLETE caller-supplied payload as record.immutable_payload (for a SetupRetryEvent exactly:
+  #   RoundID, setup_kind, SetupRetryID, TemplateID_at_seat, TemplateRefreshSetupID, retry_generation, reason).
+  #   ProcessEventTime dispatches record.event_type WITH record.immutable_payload and the record's OrdinaryDispatchContext —
+  #   payload at dispatch is IDENTICALLY the payload at seating.
+  # --- AD3 complete ScheduleEvent result union ---
+  # ScheduleEvent RETURNS scheduled(EventRef, queued_event_record) | rejected_finalised_time | post_horizon_event_rejected |
+  #   rejected_post_epilogue_not_strictly_later | rejected_backward_time. Every result-BINDING caller pattern-matches
+  #   scheduled(event_ref, record) and takes an EXPLICIT branch on each rejection it can receive (so a stored/cancellable
+  #   reference is NEVER a rejection token); a FOR-EFFECT caller's only reachable rejection is the deterministic O2
+  #   post-horizon rejection (the event is never enqueued), which needs no further handling. No procedure returns a
+  #   rejection variant absent from this declared set.
+  # --- AD4 ProcessEventTime is the SOLE queue-status owner ---
+  # Before dispatch ProcessEventTime asserts QUEUED, moves QUEUED -> DISPATCHING, sets EQ.current_event_ref, and builds a
+  #   trusted OrdinaryDispatchContext; after the handler returns it moves DISPATCHING -> CONSUMED and clears
+  #   EQ.current_event_ref. Cancellation performs ONLY QUEUED -> CANCELLED. NO handler writes a queue_status.
+  # --- AD5 dispatcher-owned OrdinaryDispatchContext ---
+  # OrdinaryDispatchContext = (dispatch_envelope, dispatched_event_ref), built and owned by ProcessEventTime. Design B: all
+  #   handlers receive dispatch_envelope; dispatched_event_ref is delivered ONLY to a handler whose signature declares it
+  #   (SetupRetryEvent). No undeclared named argument is injected into any handler.
+  # --- AD6 guard-driven abort against the DISPATCHING queue state ---
+  # A guard-driven retry abort runs SEATED -> APPLYING -> ABORTED while the queue moves QUEUED -> DISPATCHING -> CONSUMED.
+  #   CancelSetupRetriesForRound, reached synchronously during that abort, sees the retry APPLYING and the queue DISPATCHING
+  #   (NOT a stale QUEUED, because AD4 set DISPATCHING before dispatch), so it only persists terminal_closure_pending; the
+  #   RoundAbort path never trips a QUEUED assertion, and after the handler returns no event remains DISPATCHING.
+  # --- AD7 stale/terminal dispatch still consumes the queue state ---
+  # A stale or terminal dispatch STILL follows QUEUED -> DISPATCHING -> CONSUMED (the dispatcher consumes it), so a stale
+  #   dispatch can NEVER leave the registry at QUEUED and a later CloseRoundAssignments never finds a terminal retry record
+  #   whose central event is falsely QUEUED.
+  # --- AD8 completeness + integrity of the dispatched record ---
+  # ScheduleEvent REJECTS constructing an incomplete queued_event_record (it asserts the payload carries every required
+  #   field). ProcessEventTime builds a COMPLETE dispatcher-owned OrdinaryDispatchContext. On detected registry corruption it
+  #   uses the declared integrity terminal disposition (HandleDispatchIntegrityFailure): resolve + terminalise the
+  #   SetupRetryID's record, use a COMPLETE dispatcher-integrity envelope for a current-round abort, and do NOT abort if the
+  #   record belongs to an old/terminal round. A malformed untrusted envelope may NEVER become the transition identity for
+  #   round closure.
+  # --- AD9 CancelSetupRetriesForRound inspects the central registry ---
+  # For each closing-round retry it reads queued_event_registry[seat_event_ref].queue_status: QUEUED -> cancel the event,
+  #   set QUEUED -> CANCELLED, and SEATED -> CANCELLED (record); DISPATCHING -> do NOT cancel, persist terminal_closure_pending,
+  #   let the handler finish, dispatcher later sets DISPATCHING -> CONSUMED; CONSUMED / CANCELLED -> no queue rewrite.
+  #   Post-conditions: no closing-round event remains QUEUED; none remains DISPATCHING after its handler returns; every SEATED
+  #   retry is terminalised; no terminal retry owns a live QUEUED event; no queue status is held in an unsynchronised mirror.
+  # --- AD10 supersession of incomplete Stage-1AC audit claims ---
+  # STAGE_01AD_SUPERSESSION_REGISTER.md records the Stage-1AC audit gaps AD corrects (the AC8 audit missed stale/guard-abort
+  #   exits; TV249 missed the QUEUED-assertion failure during RoundAbort; TV247 did not test queue-state consumption; TV248
+  #   passed an incomplete envelope into RoundAbort; the AC1/AC2 audit did not verify complete-payload storage/dispatch; and
+  #   ScheduleEvent's declared RETURNS omitted rejection variants).
   # Q7 recovery-timing CONFIG constants (declared, deterministic):
   #   recovery_deadline_window            : config; > 0. The delay from SECURITY_RECOVERY entry to the deadline event.
   #   configured_recovery_completion_delay: config; > 0 (or the next-representable simulation instant). The
@@ -1415,7 +1559,7 @@ PROCEDURE StartWake                                             # V3/V9: a TRANS
                      target_event_time = target_time, target_microphase = WAKE_COMPLETE,
                      {MinerID, AssignmentID(target_assignment)},
                      post_epilogue_context = post_ctx)                   # V2/S7: post_ctx present ONLY for POST_EPILOGUE
-    IF seat is NOT scheduled(event_ref, envelope):   # AC1: ScheduleEvent returns scheduled(EventRef, envelope)
+    IF seat is NOT scheduled(event_ref, record):   # AC1/AD3: ScheduleEvent returns scheduled(EventRef, queued_event_record)
       # V3: the schedule failed BEFORE any transition. The miner is UNCHANGED (still from_state); nothing to cancel.
       RECORD wake_schedule_rejected(MinerID, AssignmentID(target_assignment), seat)
       RETURN wake_schedule_failed_before_transition(reason = seat)
@@ -1610,15 +1754,22 @@ STRUCTURE RunContext (per-RUN; Q5 — the SOLE owner of run-level runtime state)
   security_census_write_seq_by_event_time   : R5 — map event_time -> monotonic census-write ordinal. The EXPLICIT
                                 : deterministic write order for latest_security_census. Owned SOLELY by
                                 : CommitSecurityCensus (§0.8a); initialised here and PRESERVED across rounds.
-  setup_retry_records         : Z1/AA2/AC1/AC8 — map SetupRetryID -> setup_retry_record { SetupRetryID, setup_kind, RoundID,
+  setup_retry_records         : Z1/AA2/AC1/AD1 — map SetupRetryID -> setup_retry_record { SetupRetryID, setup_kind, RoundID,
                                 : TemplateID_at_seat, TemplateRefreshSetupID, retry_generation, seat_event_ref : EventRef
-                                : (immutable, AC1/AC8), event_queue_status : EventQueueStatus (AC8), status : SetupRetryStatus,
-                                : target_disposition, terminal_closure_pending : bool (AA2) }. The SINGLE setup-retry registry
-                                : (REPLACES the Y-era applied_setup_retry_ids mirror AND the bare setup_retry_status_by_id).
-                                : The seating procedure publishes status = SEATED, seat_event_ref = the ScheduleEvent EventRef,
-                                : event_queue_status = QUEUED after a successful ScheduleEvent; SetupRetryEvent's first dispatch
-                                : flips SEATED -> APPLYING and executes; a replay is duplicate-suppressed IFF status is already
-                                : non-SEATED (Z1). "applied" = status = APPLIED, set only after the target result is known.
+                                : (IMMUTABLE, AC1), status : SetupRetryStatus, target_disposition, terminal_closure_pending :
+                                : bool (AA2) }. AD1: the record keeps NO writable event_queue_status field — its current queue
+                                : state is queued_event_registry[seat_event_ref].queue_status (the central authoritative source).
+                                : The SINGLE setup-retry registry (REPLACES the Y-era applied_setup_retry_ids mirror AND the bare
+                                : setup_retry_status_by_id). The seating procedure publishes status = SEATED and
+                                : seat_event_ref = the ScheduleEvent EventRef (the queued_event_record it registered is QUEUED);
+                                : SetupRetryEvent's first dispatch flips SEATED -> APPLYING and executes; a replay is
+                                : duplicate-suppressed IFF status is already non-SEATED (Z1). "applied" = status = APPLIED, set
+                                : only after the target result is known.
+  queued_event_registry       : AD1 — map EventRef -> queued_event_record { event_ref, event_type, dispatch_envelope
+                                : (immutable complete), immutable_payload (complete handler args), queue_status :
+                                : EventQueueStatus }. The ONE authoritative queue-status source; created + registered QUEUED by
+                                : ScheduleEvent, driven QUEUED -> DISPATCHING -> CONSUMED (or QUEUED -> CANCELLED) SOLELY by
+                                : ProcessEventTime / the queue owner. Initialised empty at run start.
   setup_retry_generation_by_scope : Y3 — map (RoundID, setup_kind, TemplateRefreshSetupID_or_null) -> generation. The
                                 : bounded per-scope retry counter registry (RENAMED from the shadowed setup_retry_generation
                                 : map). It is NEVER a scalar; the scalar generation carried in/out is retry_generation (Y3).
@@ -1642,6 +1793,7 @@ PROCEDURE RunInitialise                                         # Q5: creates AL
     INITIALISE applied_transition_registry <- empty set     # I-03/K5
     INITIALISE transition_rejection_log    <- empty log     # K5
     INITIALISE setup_retry_records         <- empty map     # Z1: SetupRetryID -> setup_retry_record (the single retry registry)
+    INITIALISE queued_event_registry       <- empty map     # AD1: EventRef -> queued_event_record (the ONE authoritative queue-status source)
     INITIALISE waking_origin_assignment_ref <- empty map    # Z5: MinerID -> assignment_version_ref (set on WAKING entry, cleared on WAKING exit)
     SET        maximum_setup_retries       <- config.maximum_setup_retries   # W8/Y3: bounded retry budget per scope
   RETURNS: RunContext(RunID, EventQueueContext = EQ, RunHookContext, rebased_boundaries, run_finalised,
@@ -1938,13 +2090,15 @@ PROCEDURE PrepareParticipantsForNewRound
                      {RoundID = RoundID_current, setup_kind = PARTICIPANT_SETUP, SetupRetryID = srid,
                       TemplateID_at_seat = TemplateID_committed, TemplateRefreshSetupID = null,
                       retry_generation = g, reason = setup_reason})                   # W8/Y2/Y3: exact identity + scalar generation
-      IF r = scheduled(event_ref, envelope):   # AC1: ScheduleEvent returns the canonical EventRef + envelope
-        # Z1/AC8: publish the setup_retry_record ATOMICALLY with status = SEATED, seat_event_ref = the EventRef (immutable),
-        #   event_queue_status = QUEUED, AFTER the successful ScheduleEvent. The seat is the ONLY CREATE (AB3).
+      IF r = scheduled(event_ref, record):   # AC1/AD3: ScheduleEvent returns the canonical EventRef + the central queued_event_record
+        # Z1/AC1/AD1: publish the setup_retry_record ATOMICALLY with status = SEATED and seat_event_ref = the EventRef
+        #   (immutable), AFTER the successful ScheduleEvent. The queued_event_record `record` is already registered QUEUED
+        #   (AD1) — the retry record keeps NO event_queue_status mirror; its queue state is
+        #   queued_event_registry[seat_event_ref].queue_status. The seat is the ONLY CREATE of the retry record (AB3).
         ATOMICALLY: SET setup_retry_records[srid] <- setup_retry_record(SetupRetryID = srid, setup_kind = PARTICIPANT_SETUP,
               RoundID = RoundID_current, TemplateID_at_seat = TemplateID_committed, TemplateRefreshSetupID = null,
-              retry_generation = g, seat_event_ref = event_ref, event_queue_status = QUEUED, status = SEATED,
-              target_disposition = null, terminal_closure_pending = false)   # Z1/AA2/AC1/AC8
+              retry_generation = g, seat_event_ref = event_ref, status = SEATED,
+              target_disposition = null, terminal_closure_pending = false)   # Z1/AA2/AC1/AD1
         RETURN participant_set_setup_retry_seated(srid, setup_reason)
     RETURN CALL RoundAbort(RoundContext, reason = participant_setup_failed(setup_reason),
                            dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # declared abort
@@ -2088,18 +2242,23 @@ PROCEDURE RollbackTemplateRefreshSetup                          # W1/W2/V8/X2/X7
         restore), reporting rolled_to_offline for the W8 retry decision.
 
 PROCEDURE SetupRetryEvent                                       # W8/X4/Y1/Y2/Y3: a bounded, idempotent, state-compatible retry of a rolled-back setup
-  INPUTS: RoundContext, dispatch_envelope, dispatched_event_ref, RoundID, setup_kind, SetupRetryID,
-          TemplateID_at_seat, TemplateRefreshSetupID, retry_generation, reason
+  INPUTS: RoundContext, dispatch_envelope, dispatched_event_ref,
+          # AD2: the payload fields below are delivered as the STORED immutable_payload of the dispatched queued_event_record
+          #   (payload at dispatch = payload at seating); this handler's SIGNATURE declares dispatched_event_ref, so the
+          #   dispatcher passes it (AD5 Design B). The fields:
+          RoundID, setup_kind, SetupRetryID, TemplateID_at_seat, TemplateRefreshSetupID, retry_generation, reason
           # Y3: retry_generation is the SCALAR generation (NEVER a map). Y2: TemplateID_at_seat and TemplateRefreshSetupID
           #   are carried EXPLICITLY in the payload (TemplateRefreshSetupID = null for PARTICIPANT_SETUP). SetupRetryID
           #   carries the COMPLETE scope: PARTICIPANT_SETUP = (RoundID, TemplateID_at_seat, PARTICIPANT_SETUP, retry_generation);
           #   TEMPLATE_REFRESH_SETUP = (TemplateRefreshSetupID, TEMPLATE_REFRESH_SETUP, retry_generation).
-          # AC2: dispatched_event_ref is the canonical EventRef of THIS dispatched SetupRetryEvent, INJECTED by
-          #   ProcessEventTime from EQ.current_event_ref (the dispatcher owns it). It is NEVER read from the payload and
-          #   NEVER derived by prose; it is a MANDATORY input (the dispatch contract guarantees ProcessEventTime always
-          #   supplies it — TV245). Ownership compares it against the IMMUTABLE rec.seat_event_ref (AC1/AC8).
+          # AC2/AD5: dispatched_event_ref is the canonical EventRef of THIS dispatched SetupRetryEvent, supplied by
+          #   ProcessEventTime from the OrdinaryDispatchContext it built (EQ.current_event_ref). It is NEVER read from the
+          #   payload and NEVER derived by prose; it is a MANDATORY input (the dispatch contract guarantees ProcessEventTime
+          #   always supplies it — TV245). Ownership compares it against the IMMUTABLE rec.seat_event_ref (AC1).
   PRECONDITIONS: a dispatched queued handler seated by PrepareParticipantsForNewRound / ContinueTemplateRefreshAssignmentSetup
-                 after a rolled-back setup; its dispatch_envelope AND dispatched_event_ref are supplied by ProcessEventTime (§0.7f/AC2).
+                 after a rolled-back setup; its dispatch_envelope, immutable_payload, AND dispatched_event_ref are supplied by
+                 ProcessEventTime from the central queued_event_record (§0.7f/AC2/AD2/AD5); its queue state is
+                 queued_event_registry[dispatched_event_ref].queue_status = DISPATCHING while it runs (AD4).
   EFFECTS:
     # AC3 CANONICAL GUARD ORDER: (1) structure to resolve the id; (2) RESOLVE the record; (3) AC5 EVENTREF OWNERSHIP
     #   (dispatched_event_ref vs rec.seat_event_ref); (4) AC3 STATUS-based replay (non-SEATED -> duplicate-suppress) BEFORE
@@ -2150,19 +2309,18 @@ PROCEDURE SetupRetryEvent                                       # W8/X4/Y1/Y2/Y3
         CALL SetSetupRetryStatus(SetupRetryID, SUPERSEDED)   # AC4/AC7: the record's seat-time refresh template is no longer current
         UPDATE setup_retry_records[SetupRetryID].target_disposition <- setup_retry_stale_noop(SetupRetryID)
         RETURN setup_retry_stale_noop(SetupRetryID)
-    # (6) AC5-C OWNING-EVENT INTEGRITY — ONLY for a CURRENT OWNED SEATED record (established current nonterminal round + current
-    #   template in step 5). Validate the dispatch envelope AND the payload against the immutable record. A failure is corruption
-    #   of the genuine owning event: it may NOT remain SEATED with its only event consumed. Since the record belongs to the
-    #   CURRENT NONTERMINAL round, take the declared current-round integrity abort via the AC6 legal path
-    #   (SEATED -> APPLYING -> ABORTED). The dispatch_envelope used for RoundAbort is the dispatcher-materialised one (AC2
-    #   guarantees it complete); the envelope-incompleteness check is the defensive AC5-C trigger.
-    IF dispatch_envelope is incomplete
-       OR NOT (RoundID = rec.RoundID AND setup_kind = rec.setup_kind AND TemplateID_at_seat = rec.TemplateID_at_seat
-               AND TemplateRefreshSetupID = rec.TemplateRefreshSetupID AND retry_generation = rec.retry_generation):
-      CALL SetSetupRetryStatus(SetupRetryID, APPLYING)       # AC6: leave SEATED FIRST (the genuine owned event is being consumed)
-      UPDATE setup_retry_records[SetupRetryID].event_queue_status <- CONSUMED   # AC8: this genuine event is consumed now
+    # (6) AD8 DEFENSIVE OWNING-EVENT INTEGRITY — ONLY for a CURRENT OWNED SEATED record (established current nonterminal round +
+    #   current template in step 5). The delivered payload IS queued_event_registry[er].immutable_payload and the record was
+    #   seated from the SAME values, so under a well-formed registry they MATCH by construction; the dispatch_envelope is
+    #   COMPLETE (AD8: ScheduleEvent rejected an incomplete record; ProcessEventTime built a complete OrdinaryDispatchContext
+    #   and its HandleDispatchIntegrityFailure caught any corruption BEFORE this handler ran). This is therefore a DEFENSIVE
+    #   check: a residual payload-vs-record mismatch is registry corruption -> take the declared current-round integrity abort
+    #   via the AC6 legal path (SEATED -> APPLYING -> ABORTED), using the COMPLETE dispatch_envelope (never an incomplete one).
+    IF NOT (RoundID = rec.RoundID AND setup_kind = rec.setup_kind AND TemplateID_at_seat = rec.TemplateID_at_seat
+            AND TemplateRefreshSetupID = rec.TemplateRefreshSetupID AND retry_generation = rec.retry_generation):
+      CALL SetSetupRetryStatus(SetupRetryID, APPLYING)       # AC6: leave SEATED FIRST (queue state is DISPATCHING, dispatcher-owned)
       SET disp <- CALL RoundAbort(RoundContext, reason = setup_retry_payload_integrity_failure(setup_kind),
-                        dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # AB2/AC5-C: capture the abort FIRST
+                        dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # AB2/AD8: COMPLETE envelope; capture FIRST
       SET post_abort_rec <- setup_retry_records[SetupRetryID]                   # AC6: re-read
       ASSERT post_abort_rec.terminal_closure_pending = true OR round_state in {ROUND_ACCEPTED, ROUND_ABORTED}   # AC6: round terminalised coherently
       UPDATE setup_retry_records[SetupRetryID].target_disposition <- disp       # AB2: store the EXACT round_aborted(abort_record)
@@ -2197,11 +2355,11 @@ PROCEDURE SetupRetryEvent                                       # W8/X4/Y1/Y2/Y3
       UPDATE setup_retry_records[SetupRetryID].target_disposition <- disp
       CALL SetSetupRetryStatus(SetupRetryID, ABORTED)        # AC6/AC7: APPLYING -> ABORTED
       RETURN disp
-    # (8) FIRST DISPATCH: leave SEATED via SEATED -> APPLYING (AC6/AC7), mark the genuine event CONSUMED (AC8), CAPTURE the
-    #   target result (no direct RETURN CALL), then RE-READ the persisted record (AB4) and set the terminal status through the
-    #   transition guard.
+    # (8) FIRST DISPATCH: leave SEATED via SEATED -> APPLYING (AC6/AC7), CAPTURE the target result (no direct RETURN CALL),
+    #   then RE-READ the persisted record (AB4) and set the terminal status through the transition guard. AD4: the handler
+    #   does NOT write the queue status — the queued event is already DISPATCHING (dispatcher-owned) and ProcessEventTime
+    #   sets DISPATCHING -> CONSUMED after this handler returns.
     ATOMICALLY: CALL SetSetupRetryStatus(SetupRetryID, APPLYING)   # Z1/AC7: SEATED -> APPLYING
-    UPDATE setup_retry_records[SetupRetryID].event_queue_status <- CONSUMED   # AC8: the genuine owning event is consumed
     IF setup_kind = PARTICIPANT_SETUP:
       SET disp <- CALL PrepareParticipantsForNewRound(RoundContext, dispatch_envelope)          # X4: re-run participant setup
     ELSE:   # setup_kind = TEMPLATE_REFRESH_SETUP: X3/X4 — resume ONLY the post-TemplateCommit assignment phase (identity verified above)
@@ -2241,8 +2399,10 @@ PROCEDURE SetupRetryEvent                                       # W8/X4/Y1/Y2/Y3
         and never aborts a later round. INTEGRITY (AC5-C) — only a CURRENT OWNED SEATED record whose envelope/payload is
         corrupt takes the current-round integrity abort; it cannot remain SEATED with its only event consumed. LEGAL STATUS
         PATH (AC6/AC7) — every aborting guard goes SEATED -> APPLYING (before RoundAbort) -> ABORTED via SetSetupRetryStatus;
-        no SEATED -> ABORTED and no terminal -> terminal rewrite ever occurs. IDENTITY (AC8) — ownership uses the immutable
-        seat_event_ref; consuming/cancelling changes only event_queue_status. A record whose round closed can NEVER finish
+        no SEATED -> ABORTED and no terminal -> terminal rewrite ever occurs. IDENTITY (AC8/AD1) — ownership uses the
+        immutable seat_event_ref; the queue state lives SOLELY in the central queued_event_registry (AD1 REMOVES the AC8
+        per-record event_queue_status mirror), and consuming/cancelling changes ONLY queued_event_registry[seat_event_ref].queue_status
+        (dispatcher-owned, AD4), never erasing seat_event_ref. A record whose round closed can NEVER finish
         APPLIED; every dispatch ends in exactly one of a stale/duplicate/terminal no-op leaving no SEATED record it owns, the
         target's enumerated disposition, or a declared round_aborted(abort_record).
 
@@ -2253,37 +2413,57 @@ PROCEDURE CancelSetupRetriesForRound                            # AA2: terminali
   PRECONDITIONS: called by CloseRoundAssignments for the round being closed (ROUND_ACCEPTED / ROUND_ABORTED), so no
                  terminal or superseded round leaves a SEATED setup-retry record (AA2).
   EFFECTS:
-    # AB3/AA2/AC8: iterate the matching SetupRetryIDs (NOT detached record values) in STABLE order and mutate EACH record by KEY.
-    #   BOTH PARTICIPANT_SETUP and TEMPLATE_REFRESH_SETUP records carry the seat-time RoundID. `snapshot` is READ-ONLY.
+    # AB3/AA2/AC8/AD9: iterate the matching SetupRetryIDs (NOT detached record values) in STABLE order and mutate EACH record
+    #   by KEY. BOTH PARTICIPANT_SETUP and TEMPLATE_REFRESH_SETUP records carry the seat-time RoundID. `snapshot` is READ-ONLY.
     FOR EACH SetupRetryID srid IN SORT({ id : setup_retry_records[id] EXISTS AND setup_retry_records[id].RoundID = closing_RoundID } ascending):
       SET snapshot <- setup_retry_records[srid]                                        # AB3: READ-ONLY snapshot; mutate by key below
-      IF snapshot.status = SEATED:
-        # AA2/AC8: cancel its still-queued dispatch, mark the QUEUE state CANCELLED (the IMMUTABLE seat_event_ref is PRESERVED
-        #   for replay auditing, AC8), then TERMINALISE the record by key through the transition guard (SEATED -> CANCELLED, AC7).
-        IF snapshot.event_queue_status = QUEUED AND snapshot.seat_event_ref is still pending on EQ: CANCEL snapshot.seat_event_ref on EQ
-        UPDATE setup_retry_records[srid].event_queue_status <- CANCELLED              # AC8: queue state only; seat_event_ref preserved
-        CALL SetSetupRetryStatus(srid, CANCELLED)                                     # AA2/AC7: SEATED -> CANCELLED (legal)
-        UPDATE setup_retry_records[srid].target_disposition <- cancellation_reason    # AA2/AB3
-      ELSE IF snapshot.status = APPLYING:
-        # AA2/AB4/AC6: do NOT overwrite the executing handler's classification (never APPLYING -> CANCELLED here); PERSIST
-        #   terminal_closure_pending by KEY so the mid-flight handler RE-READS it (SetupRetryEvent) and finishes
-        #   APPLYING -> ABORTED / CANCELLED itself (AC7). This is why an aborting guard first moves SEATED -> APPLYING (AC6).
-        UPDATE setup_retry_records[srid].terminal_closure_pending <- true             # AA2/AB3: keyed persistent UPDATE
-      # APPLIED / SUPERSEDED / CANCELLED / ABORTED records are already terminal — left unchanged (AC7: no terminal -> terminal).
-    # AB6/AC8 POST-CONDITIONS for closing_RoundID (every mutation above was a keyed persistent UPDATE, so these hold on the registry):
-    ASSERT no id with setup_retry_records[id].RoundID = closing_RoundID has status = SEATED                       # AB6 (1)
-    ASSERT no id with setup_retry_records[id].RoundID = closing_RoundID has event_queue_status = QUEUED           # AB6 (2)/AC8: no queued event survives
+      # AD1/AD9: the queue state is read from the CENTRAL queued_event_registry (the single authoritative source). The record
+      #   NO LONGER carries an event_queue_status mirror — the decision keys off queued_event_registry[seat_event_ref].queue_status.
+      SET qstatus <- queued_event_registry[snapshot.seat_event_ref].queue_status       # AD1/AD9: single authoritative queue state
+      IF qstatus = QUEUED:
+        # AD9: a still-QUEUED (never-dispatched) retry — its record is SEATED. Cancel the pending event on EQ, set the CENTRAL
+        #   queue state CANCELLED (QUEUED -> CANCELLED), then TERMINALISE the record by key through the transition guard
+        #   (SEATED -> CANCELLED, AC7). The IMMUTABLE seat_event_ref is PRESERVED for replay auditing (AC8).
+        IF snapshot.seat_event_ref is still pending on EQ: CANCEL snapshot.seat_event_ref on EQ
+        SET queued_event_registry[snapshot.seat_event_ref].queue_status <- CANCELLED   # AD9: QUEUED -> CANCELLED (central registry only)
+        CALL SetSetupRetryStatus(srid, CANCELLED)                                      # AA2/AC7: SEATED -> CANCELLED (legal)
+        UPDATE setup_retry_records[srid].target_disposition <- cancellation_reason     # AA2/AB3
+      ELSE IF qstatus = DISPATCHING:
+        # AD9/AD6: the retry's handler is MID-FLIGHT (record APPLYING, queue DISPATCHING). Do NOT cancel the event and do NOT
+        #   rewrite the queue state — the DISPATCHER alone drives DISPATCHING -> CONSUMED (AD4). PERSIST terminal_closure_pending
+        #   by KEY so the running SetupRetryEvent RE-READS it and finishes itself APPLYING -> ABORTED / CANCELLED (AC7). This is
+        #   exactly why ProcessEventTime moves QUEUED -> DISPATCHING BEFORE dispatch (AD4): the closing pass SEES DISPATCHING,
+        #   never a stale QUEUED, and so never trips a QUEUED assertion during a guard-driven RoundAbort (AD6).
+        UPDATE setup_retry_records[srid].terminal_closure_pending <- true              # AA2/AB3: keyed persistent UPDATE
+      ELSE:
+        # AD9: qstatus is CONSUMED or CANCELLED — a TERMINAL queue state (AD1). Perform NO queue-state rewrite: CONSUMED and
+        #   CANCELLED are final. The record is already terminal (APPLIED / SUPERSEDED / CANCELLED / ABORTED) — leave it
+        #   unchanged (AC7: no terminal -> terminal).
+        SKIP                                                                           # AD9: no queue-state rewrite; record already terminal
+    # AD9 POST-CONDITIONS for closing_RoundID (every mutation above was a keyed persistent UPDATE against the record OR the
+    #   CENTRAL queued_event_registry; NO per-record queue mirror exists to fall out of sync, AD1):
+    ASSERT no id with setup_retry_records[id].RoundID = closing_RoundID has status = SEATED                       # AD9: every SEATED retry terminalised
+    ASSERT no id with setup_retry_records[id].RoundID = closing_RoundID
+                     has queued_event_registry[setup_retry_records[id].seat_event_ref].queue_status = QUEUED      # AD9: no closing-round event remains QUEUED
+    ASSERT no id with setup_retry_records[id].RoundID = closing_RoundID AND status IN { APPLIED, SUPERSEDED, CANCELLED, ABORTED }
+                     has queued_event_registry[setup_retry_records[id].seat_event_ref].queue_status = QUEUED      # AD9: no terminal retry owns a live QUEUED event
     ASSERT every id terminalised here (status transitioned to CANCELLED) has a terminal target_disposition        # AB6 (3)
-    ASSERT every id with setup_retry_records[id].RoundID = closing_RoundID AND status = APPLYING has terminal_closure_pending = true   # AB6 (4)
+    ASSERT every id with setup_retry_records[id].RoundID = closing_RoundID AND status = APPLYING has terminal_closure_pending = true   # AD6/AD9: the mid-flight handler will finish it; the dispatcher sets DISPATCHING -> CONSUMED on return, so none remains DISPATCHING afterwards
     RETURN setup_retries_terminalised(closing_RoundID)
   RETURNS: setup_retries_terminalised(closing_RoundID)
-  NOTE: AA2/AB3/AB6/AC7/AC8: the ONE named terminaliser invoked by CloseRoundAssignments. It iterates matching SetupRetryIDs
-        and mutates EACH record through a keyed persistent UPDATE — `snapshot` is read-only. A SEATED record's queued
-        SetupRetryEvent is cancelled and its event_queue_status set CANCELLED (the immutable seat_event_ref is PRESERVED for
-        auditing, AC8), and the record becomes CANCELLED via SetSetupRetryStatus (SEATED -> CANCELLED). An APPLYING record is
-        NOT overwritten — terminal_closure_pending is PERSISTED so its mid-flight handler finishes it APPLYING -> ABORTED /
-        CANCELLED (so the terminaliser never performs a CANCELLED -> ABORTED or other terminal -> terminal rewrite). After a
-        round closes, NO setup-retry record of that round remains SEATED and none holds a QUEUED event (AB6/AC8 post-conditions).
+  NOTE: AA2/AB3/AB6/AC7/AC8/AD1/AD6/AD9: the ONE named terminaliser invoked by CloseRoundAssignments. It iterates matching
+        SetupRetryIDs and mutates EACH record through a keyed persistent UPDATE — `snapshot` is read-only. The queue state is
+        inspected in the CENTRAL queued_event_registry (AD1), never a per-record mirror (which no longer exists). A QUEUED
+        (never-dispatched, record SEATED) retry has its pending SetupRetryEvent cancelled and its central queue state set
+        CANCELLED (QUEUED -> CANCELLED; the immutable seat_event_ref is PRESERVED for auditing, AC8), and the record becomes
+        CANCELLED via SetSetupRetryStatus (SEATED -> CANCELLED). A DISPATCHING (mid-flight, record APPLYING) retry is NOT
+        cancelled and its queue state is NOT rewritten here — terminal_closure_pending is PERSISTED so its handler finishes it
+        APPLYING -> ABORTED / CANCELLED, and the DISPATCHER alone completes DISPATCHING -> CONSUMED on return (AD4); because
+        ProcessEventTime sets QUEUED -> DISPATCHING before dispatch (AD4), the closing pass never sees a stale QUEUED for a
+        mid-flight retry and never trips a QUEUED assertion during a guard-driven abort (AD6). A CONSUMED or CANCELLED queue
+        state is terminal and never rewritten. After a round closes, NO setup-retry record of that round remains SEATED, NO
+        closing-round event remains QUEUED, no terminal retry owns a live QUEUED event, and none remains DISPATCHING once its
+        handler returns (AD9 post-conditions).
 
 PROCEDURE SetSetupRetryStatus                                   # AC7: the SOLE status-transition guard for setup_retry_records
   INPUTS: SetupRetryID, new_status
@@ -3282,7 +3462,7 @@ PROCEDURE SeatRecoveryCompletion                                # P4/P5/Q2/Q3/Q7
                       RecoveryCensusVersion = census_version,
                       RoundID_at_decision = RoundID_current, TemplateID_at_decision = TemplateID_committed,
                       state_version_at_decision = state_version_current})   # Q2/Q7 (deterministic target_time)
-    IF result = scheduled(event_ref, envelope):   # AC1: ScheduleEvent returns scheduled(EventRef, envelope)
+    IF result = scheduled(event_ref, record):   # AC1/AD3: ScheduleEvent returns scheduled(EventRef, queued_event_record)
       SET recovery_decisions[decision_id].due_event_ref <- event_ref        # AC1: canonical EventRef of the RecoveryCompletionDueEvent
       CALL SetRecoveryDecisionStatus(RoundContext, decision_id, SCHEDULED)   # P4/R6: SCHEDULED + REFRESH mirror
       ADD decision_id to pending_recovery_decisions[episode]                # P4/Q3: added ONLY after success
@@ -3437,7 +3617,7 @@ PROCEDURE SeatRecoveryWork                                       # U1/U3: seat O
                       RecoveryWorkAction = work_action, RecoveryCensusVersion = census_version,
                       RoundID_at_work = RoundID_current, TemplateID_at_work = TemplateID_committed,
                       state_version_at_work = state_version_current})   # U1/U3
-    IF result = scheduled(event_ref, envelope):   # AC1: ScheduleEvent returns scheduled(EventRef, envelope)
+    IF result = scheduled(event_ref, record):   # AC1/AD3: ScheduleEvent returns scheduled(EventRef, queued_event_record)
       # U3 PUBLISH only after success.
       SET recovery_work_seq <- candidate_seq
       SET recovery_work[work_id] <- work_record(episode = episode, action = work_action,
@@ -3896,7 +4076,7 @@ PROCEDURE CompleteSecurityRecovery                              # INTERNAL branc
                       RoundID_at_decision = RoundID_current, TemplateID_at_decision = TemplateID_committed,
                       state_version_at_decision = state_version_current},
                      post_epilogue_context = pctx)                                       # T1/T2/S7: strictly-later seat of the DUE event
-      IF r = scheduled(event_ref, envelope):   # AC1: ScheduleEvent returns scheduled(EventRef, envelope)
+      IF r = scheduled(event_ref, record):   # AC1/AD3: ScheduleEvent returns scheduled(EventRef, queued_event_record)
         # (4) ONLY AFTER a SUCCESSFUL seat: record the deferred-application state. The round stays SECURITY_RECOVERY
         #     and the decision stays APPLYING (the caller does NOT finalise). Store the continuation ref so a later
         #     supersession (Reconcile) or terminal cleanup (S4) can cancel it.
@@ -4755,17 +4935,31 @@ PROCEDURE ScheduleSolutionPropagation
     #           each event carries CandidateID/PropagationID (F1/G11) and its target microphase (M5).
     FOR EACH recipient r in SORT({ m in current miners : m != finder } BY MinerID ascending):
       cert_delay(r) <- deterministic modeled propagation delay(finder -> r)   # reproducible
-      ev <- CALL ScheduleEvent(EQ, RoundContext, CertificateArrival,
+      SET r_sched <- CALL ScheduleEvent(EQ, RoundContext, CertificateArrival,
                                target_event_time = now + cert_delay(r), target_microphase = CERTIFICATE_ARRIVAL,
                                {r, cpc.certificate, cpc.snapshot, CandidateID = cpc.CandidateID,
                                 PropagationID = cpc.PropagationID})   # M5: explicit microphase
-      ADD ev to certificate_arrival_events(cpc)
+      # AD3: INSPECT the ScheduleEvent result union. Store the canonical EventRef (AC1) ONLY on a real seat, so
+      #      certificate_arrival_events(cpc) holds cancellable EventRefs and NEVER a rejection token.
+      IF r_sched = scheduled(event_ref, record):
+        ADD event_ref TO certificate_arrival_events(cpc)                # AC1/AD3: cancellable EventRef of this arrival
+      ELSE:
+        # AD3/O2: a post-horizon arrival (now + cert_delay(r) > T) is DETERMINISTICALLY not enqueued; nothing to cancel.
+        RECORD certificate_arrival_not_scheduled(r, cpc.CandidateID, cpc.PropagationID, r_sched)
     # schedule the full-block acceptance event toward the modeled acceptance point (carries the ids).
     block_delay <- deterministic modeled propagation delay(finder -> acceptance_point)  # reproducible
-    SET block_arrival_event(cpc) <- CALL ScheduleEvent(EQ, RoundContext, BlockAcceptancePoint,
+    SET b_sched <- CALL ScheduleEvent(EQ, RoundContext, BlockAcceptancePoint,
                           target_event_time = now + block_delay, target_microphase = FULL_BLOCK_ARRIVAL,
                           {cpc.certificate, cpc.snapshot, CandidateID = cpc.CandidateID,
                            PropagationID = cpc.PropagationID, outcome = outcome-at-arrival})   # M5: explicit microphase
+    # AD3: INSPECT the ScheduleEvent result union. Bind the cancellable EventRef (AC1) ONLY on a real seat; a
+    #      rejection leaves block_arrival_event(cpc) = null so a later CANCEL is a no-op (nothing was enqueued).
+    IF b_sched = scheduled(event_ref, record):
+      SET block_arrival_event(cpc) <- event_ref                        # AC1/AD3: cancellable EventRef of the block arrival
+    ELSE:
+      # AD3/O2: a post-horizon block arrival (now + block_delay > T) is DETERMINISTICALLY not enqueued.
+      SET block_arrival_event(cpc) <- null
+      RECORD block_arrival_not_scheduled(cpc.CandidateID, cpc.PropagationID, b_sched)
     # (5) the finder ceases hashing (PATH B), recording THIS candidate (BOTH ids) as its pause cause (F2/G11).
     CALL EnterLowPowerListen(RoundContext, finder, stop_reason = VALID_SOLUTION_VERIFIED,
                              assignment_ref = version(cpc.snapshot.AssignmentID, cpc.snapshot.assignment_version),  # H8: exact discovery version (CURRENT for the finder now)
@@ -4855,8 +5049,8 @@ PROCEDURE HandlePropagationFailure
     REMOVE cpc from active_propagation_set                          # F3: ONLY this candidate leaves the set
     # (1) cancel ONLY this candidate's obsolete events (F2): its per-recipient certificate-arrival
     #     events and its block-arrival event. Another candidate's events are NEVER cancelled here.
-    CANCEL every event in certificate_arrival_events(cpc)
-    CANCEL block_arrival_event(cpc)
+    CANCEL every event in certificate_arrival_events(cpc)              # AD3: every stored element is a real EventRef
+    IF block_arrival_event(cpc) != null: CANCEL block_arrival_event(cpc)   # AD3: null when the seat was post-horizon rejected (no-op)
     # (2) resume ONLY miners whose pause cause matches BOTH ids of THIS candidate (F2/G11). Iterate in a
     #     STABLE sorted order by MinerID (G7). A miner paused by another candidate is left unchanged.
     FOR EACH miner M in SORT({ m : m has a PAUSED assignment
@@ -4997,7 +5191,7 @@ PROCEDURE ValidBlockAccept
     FOR EACH other cpc in SORT(active_propagation_set BY CandidateID ascending), other.CandidateID != winner_CandidateID:
       SET status(other) <- (other was a same-timestamp valid loser ? COMPETING : CANCELLED)
       CANCEL every event in certificate_arrival_events(other)
-      CANCEL block_arrival_event(other)
+      IF block_arrival_event(other) != null: CANCEL block_arrival_event(other)   # AD3: null if the block seat was post-horizon rejected (no-op)
     CLEAR active_propagation_set                                  # no live candidate remains after acceptance
     # E6/G8: a SINGLE transition to ROUND_ACCEPTED, from SOLUTION_PROPAGATION or SECURITY_RECOVERY.
     TRANSITION round_state -> ROUND_ACCEPTED                      # bumps state_version (G10)
@@ -5208,7 +5402,7 @@ PROCEDURE CloseTemplateAssignments
     FOR EACH cpc in SORT(active_propagation_set BY CandidateID ascending) WHERE TemplateID(cpc) = old_TemplateID:
       SET status(cpc) <- CANCELLED
       CANCEL every event in certificate_arrival_events(cpc)
-      CANCEL block_arrival_event(cpc)
+      IF block_arrival_event(cpc) != null: CANCEL block_arrival_event(cpc)   # AD3: null if the block seat was post-horizon rejected (no-op)
       REMOVE cpc from active_propagation_set
     CANCEL all pending certificate-arrival / BlockAcceptancePoint / resume / HashWorkEvent events bound
            to old_TemplateID
@@ -5345,13 +5539,15 @@ PROCEDURE ContinueTemplateRefreshAssignmentSetup               # X3: SOLE owner 
                      {RoundID = RoundID_current, setup_kind = TEMPLATE_REFRESH_SETUP, SetupRetryID = srid,
                       TemplateID_at_seat = TemplateID, TemplateRefreshSetupID = TemplateRefreshSetupID,
                       retry_generation = g, reason = setup_reason})               # W8/X3/Y2/Y3: the retry resumes THIS procedure (never TemplateRefresh) with the EXACT identity
-      IF r = scheduled(event_ref, envelope):   # AC1: ScheduleEvent returns the canonical EventRef + envelope
-        # Z1/AC8: publish the setup_retry_record ATOMICALLY with status = SEATED, seat_event_ref = the EventRef (immutable),
-        #   event_queue_status = QUEUED, AFTER the successful ScheduleEvent. The seat is the ONLY CREATE (AB3).
+      IF r = scheduled(event_ref, record):   # AC1/AD3: ScheduleEvent returns the canonical EventRef + the central queued_event_record
+        # Z1/AC1/AD1: publish the setup_retry_record ATOMICALLY with status = SEATED and seat_event_ref = the EventRef
+        #   (immutable), AFTER the successful ScheduleEvent. The queued_event_record `record` is already registered QUEUED
+        #   (AD1) — the retry record keeps NO event_queue_status mirror; its queue state is
+        #   queued_event_registry[seat_event_ref].queue_status. The seat is the ONLY CREATE of the retry record (AB3).
         ATOMICALLY: SET setup_retry_records[srid] <- setup_retry_record(SetupRetryID = srid, setup_kind = TEMPLATE_REFRESH_SETUP,
               RoundID = RoundID_current, TemplateID_at_seat = TemplateID, TemplateRefreshSetupID = TemplateRefreshSetupID,
-              retry_generation = g, seat_event_ref = event_ref, event_queue_status = QUEUED, status = SEATED,
-              target_disposition = null, terminal_closure_pending = false)   # Z1/AA2/AC1/AC8
+              retry_generation = g, seat_event_ref = event_ref, status = SEATED,
+              target_disposition = null, terminal_closure_pending = false)   # Z1/AA2/AC1/AD1
         RETURN template_refresh_retry_seated(srid, setup_reason)
     RETURN CALL RoundAbort(RoundContext, reason = template_refresh_failed(setup_reason),
                            dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # declared abort
@@ -5389,7 +5585,7 @@ PROCEDURE RoundAbort
     FOR EACH cpc in SORT(active_propagation_set BY CandidateID ascending):
       SET status(cpc) <- CANCELLED
       CANCEL every event in certificate_arrival_events(cpc)
-      CANCEL block_arrival_event(cpc)
+      IF block_arrival_event(cpc) != null: CANCEL block_arrival_event(cpc)   # AD3: null if the block seat was post-horizon rejected (no-op)
     CLEAR active_propagation_set
     CLEAR acceptance_batch_registry                             # cancel any pending acceptance batches
     # N1 (2)-(3): centralised closure of ALL open assignments and miner paths (D7; wires the ROUND_ABORTED
