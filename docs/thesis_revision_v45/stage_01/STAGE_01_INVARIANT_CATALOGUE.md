@@ -492,6 +492,31 @@ point, planned test stage, and consequence of violation.
   new `batch_generation` + finalize. **AG8:** `stable_tie_key = descriptor(event_type).stable_tie_key(immutable_payload)`
   everywhere; the universal `(CandidateID, MinerID, AssignmentID)` tie key is withdrawn. **AG9:** inaccurate Stage-1AF audit
   claims are superseded in `STAGE_01AG_SUPERSESSION_REGISTER.md`.
+- **Stage-1AH clause (driver-scheduling, round-rotation & acceptance-lifecycle lock).**
+  **AH1:** every `ScheduleEvent` seat carries an EXPLICIT `SchedulingOrigin`
+  (`ORDINARY_DISPATCH`/`DRIVER`/`POST_EPILOGUE`); the scheduler derives `delta_cycle` from the origin's own source frame and
+  NEVER from ambient `EQ.current_*` (a `DRIVER`/`POST_EPILOGUE` seat reads none); `rejected_invalid_scheduling_origin` and
+  `rejected_driver_target_before_source` are added. **AH2:** the fixed `round_bootstrap_time = config.run_start_time` is
+  removed — each round's bootstrap targets its own `BootstrapRequest.target_time` (first → `run_start_time`; a rotation →
+  `next_representable_simulation_time(prior terminal)`, strictly later, `≤ T`, never reusing `run_start_time`); ordinary
+  acceptance, ordinary abort, and horizon closure publish the terminal round through ONE owner
+  (`PublishTerminalRoundAndSeatNext`) in a required order, and a bootstrap is never seated while the predecessor round is
+  nonterminal. **AH3:** a stable `BootstrapRequestID` / `DriverRequestID` is the replay key, checked BEFORE any sequence is
+  minted; a replay seats no second event. **AH4:** every sim-driver request is an explicit `driver_request` record
+  (status `PENDING/SEATED/CONSUMED/REJECTED/CANCELLED`); the event loop admits + seats all pending driver requests BEFORE
+  selecting the next earliest queue time, so intake can never insert an event earlier than an already-selected `t`.
+  **AH5:** first-round miner admission is not skipped — a genesis registry is imported and an initial-registration barrier
+  gates participant setup. **AH6:** every bootstrap-chain seat result is inspected and turned into a declared disposition;
+  no caller returns success after a required successor failed to seat, and a null-round run takes a declared path.
+  **AH7:** `acceptance_batch_registry` is generation-keyed in the core data model; a finalize-seat failure fails ONLY its
+  own candidate through the single candidate-failure owner (removed from `active_propagation_set`, `ACCEPTANCE_BATCH_UNFINALISABLE`);
+  closure paths cancel `acceptance_batch_finalize_seat[key].EventRef` (never the whole record). **AH8:** the ONE authoritative
+  queue tie key is the descriptor-derived `stable_tie_key`; every surviving positive `(CandidateID, MinerID, AssignmentID[, seq])`
+  ordering rule is removed (acceptance value selection `candidate_hash` then `MinerID` is kept, distinct). **AH9:** `EventRef`,
+  `dispatch_envelope`, `immutable_payload`, `queued_event_record`, and `stable_tie_key` are kept distinct — the domain
+  identity fields (`RoundID`/`TemplateID`/`CandidateID`/`MinerID`/`AssignmentID`) are payload, NOT `dispatch_envelope` fields;
+  all driver/bootstrap fields are declared in `STRUCTURE RunContext`. **AH10:** inaccurate Stage-1AG audit claims are
+  superseded in `STAGE_01AH_SUPERSESSION_REGISTER.md`.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest
@@ -694,6 +719,14 @@ replaced by two consistent invariants** (the old form was impossible while a lin
   atomic step. Consequently a `DISPATCHING`/`CONSUMED`/`CANCELLED` `EventRef` is never on `EQ.event_queue` and is never
   re-POPped, and the EQ order is the descriptor-derived `stable_tie_key` (AF3), so (a)–(f) hold by construction rather than
   by a projection convention.
+- **Stage-1AH clause (AH8/AH9 — one ordering key; identity vs payload).** The ONLY authoritative queue tie key is the
+  descriptor-derived `stable_tie_key = descriptor(event_type).stable_tie_key(immutable_payload)` (then `seq`); the
+  universal `(CandidateID, MinerID, AssignmentID[, seq])` tuple is WITHDRAWN everywhere (§0.2, §0.7-H2, §21, and the
+  companion documents), and the acceptance VALUE selection (`candidate_hash` then `MinerID`) is kept separate as winner
+  arbitration, not a queue key. **AH9:** an `EventRef`, a `dispatch_envelope` (the five fields
+  `envelope_namespace, event_time, delta_cycle, event_seq, hook_id`), the `immutable_payload` (the domain identity fields
+  `RoundID`/`TemplateID`/`CandidateID`/`MinerID`/`AssignmentID`/`assignment_version`), the `queued_event_record`, and the
+  `stable_tie_key` are FIVE distinct things — the domain identity fields are payload, NEVER `dispatch_envelope` fields.
 - **Scope.** The scheduler/dispatcher (`ScheduleEvent`, `ProcessEventTime`, `CancelQueuedEvent`); a structural coherence
   invariant. It does not change the A1 baseline (`8.420833333 kWh`).
 - **Required inputs.** `EQ.event_queue`; `queued_event_registry`; `EQ.current_event_ref`.

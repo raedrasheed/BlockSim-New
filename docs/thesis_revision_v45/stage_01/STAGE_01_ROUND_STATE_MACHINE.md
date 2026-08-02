@@ -182,8 +182,11 @@ quantities of `STAGE_01_PROTOCOL_SCOPE.md` §0.3.
   **O5:** the security decision is therefore NEVER a microphase placed BEFORE certificate/discovery events;
   it is the post-quiescence epilogue keyed by `event_time` alone. A same-`event_time` event created inside a
   handler is placed in the current or next `delta_cycle` per §0.7-H2 (never backward into a completed
-  microphase), and intra-microphase ties break by `(CandidateID, MinerID, AssignmentID, seq)` — never by
-  iteration order. The frozen Stage-1F `STAGE_01F_EVENT_PRIORITY_TABLE.md` is **NOT** authoritative
+  microphase), and — **AH8** — intra-microphase ties break by the ONE authoritative ordering key, the
+  descriptor-derived `stable_tie_key = descriptor(event_type).stable_tie_key(immutable_payload)` then `seq`
+  (§0.2/§0.7g-schema) — never by iteration order and NEVER by the withdrawn universal
+  `(CandidateID, MinerID, AssignmentID[, seq])` tuple (that AA-era generic rule is WITHDRAWN;
+  STAGE_01AH_SUPERSESSION_REGISTER.md). The frozen Stage-1F `STAGE_01F_EVENT_PRIORITY_TABLE.md` is **NOT** authoritative
   (superseded by the microphase model + epilogue, G5/H1/I-01). This makes the round-state evolution
   reproducible across reruns.
 - **Miner-state note (CR2).** While a round is in `SOLUTION_PROPAGATION`, certificate
@@ -1217,6 +1220,47 @@ descriptor audit did not check every ScheduleEvent seating payload; the AF sched
 omitted assignment_version; the AF RunContext-ownership audit missed the first-round circular dependency, current-round
 consumption, and prior-round publication; TV273/TV276/TV286 rested on those gaps; the AF cross-document audit therefore
 marked the affected gates PASS).
+
+### 3.10l Stage-1AH addendum (driver-scheduling, round-rotation, acceptance-lifecycle lock)
+
+Stage 1AH makes the AG driver machinery *causally* sound across round rotation and acceptance. It changes no round state
+or transition edge; it corrects HOW the round-setup and terminal-round transitions are scheduled and published. §3.10a–
+§3.10k are retained as the frozen W…AG layers.
+
+- **AH1 (explicit scheduling origin).** Every `ScheduleEvent` seat that drives a round-state transition carries an EXPLICIT
+  `SchedulingOrigin` — `ORDINARY_DISPATCH` for a seat inside a dispatched handler (`TemplateCommitEvent`,
+  `PrepareParticipantsEvent`, acceptance-batch, exhaustion), `DRIVER` for a sim-driver seat (the round bootstrap, a miner
+  join, a driver reserve activation), `POST_EPILOGUE` for an epilogue / post-epilogue recovery seat. The scheduler never
+  infers the source from ambient `EQ.current_*`; a `DRIVER`/`POST_EPILOGUE` seat reads none.
+- **AH2 (per-round bootstrap target; one terminal-round publication owner).** The fixed `round_bootstrap_time =
+  config.run_start_time` is REMOVED. Each round's `ROUND_INITIALISING` is seated at its own `BootstrapRequest.target_time`
+  (first round → `run_start_time`; a rotation → `next_representable_simulation_time(predecessor terminal time)`, strictly
+  later, `≤ T`). Ordinary acceptance (`ROUND_ACCEPTED`), ordinary abort (`ROUND_ABORTED`), and horizon closure now route
+  their terminal-round publication + next-round seat through ONE owner, `PublishTerminalRoundAndSeatNext`, in a required
+  order (record terminal time → publish prior terminal state → create the immutable next `BootstrapRequest` → seat →
+  inspect). The predecessor round is ALREADY terminal before the seat (`RoundAbort` now transitions to `ROUND_ABORTED`
+  BEFORE `CloseRoundAssignments`, matching `ValidBlockAccept`), so a bootstrap is NEVER seated while the predecessor is
+  nonterminal. A horizon / run-hook close publishes the terminal state but seats NO next round.
+- **AH3 (stable request identity before minting).** A round rotation's `BootstrapRequestID`
+  (`RUN_START` | `(prior RoundID, prior terminal time, NEXT_ROUND)`) and a driver request's `DriverRequestID` are the
+  STABLE replay keys, checked BEFORE any `round_setup_seq` / `activation_seq` is read; a replay of the same transition
+  seats no second `ROUND_INITIALISING`.
+- **AH5 (first-round admission before ASSIGNMENT).** The declared genesis miner set is imported (as `MINER_JOIN` driver
+  requests) by the first `RoundInitialise` and the round holds an initial-registration BARRIER; `TEMPLATE_COMMITMENT →
+  ASSIGNMENT` participant setup (`PrepareParticipantsForNewRound`) is not seated until the declared initial miner set has
+  completely registered.
+- **AH6 (no stranded nonterminal round).** A failed `SeatTemplateCommit` / `SeatPrepareParticipants` /
+  `SeatFullRangeExhaust` now aborts THE round with a declared disposition (never leaving it stuck in
+  `TEMPLATE_COMMITMENT` / `ASSIGNMENT` / fully-searched); a failed first-round bootstrap takes a declared no-round run path.
+- **AH7 (terminal round leaves no live recovery/acceptance).** Unchanged from S4/AG7 in edges; AH7 adds that a
+  finalize-seat failure fails ONLY its own candidate through the single candidate-failure owner (removed from
+  `active_propagation_set`), so a terminal round never leaves a `FAILED` candidate in the propagation set.
+
+**AH10 (supersession of inaccurate Stage-1AG audits).** `STAGE_01AH_SUPERSESSION_REGISTER.md` records the Stage-1AG audit
+inaccuracies AH corrects (the AG run-bootstrap audit did not verify the driver-source scheduling contract or the fixed-past
+`round_bootstrap_time`; the AG round-context-rotation audit missed that the next bootstrap was seated at `run_start_time`;
+the AG driver-event-seating audit proved only syntactic reachability; the AG acceptance-batch audit missed the
+record-vs-EventRef cancellation and the FAILED-in-active-set defects).
 
 ### 3.11 What causes a template refresh
 

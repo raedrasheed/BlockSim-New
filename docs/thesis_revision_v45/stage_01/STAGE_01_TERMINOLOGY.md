@@ -1216,3 +1216,50 @@ Catalogue" denotes the separate document defining I1..I19.
   distinct.
 - **Historical freeze.** Stage-1A–1AF lettered artifacts are unchanged; Stage-1AG supersessions (including the inaccurate
   Stage-1AF audit claims) are recorded in `STAGE_01AG_SUPERSESSION_REGISTER.md`.
+
+## Stage-1AH terminology addendum (driver-scheduling, round-rotation & acceptance-lifecycle lock)
+
+- **`SchedulingOrigin` (AH1).** The EXPLICIT tag every `ScheduleEvent` call carries:
+  `ORDINARY_DISPATCH(OrdinaryDispatchContext)` (an in-flight dispatched handler),
+  `DRIVER(DriverSchedulingContext)` (a sim-driver seat — bootstrap / miner join / driver reserve), or
+  `POST_EPILOGUE(PostEpilogueSchedulingContext)` (an epilogue / post-epilogue seat). `ScheduleEvent` derives `delta_cycle`
+  from the origin's own source frame and NEVER from ambient `EQ.current_*`; a `DRIVER`/`POST_EPILOGUE` seat reads none.
+  The notation `ordinary_dispatch_origin(EQ)` builds the ordinary-dispatch origin from the current dispatch frame (valid
+  only inside an active dispatch).
+- **`DriverSchedulingContext` (AH1).** The declared source of a `DRIVER` seat: `driver_source_kind`, `driver_request_id`
+  (a `BootstrapRequestID` or `DriverRequestID`), `source_event_time`, `target_event_time`, `RunContext`, `EventQueueContext`.
+  `ScheduleEvent` derives `delta_cycle = 0` and rejects `target_event_time < source_event_time`
+  (`rejected_driver_target_before_source`).
+- **`rejected_invalid_scheduling_origin` / `rejected_driver_target_before_source` (AH1).** The two new `ScheduleEvent`
+  rejections: an absent/unrecognised origin, and a driver target before its source time.
+- **`BootstrapRequest` / `BootstrapRequestID` (AH2/AH3).** The immutable per-round bootstrap request
+  `{ BootstrapRequestID, predecessor_round_id, predecessor_terminal_time, target_time }`. The stable id is `RUN_START`
+  (first round) or `(prior RoundID, prior terminal time, NEXT_ROUND)` (a rotation); the `target_time` is `run_start_time`
+  for the first round and `next_representable_simulation_time(prior terminal)` (strictly later, `≤ T`) for a rotation. The
+  fixed `round_bootstrap_time` is REMOVED.
+- **`PublishTerminalRoundAndSeatNext` (AH2).** The ONE named terminal-round publication owner (called by
+  `CloseRoundAssignments`) that unifies ordinary acceptance, ordinary abort, and horizon closure in a required order:
+  record `round_terminal_time` → publish `prior_round_terminal_state` → create the immutable next `BootstrapRequest` →
+  seat the next bootstrap → inspect the result. Never seats while the predecessor round is nonterminal; a horizon close
+  publishes but seats no next round.
+- **`driver_request` / `DriverRequestID` / `AdmitDriverRequest` (AH4).** The explicit sim-driver request record
+  `{ DriverRequestID, kind, requested_event_time, payload, status, seated_event_ref, disposition }` with status in
+  `{ PENDING, SEATED, CONSUMED, REJECTED, CANCELLED }`, produced by `AdmitDriverRequest` and admitted by
+  `SeatPendingDriverRequests` (which runs BEFORE the event loop selects the next earliest queue time). Replaces the AG bare
+  `pending_join_requests` / `pending_ordinary_reserve_deficits` sets.
+- **`initial_registration_barrier` / `genesis_miner_registry` (AH5).** The first-round admission mechanism (Option A): the
+  declared genesis miner set is imported by the first `RoundInitialise`, and participant setup is not seated until the
+  declared initial miner set has completely registered.
+- **`ACCEPTANCE_BATCH_UNFINALISABLE` (AH7).** The candidate `failure_reason` used when the `AcceptanceBatchFinalize` seat
+  fails; `BlockAcceptancePoint` routes it through the single candidate-failure owner `HandlePropagationFailure` (FAILED +
+  removed from `active_propagation_set` + events cancelled + its paused miners resumed).
+- **`acceptance_batch_registry` / `acceptance_batch_finalize_seat` (AH7).** `acceptance_batch_registry` is generation-keyed
+  `(acceptance_timestamp, acceptance_point, batch_generation)` in the core data model; `acceptance_batch_finalize_seat[key]
+  = { generation, EventRef }`, and closure paths cancel its `.EventRef` (never the whole record).
+- **Descriptor-derived ordering key (AH8).** The ONE authoritative queue tie key remains
+  `stable_tie_key = descriptor(event_type).stable_tie_key(immutable_payload)`; AH8 removes every SURVIVING positive
+  `(CandidateID, MinerID, AssignmentID[, seq])` ordering rule (§0.7-H2, the deterministic-vs-sampling summary, §21, and the
+  companion documents). The acceptance value selection (`candidate_hash` then `MinerID`) is distinct — winner arbitration,
+  not a queue key.
+- **Historical freeze.** Stage-1A–1AG lettered artifacts are unchanged; Stage-1AH supersessions (including the inaccurate
+  Stage-1AG audit claims) are recorded in `STAGE_01AH_SUPERSESSION_REGISTER.md`.
