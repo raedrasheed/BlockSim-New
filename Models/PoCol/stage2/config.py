@@ -1,0 +1,78 @@
+"""Stage-2 confirmatory configuration for the PoCol core simulator.
+
+The algorithm is **PoCol**; the energy-saving mechanism is **the idle policy within
+PoCol** (residency in low-power / idle states, never nonce partitioning).
+
+The A1 accounting invariant (STAGE_01_ENERGY_MODEL_SPECIFICATION.md) fixes the
+continuous full-participation control:
+
+    141 miners x 21.5 W x 10_000 s / 3_600_000  ==  8.420833333 kWh
+
+so the per-miner active (hashing) power is ``P_hash = 21.5 W`` and the horizon is
+``T = 10_000 s``.  The idle-policy powers obey the canonical ordering
+``P_offline <= P_listen = P_reserve = P_registered <= P_hash`` (``P_wake`` transient).
+No dynamic difficulty is used in the confirmatory core.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+# A1 accounting invariant — the frozen matched control (kWh).
+A1_BASELINE_KWH = 8.420833333
+JOULES_PER_KWH = 3_600_000.0
+
+
+@dataclass(frozen=True)
+class Stage2Config:
+    """Immutable per-run configuration for the Stage-2 PoCol core."""
+
+    # --- horizon & population ---
+    run_start_time: float = 0.0
+    horizon_T: float = 10_000.0
+    num_miners: int = 141
+
+    # --- canonical state-to-power mapping (watts, per miner) ---
+    # A1 fixes P_hash = 21.5 W (141 TH/s over 141 miners at 21.5 J/TH).
+    P_hash: float = 21.5
+    P_listen: float = 2.15      # == P_registered == P_reserve (low-power standby/listen)
+    P_wake: float = 10.75       # transient waking draw
+    P_offline: float = 0.0      # == P_disqualified
+
+    # --- deterministic round timing (seconds) ---
+    wake_latency: float = 1.0             # StartWake -> WakeCompleteEvent latency
+    hash_step_time: float = 5.0           # one modeled hash-work unit
+    solution_after_units: int = 3         # a solution is discovered after this many units
+    round_span: float = 100.0             # nominal active span before acceptance in a round
+
+    # --- participation (idle policy) ---
+    reserve_fraction: float = 0.2   # fraction of genesis miners held in RESERVE (P_listen)
+
+    # --- scenario injection (tests only; empty in confirmatory runs) ---
+    abort_round_seqs: frozenset = frozenset()   # round seqs that abort instead of accepting
+
+    # --- bounds ---
+    maximum_setup_retries: int = 3
+
+    def per_miner_power(self, state: str) -> float:
+        """Canonical single residency power for a miner state (STAGE_01 s.1.0)."""
+        return {
+            "REGISTERED": self.P_listen,
+            "RESERVE": self.P_listen,
+            "ACTIVE_HASHING": self.P_hash,
+            "EXHAUSTED_PENDING": self.P_hash,
+            "LOW_POWER_LISTEN": self.P_listen,
+            "WAKING": self.P_wake,
+            "OFFLINE": self.P_offline,
+            "DISQUALIFIED": self.P_offline,
+        }[state]
+
+
+def a1_continuous_control_kwh(cfg: Stage2Config) -> float:
+    """The A1 continuous full-participation control energy for ``cfg`` (kWh).
+
+    Every miner ACTIVE_HASHING for the whole horizon.  With the default config this
+    is exactly ``A1_BASELINE_KWH`` (8.420833333 kWh) — the matched control against
+    which the idle policy's saving is measured.  It is invariant to nonce partitioning.
+    """
+    joules = cfg.num_miners * cfg.P_hash * cfg.horizon_T
+    return joules / JOULES_PER_KWH
