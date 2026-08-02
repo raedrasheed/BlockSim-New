@@ -322,6 +322,8 @@ PROCEDURE ProcessEventTime
           ATOMICALLY:                                             # AF5: complete the lifecycle indivisibly
             SET queued_event_registry[er].queue_status <- CONSUMED   # DISPATCHING -> CONSUMED (drained, never re-QUEUED)
             CLEAR EQ.current_event_time, EQ.current_delta_cycle, EQ.current_microphase, EQ.current_event_seq, EQ.current_event_ref
+          CALL CompleteDriverRequestOnDispatch(RunContext, seat_event_ref = er,
+                                               disposition = driver_request_consumed_dispatch_failure(dispatch_integrity_failure))   # AI4: a bound request never dangles SEATED
           CONTINUE
         # AG5: if this descriptor REQUIRES a RoundContext (RoundContext in d.runtime_injected) but none is current, do NOT call
         #      the handler — record the structured dispatch_context_unavailable, CONSUME, and re-POP. (RoundInitialiseEvent
@@ -331,6 +333,8 @@ PROCEDURE ProcessEventTime
           ATOMICALLY:
             SET queued_event_registry[er].queue_status <- CONSUMED
             CLEAR EQ.current_event_time, EQ.current_delta_cycle, EQ.current_microphase, EQ.current_event_seq, EQ.current_event_ref
+          CALL CompleteDriverRequestOnDispatch(RunContext, seat_event_ref = er,
+                                               disposition = driver_request_consumed_dispatch_failure(dispatch_context_unavailable))   # AI4
           CONTINUE
         # AF2/AG1: bind AND VERIFY the EXACT named handler arguments via BuildHandlerInvocation (payload through the descriptor
         #      map + resolvers; runtime context gated by recv env / recv ref; keys(args) verified against d.handler_inputs).
@@ -340,13 +344,23 @@ PROCEDURE ProcessEventTime
           ATOMICALLY:
             SET queued_event_registry[er].queue_status <- CONSUMED
             CLEAR EQ.current_event_time, EQ.current_delta_cycle, EQ.current_microphase, EQ.current_event_seq, EQ.current_event_ref
+          CALL CompleteDriverRequestOnDispatch(RunContext, seat_event_ref = er,
+                                               disposition = driver_request_consumed_dispatch_failure(dispatch_binding_failed))   # AI4
           CONTINUE
         # AG1: inv = handler_invocation_built(procedure, args) — the produced args EQUAL the handler's declared INPUTS.
-        CALL inv.procedure WITH inv.args                          # AF2/AF4: dispatch the handler (a wrapper for AF4 types) with the exact args
+        SET handler_result <- CALL inv.procedure WITH inv.args    # AF2/AF4: dispatch the handler (a wrapper for AF4 types) with the exact args; AI4: CAPTURE the actual result
         # AF5: after the handler returns, complete the lifecycle ATOMICALLY — DISPATCHING -> CONSUMED and CLEAR all EQ.current_*.
         ATOMICALLY:
           SET queued_event_registry[er].queue_status <- CONSUMED    # AD4: DISPATCHING -> CONSUMED (no handler wrote it)
           CLEAR EQ.current_event_time, EQ.current_delta_cycle, EQ.current_microphase, EQ.current_event_seq, EQ.current_event_ref
+        # AI4: DRIVER-REQUEST COMPLETION. If this dispatched EventRef was the SEAT of a sim-driver request (the IMMUTABLE
+        #   reverse binding RunContext.driver_request_by_seat_event_ref[er] exists), the request is now CONSUMED: record the
+        #   ACTUAL handler_result as its disposition and transition SEATED -> CONSUMED through the guarded mutator. This is the
+        #   dispatcher-owned request-completion point — the ONE place a driver_request becomes CONSUMED — and the reverse
+        #   binding names the EXACT request (never the payload). A non-driver event (a bootstrap RoundInitialiseEvent, an
+        #   ordinary in-round event) has NO binding and is skipped. No SEATED request is ever left dangling after its seat dispatches.
+        CALL CompleteDriverRequestOnDispatch(RunContext, seat_event_ref = er,
+                                             disposition = driver_request_consumed(handler_result))   # AI4
         # AE3/AF5: the WHILE RE-POPS EQ.event_queue — a handler may have CANCELLED a later same-cycle event (already removed
         #      from EQ.event_queue by CancelQueuedEvent, so never POPped) or added a (t, current_delta_cycle+1) event
         #      (forward only; handled by the outer LOOP, §0.7-H2).
@@ -406,6 +420,13 @@ PROCEDURE ProcessEventTime
     ASSERT no recovery_work[*].due_status = DUE with due_at_event_time = t
                                                                   # U1/U4: every DUE recovery-work fact at t was explicitly consumed by ApplyRecoveryWorkAfterEpilogue
     ADD t to finalised_event_times                               # t is now closed to ordinary events (P1: T is ALWAYS finalised here)
+    # AI2: ADVANCE the authoritative simulation frontier. ProcessEventTime is the SOLE writer of
+    #   RunContext.last_finalised_event_time; it advances monotonically to the latest finalised event_time. This is the
+    #   run-level "how far the simulation has advanced" fact AdmitDriverRequest and ScheduleEvent (DRIVER /
+    #   TERMINAL_ROTATION) read to reject a driver seat behind the frontier — the ONLY guard that stops the simulation
+    #   moving from a later processed time back to an earlier newly-admitted driver time.
+    IF RunContext.last_finalised_event_time = NONE OR t > RunContext.last_finalised_event_time:
+      SET RunContext.last_finalised_event_time <- t              # AI2: monotonic frontier advance (never rewound)
     # any participation action the decision created was scheduled at a STRICTLY LATER event_time (I-02/R1),
     # so it cannot alter the census that this epilogue already finalised at t.
     ADVANCE simulated wall-clock time to the next event_time on the queue
@@ -513,6 +534,15 @@ PROCEDURE RunEventLoopToHorizon                                   # O1/P1/AG3: t
     #     then insert a driver event earlier than t, then process the old t" (STAGE_01AH_SUPERSESSION_REGISTER.md).
     WHILE true:
       CALL SeatPendingDriverRequests(RunContext)                  # AG4/AH4: named sim-driver intake — runs BEFORE selection
+      # AI6: the run controller inspects the run-level next-bootstrap health BEFORE selecting the next event_time. A terminal
+      #   closure that could NOT seat its successor round set NEXT_ROUND_BOOTSTRAP_FAILED (CloseRoundAssignments captured +
+      #   stored the publication result, AI6). The DETERMINISTIC policy is terminate-partial: finalise the run against the
+      #   already-terminal predecessor round with a DECLARED partial-run disposition rather than spin with no next round to run.
+      IF RunContext.next_round_bootstrap_status = NEXT_ROUND_BOOTSTRAP_FAILED:
+        RECORD run_terminated_partial(next_round_bootstrap_failed, RunContext.terminal_publication_result)   # AI6
+        SET RoundContext <- RunContext.current_round_context      # AG5: the terminal predecessor round (published, never a new one)
+        CALL FinalizeSimulationRun(RunContext, RoundContext)      # O1/N1: the predecessor is terminal (ASSERT holds) — single settle
+        RETURN run_completed_partial(next_round_bootstrap_failed) # AI6: declared PARTIAL-RUN disposition (no further round is seatable)
       IF the queue has NO unprocessed event_time t with t < T: BREAK   # AH4: re-check AFTER admission (intake may have added events)
       SET t <- the earliest unprocessed event_time on the queue   # AH4: selection sees every just-admitted driver event
       CALL ProcessEventTime(RunContext, t, is_horizon = false)    # AG3: pass the RUN context; the round is resolved per dispatch
@@ -529,7 +559,7 @@ PROCEDURE RunEventLoopToHorizon                                   # O1/P1/AG3: t
     #     FINAL_RUN_END settle + I5/I6/I7 reconciliation; it ASSERTS the round is terminal (gate 2).
     SET RoundContext <- RunContext.current_round_context          # AG5: resolve the current (now terminal) round — never a retained arg
     CALL FinalizeSimulationRun(RunContext, RoundContext)          # O1/N1: run-level hook (not queued)
-  RETURNS: run_completed(T) | run_aborted_no_round(reason)
+  RETURNS: run_completed(T) | run_aborted_no_round(reason) | run_completed_partial(next_round_bootstrap_failed)   # AI6
   NOTE: O1/P1: the canonical horizon sequence lives HERE — process every event_time < T via ProcessEventTime,
         THEN a SINGLE horizon-sentinel ProcessEventTime(T) (synthetic, allow_empty_horizon) that always runs
         (even with an empty T queue), so a nonterminal round is ALWAYS horizon-closed and T is ALWAYS finalised
@@ -660,29 +690,51 @@ STRUCTURE PostEpilogueSchedulingContext (S7; AH1 — the declared source of a PO
   # > source_event_time and derives delta_cycle = 0; the event_creation_seq is STILL minted solely by ScheduleEvent
   # (J4). No post-epilogue caller may enqueue at source_event_time (R1 structural).
 
-STRUCTURE DriverSchedulingContext (AH1 — the declared source of a DRIVER (sim-driver) ScheduleEvent seat)
-  # AH1: a SIM-DRIVER seat (the run-start / round-rotation bootstrap, an external miner join, a driver-sourced reserve
-  #      activation) is neither an ordinary dispatched handler nor a post-epilogue application. It runs OUTSIDE any
-  #      active ordinary dispatch (before the first round exists, or between dispatches at the driver intake), so its
-  #      EQ.current_* may be UNSET / cleared / stale. This context makes the driver source EXPLICIT so ScheduleEvent
-  #      derives the delta_cycle WITHOUT reading EQ.current_* and rejects a target before the request's source time.
-  driver_source_kind     : DriverSourceKind in { RUN_BOOTSTRAP, ROUND_ROTATION_BOOTSTRAP, MINER_JOIN, ORDINARY_RESERVE_DEFICIT }
-  driver_request_id      : the IMMUTABLE identity of the driver request being seated — a BootstrapRequestID (AH2/AH3)
-                           # for a RUN_BOOTSTRAP / ROUND_ROTATION_BOOTSTRAP, else a DriverRequestID (AH4)
-  source_event_time      : the admissible SOURCE time of the request (AH3): config.run_start_time for a RUN_BOOTSTRAP;
-                           # the predecessor round's terminal time for a ROUND_ROTATION_BOOTSTRAP; the request's
-                           # requested_event_time for a MINER_JOIN / ORDINARY_RESERVE_DEFICIT. NEVER read from EQ.current_*.
-  target_event_time      : the admissible TARGET time for the seated event (AH2/AH3): the BootstrapRequest.target_time
-                           # for a bootstrap, else the driver_request.requested_event_time. Admissibility: it must
-                           # satisfy target_event_time >= source_event_time (ScheduleEvent enforces it, AH1).
-  RunContext             : the per-run owner (§1.0)
-  EventQueueContext      : the sole dispatch/scheduling state (the same EQ ScheduleEvent updates)
-  # AH1: passed to ScheduleEvent as scheduling_origin = DRIVER(this). DETERMINISTIC delta-cycle rule: a driver seat
+STRUCTURE DriverSchedulingContext (AH1; AI2/AI5 — the declared source of a DRIVER (sim-driver) ScheduleEvent seat)
+  # AH1: a SIM-DRIVER seat (the run-start bootstrap, an external miner join, a driver-sourced reserve activation) is
+  #      neither an ordinary dispatched handler nor a post-epilogue application. It runs OUTSIDE any active ordinary
+  #      dispatch (before the first round exists, or between dispatches at the driver intake), so its EQ.current_* may be
+  #      UNSET / cleared / stale. This context makes the driver source EXPLICIT so ScheduleEvent derives the delta_cycle
+  #      WITHOUT reading EQ.current_* and validates the request's identity/time/scope. (AI8: the round-rotation bootstrap
+  #      is NO LONGER a DRIVER seat — it is TERMINAL_ROTATION, below, because it is seated synchronously from inside a
+  #      terminal-publication call, not from the outside-dispatch sim driver.)
+  driver_source_kind     : DriverSourceKind in { RUN_BOOTSTRAP, MINER_JOIN, ORDINARY_RESERVE_DEFICIT }   # AI8: ROUND_ROTATION_BOOTSTRAP moved to TERMINAL_ROTATION
+  driver_request_id      : the IMMUTABLE identity of the driver request being seated — the RUN_START BootstrapRequestID
+                           # (AH2/AH3) for a RUN_BOOTSTRAP, else a DriverRequestID (AH4)
+  source_event_time      : AI2 — the request's AUTHORITATIVE driver_admission_time (NOT a copy of requested_event_time):
+                           # config.run_start_time for a RUN_BOOTSTRAP; the driver_request.driver_admission_time for a
+                           # MINER_JOIN / ORDINARY_RESERVE_DEFICIT (>= RunContext.last_finalised_event_time at admission,
+                           # AdmitDriverRequest AI2). NEVER read from EQ.current_*.
+  target_event_time      : the admissible TARGET time for the seated event: the RUN_START BootstrapRequest.target_time
+                           # for a RUN_BOOTSTRAP, else the driver_request.requested_event_time. Admissibility (AI2):
+                           # target_event_time >= source_event_time AND target_event_time >= the simulation frontier.
+  intended_round_scope   : AI5 — the DriverRoundScope the seat is validated against (EXACT_ROUND(RoundID) /
+                           # NEXT_AVAILABLE_ROUND / RUN_LEVEL). ScheduleEvent verifies driver_source_kind is permitted to
+                           # seat the event_type; SeatPendingDriverRequests verifies scope vs round state before seating.
+  RunContext             : AI2 — the OWNING per-run context (ScheduleEvent verifies dctx.RunContext is the RunContext it was called with)
+  EventQueueContext      : AI2 — the sole dispatch/scheduling state (ScheduleEvent verifies dctx.EventQueueContext is the EQ it was called with)
+  # AH1/AI2: passed to ScheduleEvent as scheduling_origin = DRIVER(this). DETERMINISTIC delta-cycle rule: a driver seat
   #   targets a FUTURE (or run-start) event_time, so ScheduleEvent derives delta_cycle = 0; it NEVER schedules into the
-  #   past (target < source is rejected_driver_target_before_source) and NEVER reads a cleared/stale EQ.current_* to
-  #   derive the cycle. The event_creation_seq is STILL minted solely by ScheduleEvent (J4).
+  #   past or behind the simulation frontier (rejected_driver_target_before_source /
+  #   rejected_driver_target_before_simulation_frontier) and NEVER reads a cleared/stale EQ.current_*. The
+  #   event_creation_seq is STILL minted solely by ScheduleEvent (J4).
 
-# AH1 — SchedulingOrigin: the ONE explicit tag every ScheduleEvent call carries. ScheduleEvent NEVER infers the
+STRUCTURE TerminalRotationSchedulingContext (AI8 — the declared source of the ROUND-ROTATION next-bootstrap seat)
+  # AI8: the next-round bootstrap is seated SYNCHRONOUSLY by PublishTerminalRoundAndSeatNext, which is called from inside a
+  #      terminal-publication path (ValidBlockAccept / RoundAbort — an ordinary dispatched handler — or, for the horizon,
+  #      CloseRoundAtHorizon, which seats NO next round). Its truthful source is therefore NEITHER a plain outside-dispatch
+  #      sim-driver seat (DRIVER) NOR a post-epilogue seat: it is a terminal rotation. This context makes that explicit and
+  #      lets ScheduleEvent derive the cycle from the predecessor terminal time WITHOUT reading ambient EQ.current_*.
+  BootstrapRequestID     : AH3 — the STABLE rotation id (predecessor RoundID, predecessor terminal time, NEXT_ROUND)
+  predecessor_terminal_time : the predecessor round's round_terminal_time (the SOURCE time; not EQ.current_*)
+  target_event_time      : next_representable_simulation_time(predecessor_terminal_time) — STRICTLY later than the source
+  RunContext             : the OWNING per-run context (ScheduleEvent verifies it)
+  EventQueueContext      : the sole dispatch/scheduling state (ScheduleEvent verifies it)
+  # AI8: passed to ScheduleEvent as scheduling_origin = TERMINAL_ROTATION(this). ScheduleEvent requires
+  #   target_event_time > predecessor_terminal_time AND target_event_time >= the simulation frontier, derives
+  #   delta_cycle = 0, and reads NO EQ.current_*. The event_creation_seq is STILL minted solely by ScheduleEvent (J4).
+
+# AH1/AI8 — SchedulingOrigin: the ONE explicit tag every ScheduleEvent call carries. ScheduleEvent NEVER infers the
 #   scheduling source from ambient EQ.current_*; the caller names its source and supplies the matching context, and
 #   ScheduleEvent derives the delta_cycle from THAT context's own fields.
 # SchedulingOrigin in {
@@ -690,10 +742,13 @@ STRUCTURE DriverSchedulingContext (AH1 — the declared source of a DRIVER (sim-
 #                                                    dispatcher-owned current dispatch frame (event_time,
 #                                                    delta_cycle from octx.dispatch_envelope; microphase from
 #                                                    octx.dispatched_event_ref). The forward same-timestamp rule (§0.7-H2) applies.
-#   | DRIVER(DriverSchedulingContext)              — a sim-driver seat (bootstrap / join / driver reserve); dc = 0,
-#                                                    target >= source, NO EQ.current_* read.
+#   | DRIVER(DriverSchedulingContext)              — a sim-driver seat (run bootstrap / join / driver reserve); dc = 0,
+#                                                    target >= source AND >= frontier, identity/scope validated, NO EQ.current_* read.
 #   | POST_EPILOGUE(PostEpilogueSchedulingContext) — a post-epilogue / epilogue seat; dc = 0, target strictly later
 #                                                    than the drained source_event_time, NO EQ.current_* read.
+#   | TERMINAL_ROTATION(TerminalRotationSchedulingContext) — AI8: the round-rotation next-bootstrap seat made
+#                                                    synchronously by PublishTerminalRoundAndSeatNext; dc = 0, target
+#                                                    strictly later than the predecessor terminal time AND >= frontier, NO EQ.current_* read.
 # }
 # Notation `ordinary_dispatch_origin(EQ)` denotes ORDINARY_DISPATCH(OrdinaryDispatchContext(dispatch_envelope = the
 #   CURRENT dispatch envelope (EQ.current_event_time, EQ.current_delta_cycle, EQ.current_event_seq), dispatched_event_ref
@@ -701,6 +756,20 @@ STRUCTURE DriverSchedulingContext (AH1 — the declared source of a DRIVER (sim-
 #   the ONLY sanctioned reader of EQ.current_* for scheduling, and VALID ONLY inside an active ordinary dispatch (EQ.current_*
 #   set). Every ordinary in-handler seat passes scheduling_origin = ordinary_dispatch_origin(EQ). No scheduling path reads
 #   EQ.current_* OUTSIDE an active ordinary dispatch (AH1).
+# AI2 — DriverSourceKind (the union of every driver / rotation seat kind): { RUN_BOOTSTRAP, ROUND_ROTATION_BOOTSTRAP,
+#   MINER_JOIN, ORDINARY_RESERVE_DEFICIT }. RUN_BOOTSTRAP / MINER_JOIN / ORDINARY_RESERVE_DEFICIT are carried by a
+#   DriverSchedulingContext (DRIVER origin); ROUND_ROTATION_BOOTSTRAP is carried IMPLICITLY by a
+#   TerminalRotationSchedulingContext (TERMINAL_ROTATION origin) — AI8 moved it off the DRIVER union but its
+#   kind↔event_type permission is still checked through the SAME table below.
+# Notation `driver_kind_may_seat(kind, event_type)` denotes the FIXED driver/rotation kind → event_type permission
+#   predicate (a lowercase notation, NOT a CALL target). It is TRUE for exactly these pairs and FALSE for all others:
+#     driver_kind_may_seat(RUN_BOOTSTRAP,            RoundInitialiseEvent) = TRUE   # the run-start bootstrap seats the first round
+#     driver_kind_may_seat(ROUND_ROTATION_BOOTSTRAP, RoundInitialiseEvent) = TRUE   # AI8: the rotation seats the next round
+#     driver_kind_may_seat(MINER_JOIN,               MinerRegisterEvent)   = TRUE   # a driver miner-join seats a registration
+#     driver_kind_may_seat(ORDINARY_RESERVE_DEFICIT, ReserveActivateEvent) = TRUE   # a driver reserve-deficit seats an activation
+#     driver_kind_may_seat(_, _) = FALSE                                            # every other (kind, event_type) pair
+#   ScheduleEvent's DRIVER / TERMINAL_ROTATION cases consult this predicate (rejected_driver_kind_event_type_mismatch on
+#   FALSE) so a driver of one kind can NEVER seat an event_type reserved for another kind (AI2).
 
 STRUCTURE EventRef (AC1 — the ONE canonical immutable reference to a queued ordinary event)
   # AC1: EventRef = (envelope_namespace, event_type, event_time, delta_cycle, microphase, seq). ScheduleEvent DERIVES it
@@ -765,11 +834,14 @@ STRUCTURE OrdinaryDispatchContext (AD5 — the complete dispatcher-owned context
 PROCEDURE ScheduleEvent
   INPUTS: EventQueueContext EQ, RoundContext, event_type, target_event_time, target_microphase,
           envelope_fields,   # MinerID?/AssignmentID?/assignment_version?/CandidateID?/PropagationID? as applicable
-          scheduling_origin   # AH1: SchedulingOrigin (§0.7e), REQUIRED and EXPLICIT — one of
+          scheduling_origin   # AH1/AI8: SchedulingOrigin (§0.7e), REQUIRED and EXPLICIT — one of
                               #   ORDINARY_DISPATCH(OrdinaryDispatchContext) | DRIVER(DriverSchedulingContext) |
-                              #   POST_EPILOGUE(PostEpilogueSchedulingContext). This REPLACES the AG post_epilogue_context
-                              #   flag. ScheduleEvent NEVER infers the scheduling source from ambient EQ.current_*; it
-                              #   derives the delta_cycle from the source frame carried by THIS explicit origin (below).
+                              #   POST_EPILOGUE(PostEpilogueSchedulingContext) | TERMINAL_ROTATION(TerminalRotationSchedulingContext).
+                              #   This REPLACES the AG post_epilogue_context flag. ScheduleEvent NEVER infers the scheduling
+                              #   source from ambient EQ.current_*; it derives the delta_cycle from the source frame carried
+                              #   by THIS explicit origin (below), and for a DRIVER / TERMINAL_ROTATION seat it ALSO validates
+                              #   the context identities, the target time vs the simulation frontier, and the driver kind vs
+                              #   event_type (AI2).
                             # K8: NO target_delta_cycle input — the caller cannot set it.
                             # AG3: RoundContext MAY be null for a RoundInitialiseEvent bootstrap seat (SeatNextRoundBootstrap,
                             #     before the first round exists). ScheduleEvent validates the §0.7g descriptor + derives the
@@ -784,8 +856,15 @@ PROCEDURE ScheduleEvent
                      ordinary dispatch; dctx carries an explicit source_event_time + target_event_time (never EQ.current_*);
                  (3) POST_EPILOGUE(pctx) — the event-time epilogue or a post-epilogue application hook (EQ.current_* CLEARED);
                      pctx carries source_event_time = the drained epilogue t.
-                 A post-epilogue seat MUST carry POST_EPILOGUE(pctx); a driver seat MUST carry DRIVER(dctx); an ordinary
-                 in-dispatch seat MUST carry ORDINARY_DISPATCH(octx). Any other/absent origin is rejected_invalid_scheduling_origin.
+                 (4) TERMINAL_ROTATION(trctx) — AI8: the round-rotation next-bootstrap seat made SYNCHRONOUSLY by
+                     PublishTerminalRoundAndSeatNext from inside a terminal-publication path; trctx carries the predecessor
+                     terminal time (the source) + a strictly-later target (never EQ.current_*).
+                 A post-epilogue seat MUST carry POST_EPILOGUE(pctx); a driver seat MUST carry DRIVER(dctx); the rotation
+                 bootstrap MUST carry TERMINAL_ROTATION(trctx); an ordinary in-dispatch seat MUST carry ORDINARY_DISPATCH(octx).
+                 Any other/absent origin is rejected_invalid_scheduling_origin. AI2: a DRIVER / TERMINAL_ROTATION seat is
+                 additionally rejected if its carried EventQueueContext/RunContext are not the ones ScheduleEvent was called
+                 with, if its declared driver_source_kind may not seat this event_type, if target_event_time != the carried
+                 target, or if target_event_time is behind the simulation frontier.
   EFFECTS:
     # K8/J9 (1): reject scheduling into an already-finalised event_time (I-02).
     IF target_event_time in EQ.finalised_event_times:
@@ -808,10 +887,36 @@ PROCEDURE ScheduleEvent
         SET dc <- 0
       CASE DRIVER(dctx):
         # AH1 SIM-DRIVER SEAT. A driver seat targets a FUTURE / run-start event_time; dc is deterministically 0 and NO
-        #   EQ.current_* is read (it may be unset/cleared/stale outside an active dispatch). Reject a target before the source.
+        #   EQ.current_* is read (it may be unset/cleared/stale outside an active dispatch).
+        # AI2: VALIDATE the driver context BEFORE deriving. The carried EQ/RunContext MUST be the ones ScheduleEvent was
+        #   called with (dctx.RunContext.EventQueueContext ties the owning RunContext to this EQ); the carried target MUST
+        #   equal the requested target; the driver kind MUST be permitted to seat this event_type; the target MUST NOT be
+        #   before the source NOR behind the simulation frontier (RunContext.last_finalised_event_time).
+        IF (dctx.EventQueueContext is NOT EQ) OR (dctx.RunContext.EventQueueContext is NOT EQ):
+          RETURN rejected_driver_context_mismatch(event_type, scheduling_origin)   # AI2
+        IF NOT driver_kind_may_seat(dctx.driver_source_kind, event_type):
+          RETURN rejected_driver_kind_event_type_mismatch(event_type, dctx.driver_source_kind)   # AI2
+        IF target_event_time != dctx.target_event_time:
+          RETURN rejected_driver_target_context_mismatch(event_type, target_event_time, dctx.target_event_time)   # AI2
         IF NOT (target_event_time >= dctx.source_event_time):
           RETURN rejected_driver_target_before_source(event_type, target_event_time, dctx.source_event_time)   # AH1
+        IF dctx.RunContext.last_finalised_event_time != NONE AND target_event_time < dctx.RunContext.last_finalised_event_time:
+          RETURN rejected_driver_target_before_simulation_frontier(event_type, target_event_time, dctx.RunContext.last_finalised_event_time)   # AI2
         SET dc <- 0                            # AH1: future / run-start event_time -> delta_cycle 0 (no backward travel)
+      CASE TERMINAL_ROTATION(trctx):
+        # AI8 ROUND-ROTATION SEAT. Seated synchronously by PublishTerminalRoundAndSeatNext; validate context identities +
+        #   STRICTLY-LATER-than-predecessor target + frontier; dc = 0; NO EQ.current_* read.
+        IF (trctx.EventQueueContext is NOT EQ) OR (trctx.RunContext.EventQueueContext is NOT EQ):
+          RETURN rejected_driver_context_mismatch(event_type, scheduling_origin)   # AI2/AI8
+        IF NOT driver_kind_may_seat(ROUND_ROTATION_BOOTSTRAP, event_type):
+          RETURN rejected_driver_kind_event_type_mismatch(event_type, ROUND_ROTATION_BOOTSTRAP)   # AI2/AI8 (rotation seats only RoundInitialiseEvent)
+        IF target_event_time != trctx.target_event_time:
+          RETURN rejected_driver_target_context_mismatch(event_type, target_event_time, trctx.target_event_time)   # AI2
+        IF NOT (target_event_time > trctx.predecessor_terminal_time):
+          RETURN rejected_driver_target_before_source(event_type, target_event_time, trctx.predecessor_terminal_time)   # AI8: strictly later
+        IF trctx.RunContext.last_finalised_event_time != NONE AND target_event_time < trctx.RunContext.last_finalised_event_time:
+          RETURN rejected_driver_target_before_simulation_frontier(event_type, target_event_time, trctx.RunContext.last_finalised_event_time)   # AI2
+        SET dc <- 0
       CASE ORDINARY_DISPATCH(octx):
         # ORDINARY IN-DISPATCH SEAT (§0.7-H2 forward rule). The source frame is octx's own fields — NOT ambient EQ:
         #   source event_time / delta_cycle from octx.dispatch_envelope; source microphase from octx.dispatched_event_ref.
@@ -885,15 +990,21 @@ PROCEDURE ScheduleEvent
            rejected_post_epilogue_not_strictly_later | rejected_backward_time |
            rejected_invalid_scheduling_origin(event_type, scheduling_origin) |                       # AH1
            rejected_driver_target_before_source(event_type, target_event_time, source_event_time) |  # AH1
+           rejected_driver_target_before_simulation_frontier(event_type, target_event_time, last_finalised_event_time) |  # AI2
+           rejected_driver_context_mismatch(event_type, scheduling_origin) |                          # AI2
+           rejected_driver_kind_event_type_mismatch(event_type, driver_source_kind) |                # AI2
+           rejected_driver_target_context_mismatch(event_type, target_event_time, carried_target_event_time) |  # AI2
            rejected_event_type_unknown(event_type) |
            rejected_microphase_mismatch(event_type, target_microphase, expected_microphase) |
            rejected_payload_schema_mismatch(event_type, missing_fields, extra_fields, type_invalid_fields) |
            rejected_stable_tie_key_unavailable(event_type)
-           # AD3/AE7/AF3/AH1: the COMPLETE result union — every success and rejection variant ScheduleEvent can return. scheduled
-           #   carries the canonical EventRef AND the central queued_event_record; AF3 replaces the AE7 single
+           # AD3/AE7/AF3/AH1/AI2: the COMPLETE result union — every success and rejection variant ScheduleEvent can return.
+           #   scheduled carries the canonical EventRef AND the central queued_event_record; AF3 replaces the AE7 single
            #   rejected_payload_schema_mismatch(event_type, missing_or_invalid_fields) with the FULL schema-enforcement set
            #   (event-type-unknown / microphase-mismatch / exact-key-set-or-type mismatch / tie-key-unavailable), all
-           #   returned BEFORE any state mutation.
+           #   returned BEFORE any state mutation. AI2 ADDS the four driver/rotation-context validation rejections
+           #   (target-before-simulation-frontier / context-mismatch / kind↔event_type-mismatch / target-context-mismatch),
+           #   returned from the DRIVER / TERMINAL_ROTATION SWITCH cases BEFORE any state mutation.
   NOTE: K8/J9/AD1/AD2/AD3/AE7/AE8/AF3: the SOLE enqueue interface. It DERIVES delta_cycle (caller supplies only event_time +
         microphase), owns event_creation_seq (J4), rejects finalised (I-02), post-horizon (O2: target_event_time > T), and
         backward event_times, then ENFORCES THE FULL DESCRIPTOR SCHEMA against §0.7g-schema BEFORE any mutation (AF3): the
@@ -905,13 +1016,21 @@ PROCEDURE ScheduleEvent
         QUEUED queued_event_record, add the registry entry, and insert the EventRef into EQ ordered by the descriptor-derived
         stable_tie_key (AF3), together (both-or-neither), so the registry and EQ never diverge (AE10). Every `SCHEDULE`
         elsewhere is shorthand for a call here. O2: because this is the ONLY enqueue path and it rejects target_event_time > T,
-        the queue can never hold an ordinary event beyond the horizon T. AH1: the delta_cycle is derived from the EXPLICIT
-        scheduling_origin (ORDINARY_DISPATCH / DRIVER / POST_EPILOGUE) — its own carried source frame — never from ambient
-        EQ.current_*; a DRIVER seat targets a future/run-start time (dc = 0, target >= source, else
-        rejected_driver_target_before_source), a POST_EPILOGUE seat targets strictly later than the drained epilogue t (dc = 0),
-        and an ORDINARY_DISPATCH seat applies the §0.7-H2 forward rule against the dispatcher-owned dispatch frame; an
-        absent/unrecognised origin is rejected_invalid_scheduling_origin. The ONLY sanctioned read of EQ.current_* for
-        scheduling is ordinary_dispatch_origin(EQ), and only inside an active ordinary dispatch (§0.7e).
+        the queue can never hold an ordinary event beyond the horizon T. AH1/AI8: the delta_cycle is derived from the EXPLICIT
+        scheduling_origin (ORDINARY_DISPATCH / DRIVER / POST_EPILOGUE / TERMINAL_ROTATION) — its own carried source frame —
+        never from ambient EQ.current_*; a DRIVER seat targets a future/run-start time (dc = 0, target >= source, else
+        rejected_driver_target_before_source), a TERMINAL_ROTATION seat targets strictly later than the predecessor terminal
+        time (dc = 0), a POST_EPILOGUE seat targets strictly later than the drained epilogue t (dc = 0), and an
+        ORDINARY_DISPATCH seat applies the §0.7-H2 forward rule against the dispatcher-owned dispatch frame; an
+        absent/unrecognised origin is rejected_invalid_scheduling_origin. AI2: a DRIVER / TERMINAL_ROTATION seat is
+        VALIDATED before deriving — the carried EventQueueContext/RunContext MUST be the ones ScheduleEvent was called with
+        (else rejected_driver_context_mismatch), the carried driver_source_kind MUST be permitted to seat this event_type
+        under driver_kind_may_seat (else rejected_driver_kind_event_type_mismatch), target_event_time MUST equal the carried
+        target (else rejected_driver_target_context_mismatch), and target_event_time MUST NOT be behind the simulation
+        frontier RunContext.last_finalised_event_time (else rejected_driver_target_before_simulation_frontier) — so the
+        simulation can NEVER move from a later processed time back to an earlier newly-admitted driver time. The ONLY
+        sanctioned read of EQ.current_* for scheduling is ordinary_dispatch_origin(EQ), and only inside an active ordinary
+        dispatch (§0.7e).
 
 PROCEDURE CancelQueuedEvent                                     # AE1: the SOLE queue-owner cancellation operation
   INPUTS: EventRef, cancellation_reason, cancellation_context
@@ -935,6 +1054,14 @@ PROCEDURE CancelQueuedEvent                                     # AE1: the SOLE 
         REMOVE EventRef FROM EQ.event_queue
         SET queued_event_registry[EventRef].queue_status <- CANCELLED
         RECORD queued_event_cancelled(EventRef, cancellation_reason, cancellation_context)
+      # AI4: if this cancelled EventRef was the SEAT of a sim-driver request (the immutable reverse binding exists), reconcile
+      #   the EXACT driver_request to CANCELLED through the guarded mutator, so a cancelled seat never leaves its driver_request
+      #   dangling SEATED. The RunContext is the bound one (AF6: the owner of queued_event_registry / driver_request_registry).
+      SET RunContext_bound <- the bound RunContext (AF6: owner of queued_event_registry, driver_request_by_seat_event_ref)
+      IF RunContext_bound.driver_request_by_seat_event_ref[EventRef] EXISTS:
+        SET drid <- RunContext_bound.driver_request_by_seat_event_ref[EventRef]
+        CALL SetDriverRequestStatus(RunContext_bound, drid, expected_status = SEATED, new_status = CANCELLED,
+                                    disposition = driver_request_seat_cancelled(EventRef, cancellation_reason))   # AI4: SEATED -> CANCELLED (never resurrected)
       RETURN event_cancelled(EventRef)
     IF status = DISPATCHING:
       # AE1: the event is MID-DISPATCH (owned by ProcessEventTime, AD4). Do NOT mutate the queue state; the dispatcher
@@ -1237,8 +1364,29 @@ PROCEDURE RoundInitialiseEvent                                   # AF4: wrapper 
     #   resolved from RunContext (AF6) — NEVER stored payload. round_setup_seq is the deterministic idempotence / tie key ONLY.
     SET config      <- RunContext.config                          # AF6: config is owned by RunContext
     SET prior_state <- RunContext.prior_round_terminal_state      # AF6: null for the first round; the prior terminal RoundContext otherwise
-    SET rc <- CALL RoundInitialise(config = config, RunContext = RunContext, prior_state = prior_state)   # mints RoundID; returns RoundContext (AH5: imports the genesis miner set for the first round)
+    SET rc <- CALL RoundInitialise(config = config, RunContext = RunContext, prior_state = prior_state)   # mints RoundID; returns RoundContext (AH5: admits the genesis miner driver_requests for the first round)
     SET RunContext.current_round_context <- rc                    # AF6/AG5: publish the new RoundContext (step 2) — every subsequent event resolves it
+    # AI1: GENESIS ADMISSION FIX. The genesis MINER_JOIN driver_requests RoundInitialise just admitted (scope EXACT_ROUND(rc.RoundID),
+    #   requested_event_time = t0) MUST be SEATED NOW — synchronously, inside THIS dispatched RoundInitialiseEvent at t0 — through
+    #   SeatMinerRegister in IN_DISPATCH_GENESIS mode (an ORDINARY_DISPATCH origin, target = EQ.current_event_time = t0). They are
+    #   NOT left for the outer-loop SeatPendingDriverRequests, which runs only AFTER t0 is finalised and would seat them at a
+    #   finalised time (rejected_finalised_time) — the deadlock this correction removes. The initial-registration barrier (AH5)
+    #   still defers PrepareParticipantsForNewRound until every genesis MinerRegisterEvent has dispatched and registered, so all
+    #   genesis registrations execute BEFORE participant preparation regardless of the REGISTRATION vs TEMPLATE_COMMIT dispatch order.
+    FOR EACH drid IN SORT(RunContext.pending_driver_request_index BY DriverRequestID ascending):
+      SET gdr <- RunContext.driver_request_registry[drid]
+      IF gdr.status != PENDING OR gdr.kind != MINER_JOIN OR gdr.round_scope != EXACT_ROUND(rc.RoundID): CONTINUE   # AI1: only THIS round's genesis joins
+      SET gseat <- CALL SeatMinerRegister(RunContext, driver_request = gdr, admission_mode = IN_DISPATCH_GENESIS)   # AI1: seat at the live (non-finalised) t0
+      IF gseat = miner_register_seat_failed(_, greason):
+        # AI1/AH6: a genesis registration that cannot seat at t0 can never complete the initial-registration barrier — abort THIS
+        #   round with the declared disposition rather than strand it waiting for a registration that will never arrive.
+        SET g_abort_env <- { envelope_namespace = ORDINARY_EVENT, event_time = EQ.current_event_time,
+                             delta_cycle = EQ.current_delta_cycle, event_seq = EQ.current_event_seq, hook_id = null }
+        CALL SetDriverRequestStatus(RunContext, drid, expected_status = PENDING, new_status = REJECTED,
+                                    disposition = driver_request_rejected(greason))   # AI4: terminalise the failed genesis request
+        REMOVE drid FROM RunContext.pending_driver_request_index
+        SET gdisp <- CALL RoundAbort(rc, reason = genesis_registration_seat_failed_round_abort(greason), dispatch_envelope = g_abort_env)
+        RETURN round_initialise_aborted(rc.RoundID, genesis_registration_seat_failed_round_abort(greason))   # AI1: declared disposition; round terminal, not stranded
     # AG4 (step 3) / AH6: seat the TemplateCommitEvent for the EXACT new RoundID through the named owner and INSPECT the result.
     #   candidate_template is the coordinator's prepared template for rc (§2); SeatTemplateCommit is idempotent per (RoundID, template).
     SET tc <- CALL SeatTemplateCommit(RunContext, RoundID_at_seat = rc.RoundID, candidate_template = candidate_template_for_round(rc))
@@ -1254,7 +1402,8 @@ PROCEDURE RoundInitialiseEvent                                   # AF4: wrapper 
                                 delta_cycle = EQ.current_delta_cycle, event_seq = EQ.current_event_seq, hook_id = null }   # dispatched RoundInitialiseEvent frame
         SET disp <- CALL RoundAbort(rc, reason = template_commit_seat_failed_round_abort(reason), dispatch_envelope = abort_envelope)
         RETURN round_initialise_aborted(rc.RoundID, template_commit_seat_failed_round_abort(reason))   # AH6: declared disposition; round is terminal, not stranded
-  RETURNS: round_initialised(RoundID) | round_initialise_aborted(RoundID, template_commit_seat_failed_round_abort(reason))
+  RETURNS: round_initialised(RoundID) | round_initialise_aborted(RoundID, template_commit_seat_failed_round_abort(reason)) |
+           round_initialise_aborted(RoundID, genesis_registration_seat_failed_round_abort(reason))   # AI1
 
 PROCEDURE TemplateCommitEvent                                    # AF4: wrapper for TEMPLATE_COMMIT -> TemplateCommit
   INPUTS: RoundContext, RoundID_at_seat, candidate_template      # AF1: TemplateCommit MINTS TemplateID from candidate_template
@@ -1287,9 +1436,15 @@ PROCEDURE MinerRegisterEvent                                     # AF4: wrapper 
   INPUTS: RoundContext, join_request, dispatch_envelope          # AF1: MinerRegister DERIVES MinerID from join_request
   PRECONDITIONS: dispatched for a MinerRegisterEvent record (recv env = yes, recv ref = no); round admits participation
   EFFECTS:
-    SET MinerID <- CALL MinerRegister(RoundContext, join_request = join_request, dispatch_envelope = dispatch_envelope)  # derives MinerID
-    RETURN miner_registered(MinerID)                              # AF4: MinerID is DERIVED, never payload
-  RETURNS: miner_registered(MinerID)
+    # AI7: PROPAGATE the MinerRegister disposition verbatim — it distinguishes ordinary registration / barrier-pending /
+    #   participant-setup-seated / -already-seated / -aborted. This is the handler_result ProcessEventTime records as the
+    #   driver_request's consumed_result when the MinerRegisterEvent dispatch completes (CompleteDriverRequestOnDispatch, AI4),
+    #   so a participant-setup abort during the barrier-completing registration is NEVER hidden behind a plain success.
+    SET mr <- CALL MinerRegister(RoundContext, join_request = join_request, dispatch_envelope = dispatch_envelope)  # AI7: capture the full disposition
+    RETURN mr                                                     # AI7: propagate (miner_registered / _barrier_pending / _participant_setup_seated / _already_seated / _aborted)
+  RETURNS: miner_registered(MinerID) | miner_registered_barrier_pending(MinerID) |
+           miner_registered_participant_setup_seated(MinerID) | miner_registered_participant_setup_already_seated(MinerID) |
+           miner_registered_participant_setup_aborted(MinerID, participant_setup_seat_failed_round_abort(reason))
 
 PROCEDURE PrepareParticipantsEvent                              # AF4: wrapper for ASSIGNMENT_SETUP -> PrepareParticipantsForNewRound
   INPUTS: RoundContext, RoundID_at_seat, TemplateID_at_seat, dispatch_envelope
@@ -1365,20 +1520,25 @@ PROCEDURE SeatNextRoundBootstrap                              # AG4/AH1/AH2/AH3:
     # AH3: ONLY NOW (the request is shown NEW) READ the round_setup_seq LABEL (the descriptor tie key). It is advanced AFTER a
     #   successful seat — NEVER read+incremented before the replay check (that would mint a fresh seq per replay attempt).
     SET round_setup_seq <- RunContext.next_round_setup_seq
-    # AH1: a SIM-DRIVER seat. Build the EXPLICIT DRIVER origin from the request — NO EQ.current_* read (EQ.current_* is unset at
-    #   run start and cleared between dispatches). AH2: the target is this request's per-round target_time (first round ->
-    #   run_start_time; a rotation -> next_representable_simulation_time(predecessor_terminal_time)).
-    SET dctx <- DriverSchedulingContext(
-                  driver_source_kind = (br.predecessor_round_id = RUN_START ? RUN_BOOTSTRAP : ROUND_ROTATION_BOOTSTRAP),
-                  driver_request_id  = br.BootstrapRequestID,
-                  source_event_time  = (br.predecessor_terminal_time != null ? br.predecessor_terminal_time
-                                                                             : RunContext.config.run_start_time),
-                  target_event_time  = br.target_time, RunContext = RunContext, EventQueueContext = EQ)   # AH1
+    # AI8: build the EXPLICIT origin from the TRUTHFUL call stack — NO EQ.current_* read (EQ.current_* is unset at run start and
+    #   cleared between dispatches). The RUN-START bootstrap is a genuine OUTSIDE-dispatch sim-driver seat (DRIVER origin,
+    #   RUN_BOOTSTRAP, RUN_LEVEL scope). The ROTATION bootstrap is seated SYNCHRONOUSLY from inside PublishTerminalRoundAndSeatNext
+    #   (a terminal-publication path), so its truthful origin is TERMINAL_ROTATION (§0.7e), NOT a plain DRIVER seat (AI8 Option A).
+    #   AH2: the target is this request's per-round target_time (first round -> run_start_time; a rotation ->
+    #   next_representable_simulation_time(predecessor_terminal_time)).
+    IF br.predecessor_round_id = RUN_START:
+      SET origin <- DRIVER(DriverSchedulingContext(driver_source_kind = RUN_BOOTSTRAP, driver_request_id = br.BootstrapRequestID,
+                      source_event_time = RunContext.config.run_start_time, target_event_time = br.target_time,
+                      intended_round_scope = RUN_LEVEL, RunContext = RunContext, EventQueueContext = EQ))   # AI8: outside-dispatch run-start driver seat
+    ELSE:
+      SET origin <- TERMINAL_ROTATION(TerminalRotationSchedulingContext(BootstrapRequestID = br.BootstrapRequestID,
+                      predecessor_terminal_time = br.predecessor_terminal_time, target_event_time = br.target_time,
+                      RunContext = RunContext, EventQueueContext = EQ))   # AI8: synchronous terminal-rotation seat (truthful origin)
     # AG3: RoundInitialiseEvent needs NO RoundContext to seat; ScheduleEvent never dereferences RoundContext on that path.
     SET r <- CALL ScheduleEvent(EQ, RoundContext = RunContext.current_round_context, RoundInitialiseEvent,
                      target_event_time = br.target_time, target_microphase = ROUND_SETUP,
                      { round_setup_seq = round_setup_seq },
-                     scheduling_origin = DRIVER(dctx))            # AH1: explicit DRIVER origin (dc = 0; target >= source or rejected_driver_target_before_source)
+                     scheduling_origin = origin)                  # AI8: explicit DRIVER (run-start) OR TERMINAL_ROTATION (rotation) origin
     IF r = scheduled(event_ref, record):
       SET RunContext.driver_event_seat[key] <- event_ref          # AG4/AH3: store the seated EventRef keyed by the STABLE id
       SET RunContext.next_round_setup_seq   <- round_setup_seq + 1 # AH3: advance ONLY after a NEW request seats
@@ -1444,25 +1604,48 @@ PROCEDURE SeatParticipantSetupOrAbort                        # AH5/AH6: seat Pre
   RETURNS: participant_setup_seated(EventRef) | participant_setup_already_seated |
            participant_setup_aborted(participant_setup_seat_failed_round_abort(reason))
 
-PROCEDURE SeatMinerRegister                                  # AG4/AH1/AH3/AH4: named owner for MinerRegisterEvent
-  INPUTS: RunContext, driver_request                            # AH4: the MINER_JOIN driver_request record (not a bare join_request)
+PROCEDURE SeatMinerRegister                                  # AG4/AH1/AH3/AH4/AI1/AI2/AI4: named owner for MinerRegisterEvent
+  INPUTS: RunContext, driver_request, admission_mode            # AH4: the MINER_JOIN driver_request record; AI1: admission_mode
+                                                                # admission_mode in { IN_DISPATCH_GENESIS, DRIVER_INTAKE }
   PRECONDITIONS: a REGISTERED-admitting round exists (current_round_context != null); driver_request.kind = MINER_JOIN.
-                 Routed by SeatPendingDriverRequests as a SIM-DRIVER seat (AH1 DRIVER origin).
+                 AI1: IN_DISPATCH_GENESIS is called SYNCHRONOUSLY from inside the dispatched RoundInitialiseEvent (EQ.current_* is
+                 the RoundInitialiseEvent frame at the round-setup event_time t0, which is NOT yet finalised) — it uses an
+                 ORDINARY_DISPATCH origin so the genesis registration is seated at t0 and dispatched at t0 (never left for the
+                 outer-loop intake, which runs AFTER t0 is finalised and would hit rejected_finalised_time). DRIVER_INTAKE is
+                 routed by SeatPendingDriverRequests OUTSIDE dispatch as a SIM-DRIVER seat (AH1 DRIVER origin, AI2 authoritative time).
   EFFECTS:
     SET jr  <- driver_request.payload.join_request
     SET key <- (MINER_REGISTER, driver_request.DriverRequestID)   # AH3/AH4: STABLE per-request identity (not a mutable seq)
     IF RunContext.driver_event_seat[key] EXISTS AND queued_event_registry[RunContext.driver_event_seat[key]].queue_status in {QUEUED, DISPATCHING, CONSUMED}:
       RETURN miner_register_already_seated(driver_request.DriverRequestID, RunContext.driver_event_seat[key])   # AH3: replay -> same EventRef
-    # AH1: EXPLICIT DRIVER origin built from the request (NO EQ.current_* read). AH2/AH4: target = the request's requested_event_time.
-    SET dctx <- DriverSchedulingContext(driver_source_kind = MINER_JOIN, driver_request_id = driver_request.DriverRequestID,
-                  source_event_time = driver_request.requested_event_time,
-                  target_event_time = driver_request.requested_event_time, RunContext = RunContext, EventQueueContext = EQ)
+    # AI1/AI2: build the origin from the admission_mode. IN_DISPATCH_GENESIS targets EQ.current_event_time (t0, live dispatch);
+    #   DRIVER_INTAKE builds an EXPLICIT DRIVER origin whose source is the AUTHORITATIVE driver_admission_time (NOT a copy of the
+    #   requested target) and whose scope is the request's declared round_scope (AI5). NO EQ.current_* is read in DRIVER mode.
+    SWITCH admission_mode:
+      CASE IN_DISPATCH_GENESIS:
+        SET target_time <- EQ.current_event_time                 # AI1: seat at the live (non-finalised) round-setup t0
+        SET origin      <- ordinary_dispatch_origin(EQ)          # AI1: seated INSIDE the dispatched RoundInitialiseEvent
+      CASE DRIVER_INTAKE:
+        SET target_time <- driver_request.requested_event_time   # AH4: the request's admissible target
+        SET origin      <- DRIVER(DriverSchedulingContext(driver_source_kind = MINER_JOIN,
+                              driver_request_id = driver_request.DriverRequestID,
+                              source_event_time = driver_request.driver_admission_time,   # AI2: authoritative admission time (not requested)
+                              target_event_time = driver_request.requested_event_time,
+                              intended_round_scope = driver_request.round_scope,           # AI5
+                              RunContext = RunContext, EventQueueContext = EQ))
     SET r <- CALL ScheduleEvent(EQ, RunContext.current_round_context, MinerRegisterEvent,
-                     target_event_time = driver_request.requested_event_time, target_microphase = REGISTRATION,
+                     target_event_time = target_time, target_microphase = REGISTRATION,
                      { join_request = jr },                       # AG1: exact closed payload
-                     scheduling_origin = DRIVER(dctx))            # AH1
+                     scheduling_origin = origin)                  # AH1/AI1
     IF r = scheduled(event_ref, record):
-      SET RunContext.driver_event_seat[key] <- event_ref
+      # AI4: publish the reverse binding + transition PENDING -> SEATED + clear the pending index ATOMICALLY WITH the seat.
+      ATOMICALLY:
+        SET RunContext.driver_event_seat[key] <- event_ref
+        SET RunContext.driver_request_by_seat_event_ref[event_ref] <- driver_request.DriverRequestID   # AI4: immutable reverse binding
+        SET RunContext.driver_request_registry[driver_request.DriverRequestID].seated_event_ref <- event_ref   # AI4
+        CALL SetDriverRequestStatus(RunContext, driver_request.DriverRequestID, expected_status = PENDING,
+                                    new_status = SEATED, disposition = driver_request_seated(event_ref))   # AI4
+        REMOVE driver_request.DriverRequestID FROM RunContext.pending_driver_request_index               # AI4: no SEATED request lingers
       RETURN miner_register_seated(driver_request.DriverRequestID, event_ref)
     RETURN miner_register_seat_failed(driver_request.DriverRequestID, r)
   RETURNS: miner_register_seated(DriverRequestID, EventRef) | miner_register_already_seated(DriverRequestID, EventRef) |
@@ -1481,17 +1664,27 @@ PROCEDURE SeatReserveActivate                                # AG4/AH1/AH3/AH4: 
       RETURN reserve_activate_already_seated(driver_request.DriverRequestID, RunContext.driver_event_seat[key])   # AH3: replay -> same EventRef
     # AH3: ONLY NOW (request shown NEW) READ the per-round activation_seq (the descriptor tie key); advance AFTER a successful seat.
     SET activation_seq <- RunContext.current_round_context.reserve_activation_seq
-    # AH1: EXPLICIT DRIVER origin (NO EQ.current_* read). AH4: target = the request's requested_event_time.
+    # AH1/AI2: EXPLICIT DRIVER origin (NO EQ.current_* read). source = the AUTHORITATIVE driver_admission_time (NOT the target);
+    #   target = the request's requested_event_time; scope = the request's round_scope (AI5: always EXACT_ROUND for a reserve deficit).
     SET dctx <- DriverSchedulingContext(driver_source_kind = ORDINARY_RESERVE_DEFICIT, driver_request_id = driver_request.DriverRequestID,
-                  source_event_time = driver_request.requested_event_time,
-                  target_event_time = driver_request.requested_event_time, RunContext = RunContext, EventQueueContext = EQ)
+                  source_event_time = driver_request.driver_admission_time,   # AI2: authoritative admission time
+                  target_event_time = driver_request.requested_event_time,
+                  intended_round_scope = driver_request.round_scope,          # AI5
+                  RunContext = RunContext, EventQueueContext = EQ)
     SET r <- CALL ScheduleEvent(EQ, RunContext.current_round_context, ReserveActivateEvent,
                      target_event_time = driver_request.requested_event_time, target_microphase = RECOVERY_ACTIVATE,
                      { RoundID_at_seat = RoundID_at_seat, deficit = deficit, activation_seq = activation_seq },   # AG1: exact closed payload
                      scheduling_origin = DRIVER(dctx))            # AH1
     IF r = scheduled(event_ref, record):
-      SET RunContext.driver_event_seat[key] <- event_ref
-      SET RunContext.current_round_context.reserve_activation_seq <- activation_seq + 1   # AH3: advance AFTER a NEW request seats
+      # AI4: publish the reverse binding + transition PENDING -> SEATED + clear the pending index ATOMICALLY WITH the seat.
+      ATOMICALLY:
+        SET RunContext.driver_event_seat[key] <- event_ref
+        SET RunContext.driver_request_by_seat_event_ref[event_ref] <- driver_request.DriverRequestID   # AI4: immutable reverse binding
+        SET RunContext.driver_request_registry[driver_request.DriverRequestID].seated_event_ref <- event_ref   # AI4
+        SET RunContext.current_round_context.reserve_activation_seq <- activation_seq + 1   # AH3: advance AFTER a NEW request seats
+        CALL SetDriverRequestStatus(RunContext, driver_request.DriverRequestID, expected_status = PENDING,
+                                    new_status = SEATED, disposition = driver_request_seated(event_ref))   # AI4
+        REMOVE driver_request.DriverRequestID FROM RunContext.pending_driver_request_index               # AI4: no SEATED request lingers
       RETURN reserve_activate_seated(driver_request.DriverRequestID, event_ref)
     RETURN reserve_activate_seat_failed(driver_request.DriverRequestID, r)
   RETURNS: reserve_activate_seated(DriverRequestID, EventRef) | reserve_activate_already_seated(DriverRequestID, EventRef) |
@@ -1515,20 +1708,92 @@ PROCEDURE SeatFullRangeExhaust                               # AG4: step 5 — n
     RETURN full_range_exhaust_seat_failed(r)
   RETURNS: full_range_exhaust_seated(EventRef) | full_range_exhaust_already_seated(key) | full_range_exhaust_seat_failed(reason)
 
-PROCEDURE AdmitDriverRequest                                 # AH4: the NAMED producer of a sim-driver request record
-  INPUTS: RunContext, kind, requested_event_time, payload      # kind in {MINER_JOIN, ORDINARY_RESERVE_DEFICIT}
+PROCEDURE AdmitDriverRequest                                 # AH4/AI2/AI3/AI5: the NAMED producer of a sim-driver request record
+  INPUTS: RunContext, kind, requested_event_time, round_scope, payload   # kind in {MINER_JOIN, ORDINARY_RESERVE_DEFICIT}; round_scope: DriverRoundScope (AI5)
   PRECONDITIONS: called by the sim driver when an external miner join arrives (MINER_JOIN, payload = { join_request }) or when
                  an ordinary-dispatch reserve deficit is detected (ORDINARY_RESERVE_DEFICIT, payload = { RoundID_at_seat, deficit }).
-                 This is the ONLY producer of a driver_request; it REPLACES appending to the AG bare pending sets.
+                 This is the ONLY producer of a driver_request; it REPLACES appending to the AG bare pending sets. AI5:
+                 ORDINARY_RESERVE_DEFICIT MUST be admitted with round_scope = EXACT_ROUND(payload.RoundID_at_seat) (a reserve
+                 activation is meaningless against a different round); a MINER_JOIN is EXACT_ROUND (genesis) or NEXT_AVAILABLE_ROUND.
   EFFECTS:
+    # AI5: STRUCTURAL scope check — a reserve deficit may ONLY be admitted EXACT_ROUND for its own RoundID_at_seat.
+    IF kind = ORDINARY_RESERVE_DEFICIT AND round_scope != EXACT_ROUND(payload.RoundID_at_seat):
+      RETURN driver_request_scope_invalid(kind, round_scope)      # AI5: reserve activation is always EXACT_ROUND(RoundID_at_seat)
+    # AI2: the AUTHORITATIVE admission time is the run-level simulation frontier — NOT a copy of requested_event_time. Before any
+    #   finalisation the frontier is NONE, so admission is anchored at config.run_start_time (the run has not advanced); after the
+    #   first finalisation it is RunContext.last_finalised_event_time. A requested_event_time BEHIND this authoritative time is
+    #   rejected (the simulation must never seat a driver event before where it has already advanced).
+    SET driver_admission_time <- (RunContext.last_finalised_event_time = NONE ? RunContext.config.run_start_time
+                                                                              : RunContext.last_finalised_event_time)   # AI2
+    IF requested_event_time < driver_admission_time:
+      RETURN driver_request_time_before_admission_rejected(requested_event_time, driver_admission_time)   # AI2: not self-validating (source != target)
+    # AI3: derive the STABLE logical identity (ExternalDriverRequestID) from the request's OWN content, BEFORE advancing the
+    #   sequence. A MINER_JOIN is keyed by its deterministic JoinRequestID; an ORDINARY_RESERVE_DEFICIT by its deterministic
+    #   ReserveActivationRequestID. Two genuinely distinct requests derive DISTINCT logical ids; the SAME logical request
+    #   (a replay) derives the SAME logical id.
+    SWITCH kind:
+      CASE MINER_JOIN:               SET logical_id <- JOIN_REQUEST(join_request_id(payload.join_request))
+      CASE ORDINARY_RESERVE_DEFICIT: SET logical_id <- RESERVE_ACTIVATION(payload.RoundID_at_seat, deficit_identity(payload.deficit))
+    # AI3: REPLAY CHECK before any sequence is minted — a re-admission of the SAME logical request returns the SAME DriverRequestID
+    #   and mints NO second identity / EventRef / protocol effect.
+    IF RunContext.driver_request_by_logical_id[logical_id] EXISTS:
+      RETURN driver_request_already_admitted(RunContext.driver_request_by_logical_id[logical_id])   # AI3: same DriverRequestID
+    # AI3: ONLY a genuinely NEW logical request advances a NEW sequence.
     SET RunContext.driver_request_seq <- RunContext.driver_request_seq + 1
     SET drid <- (RunContext.RunID, RunContext.driver_request_seq)   # AH4: immutable per-run DriverRequestID
-    SET dr   <- driver_request(DriverRequestID = drid, kind = kind, requested_event_time = requested_event_time,
-                               payload = payload, status = PENDING, seated_event_ref = null, disposition = null)
+    SET dr   <- driver_request(DriverRequestID = drid, logical_request_id = logical_id, kind = kind,
+                               driver_admission_time = driver_admission_time, requested_event_time = requested_event_time,
+                               round_scope = round_scope, payload = payload, status = PENDING,
+                               seated_event_ref = null, disposition = driver_request_pending, consumed_result = null)
     SET RunContext.driver_request_registry[drid] <- dr
+    SET RunContext.driver_request_by_logical_id[logical_id] <- drid   # AI3: register the stable-identity replay key
     ADD drid TO RunContext.pending_driver_request_index          # AH4: on the admission worklist until seated/rejected
     RETURN driver_request_admitted(drid)
-  RETURNS: driver_request_admitted(DriverRequestID)
+  RETURNS: driver_request_admitted(DriverRequestID) | driver_request_already_admitted(DriverRequestID) |   # AI3
+           driver_request_time_before_admission_rejected(requested_event_time, driver_admission_time) |     # AI2
+           driver_request_scope_invalid(kind, round_scope)                                                  # AI5
+  NOTE: AI2/AI3/AI5: the driver_admission_time is derived from the AUTHORITATIVE run frontier (never source = requested); the
+        stable logical identity is derived + checked BEFORE the sequence advances so replay is idempotent at the ADMISSION layer
+        (not only the seat layer, AH3); and the round scope is recorded (and structurally constrained for reserve deficits) so
+        SeatPendingDriverRequests can validate scope vs round state before seating (AI5).
+
+PROCEDURE SetDriverRequestStatus                             # AI4: the SINGLE guarded mutator of driver_request.status
+  INPUTS: RunContext, DriverRequestID, expected_status, new_status, disposition
+  PRECONDITIONS: the ONLY procedure that writes driver_request.status. Every status change (seat / consume / reject / cancel)
+                 routes through here so no procedure overwrites the status directly and no illegal edge is ever taken.
+  EFFECTS:
+    IF RunContext.driver_request_registry[DriverRequestID] does not exist:
+      RETURN driver_request_unknown(DriverRequestID)             # AI4: declared no-op, never an assertion
+    SET dr <- RunContext.driver_request_registry[DriverRequestID]
+    IF dr.status != expected_status:
+      RETURN driver_request_status_mismatch(DriverRequestID, dr.status, expected_status)   # AI4: a CAS-style guard (no blind overwrite)
+    # AI4: LEGAL TRANSITION TABLE (STRUCTURE RunContext note): PENDING -> {SEATED, REJECTED, CANCELLED};
+    #   SEATED -> {CONSUMED, CANCELLED}; CONSUMED/REJECTED/CANCELLED terminal. Any other edge is a declared illegal transition.
+    IF NOT ( (expected_status = PENDING AND new_status in {SEATED, REJECTED, CANCELLED})
+             OR (expected_status = SEATED AND new_status in {CONSUMED, CANCELLED}) ):
+      RETURN driver_request_illegal_transition(DriverRequestID, expected_status, new_status)   # AI4: never SEATED-while-CONSUMED/CANCELLED
+    SET dr.status      <- new_status
+    SET dr.disposition <- disposition
+    IF new_status = CONSUMED AND disposition = driver_request_consumed(handler_result):
+      SET dr.consumed_result <- handler_result                   # AI4: record the ACTUAL handler result on CONSUMED
+    RETURN driver_request_status_set(DriverRequestID, new_status)
+  RETURNS: driver_request_status_set(DriverRequestID, new_status) | driver_request_unknown(DriverRequestID) |
+           driver_request_status_mismatch(DriverRequestID, actual_status, expected_status) |
+           driver_request_illegal_transition(DriverRequestID, expected_status, new_status)
+
+PROCEDURE CompleteDriverRequestOnDispatch                    # AI4: the request-completion owner — SEATED -> CONSUMED via the reverse binding
+  INPUTS: RunContext, seat_event_ref, disposition
+  PRECONDITIONS: called by ProcessEventTime AFTER a dispatched ordinary event completes (success OR a defensive CONSUME path).
+                 It resolves the EXACT driver_request from the TRUSTED seat EventRef (never the payload); a non-driver event
+                 (a bootstrap RoundInitialiseEvent, an ordinary in-round event) has NO reverse binding and is a declared no-op.
+  EFFECTS:
+    IF RunContext.driver_request_by_seat_event_ref[seat_event_ref] does not exist:
+      RETURN driver_request_not_a_seat(seat_event_ref)          # AI4: not a driver seat — nothing to complete (the common case)
+    SET drid <- RunContext.driver_request_by_seat_event_ref[seat_event_ref]
+    # AI4: transition SEATED -> CONSUMED through the guarded mutator (a request already CANCELLED via CancelQueuedEvent yields a
+    #   status_mismatch and is left terminal — never resurrected to CONSUMED).
+    RETURN CALL SetDriverRequestStatus(RunContext, drid, expected_status = SEATED, new_status = CONSUMED, disposition = disposition)
+  RETURNS: (SetDriverRequestStatus result) | driver_request_not_a_seat(seat_event_ref)
 
 PROCEDURE SeatPendingDriverRequests                          # AG4/AH4/AH6: the named SIM-DRIVER intake — routes each PENDING request to its owner
   INPUTS: RunContext
@@ -1537,31 +1802,48 @@ PROCEDURE SeatPendingDriverRequests                          # AG4/AH4/AH6: the 
                  than an already-selected t (there is no selected t at admission time). Each owner is idempotent (AH3), so a
                  re-intake of a SEATED request seats nothing new. current_round_context must be non-null.
   EFFECTS:
-    # AH5: non-genesis intake needs a round. (First-round miners come from genesis_miner_registry imported by RoundInitialise,
-    #   not from this intake, so no registration is silently lost before the first round exists.)
+    # AH5: non-genesis intake needs a round. (First-round miners come from genesis_miner_registry imported by RoundInitialise and
+    #   seated IN-DISPATCH by RoundInitialiseEvent, AI1 — not from this intake, so no registration is silently lost before the
+    #   first round exists.)
     IF RunContext.current_round_context = null: RETURN driver_intake_no_round
+    SET rc <- RunContext.current_round_context
     SET seated_count <- 0 ; SET rejected_count <- 0
-    # AH4: iterate the PENDING driver_request records in a STABLE deterministic order (by DriverRequestID). Route each to its
-    #   named owner, INSPECT the structured result (AH6), and TERMINALISE the EXACT record — a seated request becomes SEATED
-    #   and LEAVES the pending index; a rejected request becomes REJECTED and leaves the index; a replay stays SEATED. No
-    #   seated request is ever left permanently PENDING.
+    # AH4: iterate the PENDING driver_request records in a STABLE deterministic order (by DriverRequestID). AI5: CHECK round
+    #   state + scope BEFORE routing to the seat owner. A seated request LEAVES the pending index and becomes SEATED (the seat
+    #   owner does that atomically with the seat, AI4); a rejected/stale-scope request becomes REJECTED and leaves the index;
+    #   no seated request is ever left permanently PENDING.
     FOR EACH drid IN SORT(RunContext.pending_driver_request_index BY DriverRequestID ascending):
       SET dr <- RunContext.driver_request_registry[drid]
-      IF dr.status != PENDING: CONTINUE                          # AH4: only PENDING requests are admitted
+      IF dr.status != PENDING: CONTINUE                          # AH4/AI4: only PENDING requests are admitted (a SEATED/terminal one is skipped)
+      # AI5: SCOPE + ROUND-STATE gate. An EXACT_ROUND(rid) request may execute ONLY against the round whose RoundID = rid and only
+      #   while that round still admits its event_type; a NEXT_AVAILABLE_ROUND join waits (stays PENDING) if the current round no
+      #   longer admits registration; a stale EXACT_ROUND scope (its round is terminal or a different round is active) is REJECTED
+      #   here — NEVER silently seated under a terminal round and then executed against a new round.
+      SET scope_ok <- SCOPE_ADMITS(dr.round_scope, dr.kind, rc)   # AI5: EXACT_ROUND matches rc.RoundID + admitting state; NEXT_AVAILABLE admits vs rc; RUN_LEVEL n/a here
+      IF scope_ok = SCOPE_STALE:
+        CALL SetDriverRequestStatus(RunContext, drid, expected_status = PENDING, new_status = REJECTED,
+                                    disposition = driver_request_scope_stale(dr.round_scope, rc.RoundID))   # AI5: declared stale-scope rejection
+        REMOVE drid FROM RunContext.pending_driver_request_index ; SET rejected_count <- rejected_count + 1
+        RECORD driver_request_rejected(drid, dr.kind, driver_request_scope_stale(dr.round_scope, rc.RoundID))
+        CONTINUE
+      IF scope_ok = SCOPE_WAIT: CONTINUE                          # AI5: NEXT_AVAILABLE_ROUND not yet admissible — leave PENDING for a later round
+      # scope_ok = SCOPE_ADMIT — route to the named owner as a DRIVER-intake seat.
       SWITCH dr.kind:
-        CASE MINER_JOIN:              SET res <- CALL SeatMinerRegister(RunContext, driver_request = dr)   # AG4/AH1 DRIVER seat
-        CASE ORDINARY_RESERVE_DEFICIT: SET res <- CALL SeatReserveActivate(RunContext, driver_request = dr) # AG4/AH1 DRIVER seat
+        CASE MINER_JOIN:              SET res <- CALL SeatMinerRegister(RunContext, driver_request = dr, admission_mode = DRIVER_INTAKE)   # AG4/AH1/AI1 DRIVER seat
+        CASE ORDINARY_RESERVE_DEFICIT: SET res <- CALL SeatReserveActivate(RunContext, driver_request = dr)   # AG4/AH1 DRIVER seat
       SWITCH res:
-        CASE miner_register_seated(_, event_ref) | reserve_activate_seated(_, event_ref):
-          SET dr.status <- SEATED ; SET dr.seated_event_ref <- event_ref
-          SET dr.disposition <- driver_request_seated(event_ref)
-          REMOVE drid FROM RunContext.pending_driver_request_index ; SET seated_count <- seated_count + 1
+        CASE miner_register_seated(_, _) | reserve_activate_seated(_, _):
+          SET seated_count <- seated_count + 1                    # AI4: the seat owner ALREADY set SEATED + reverse binding + cleared the index
         CASE miner_register_already_seated(_, event_ref) | reserve_activate_already_seated(_, event_ref):
-          SET dr.status <- SEATED ; SET dr.seated_event_ref <- event_ref
-          SET dr.disposition <- driver_request_replay_noop(event_ref)   # AH3: replay — the SAME EventRef; leaves nothing pending
+          # AH3: replay — the SAME EventRef. The request should already be terminalised; defensively ensure it leaves the index.
+          IF dr.status = PENDING:
+            CALL SetDriverRequestStatus(RunContext, drid, expected_status = PENDING, new_status = SEATED,
+                                        disposition = driver_request_replay_noop(event_ref))
+            SET RunContext.driver_request_registry[drid].seated_event_ref <- event_ref
           REMOVE drid FROM RunContext.pending_driver_request_index
         CASE miner_register_seat_failed(_, reason) | reserve_activate_seat_failed(_, reason):
-          SET dr.status <- REJECTED ; SET dr.disposition <- driver_request_rejected(reason)   # AH6: declared rejection disposition
+          CALL SetDriverRequestStatus(RunContext, drid, expected_status = PENDING, new_status = REJECTED,
+                                      disposition = driver_request_rejected(reason))   # AH6/AI4: declared rejection through the guarded mutator
           REMOVE drid FROM RunContext.pending_driver_request_index ; SET rejected_count <- rejected_count + 1
           RECORD driver_request_rejected(drid, dr.kind, reason)
     RETURN driver_intake_completed(seated_count, rejected_count)
@@ -2646,6 +2928,29 @@ STRUCTURE RunContext (per-RUN; Q5 — the SOLE owner of run-level runtime state)
   rebased_boundaries          : L5/M4 — set of boundary_ids already settled by SettleResidencyBoundary (§1a)
   run_finalised               : N1 — boolean; guards the single run-end finalisation (§20a)
   run_horizon_T               : O2 — the fixed simulation horizon T (mirrored in EventQueueContext for ScheduleEvent)
+  last_finalised_event_time   : AI2 — the AUTHORITATIVE run-level simulation frontier: the LATEST event_time whose
+                                : ProcessEventTime epilogue has completed (the maximum of finalised_event_times), or NONE
+                                : before any event_time is finalised. It is the SINGLE source of truth for "how far the
+                                : simulation has advanced"; ProcessEventTime is its SOLE writer (set after ADD t to
+                                : finalised_event_times, §1). AdmitDriverRequest reads it as the authoritative
+                                : driver_admission_time floor (a request may not be admitted at a time already behind the
+                                : frontier), and ScheduleEvent's DRIVER / TERMINAL_ROTATION cases reject a target behind it
+                                : (rejected_driver_target_before_simulation_frontier) — so the simulation can NEVER move from a
+                                : later processed time back to an earlier newly-admitted driver time. NOT a copy of any
+                                : requested_event_time; it advances monotonically as ProcessEventTime finalises event_times.
+  terminal_publication_result : AI6 — the STORED result of the most recent terminal-round publication
+                                : (PublishTerminalRoundAndSeatNext, captured by CloseRoundAssignments): one of
+                                : terminal_round_published_and_seated / terminal_round_published_no_seat /
+                                : terminal_round_published_seat_failed(reason). null until the first terminal closure. The run
+                                : controller inspects it — a discarded publication result (the AH defect) is REMOVED.
+  next_round_bootstrap_status : AI6 — run-level state in { OK, NEXT_ROUND_BOOTSTRAP_FAILED }. OK until a terminal closure's
+                                : publication returns terminal_round_published_seat_failed; then set NEXT_ROUND_BOOTSTRAP_FAILED.
+                                : RunEventLoopToHorizon inspects it and applies the DETERMINISTIC failure policy: it TERMINATES the
+                                : run with a declared PARTIAL-RUN disposition (run_completed_partial(next_round_bootstrap_failed))
+                                : rather than looping forever with no next round seated. (A bounded retry at a declared future time
+                                : is a documented ALTERNATIVE policy; the chosen deterministic policy here is terminate-partial,
+                                : because a run-loop re-seat of a rotation bootstrap is an outside-dispatch DRIVER seat and would
+                                : blur the AI8 TERMINAL_ROTATION-vs-DRIVER origin truthfulness — so the spec commits to terminate.)
   # per-run security-census/registries (I-01/I-04; keyed by event_time / TransitionEventID, monotonic across rounds):
   security_census_dirty, latest_security_census, applied_transition_registry, transition_rejection_log
   security_census_write_seq_by_event_time   : R5 — map event_time -> monotonic census-write ordinal. The EXPLICIT
@@ -2692,14 +2997,52 @@ STRUCTURE RunContext (per-RUN; Q5 — the SOLE owner of run-level runtime state)
                                 : payload, status : DriverRequestStatus, seated_event_ref : EventRef | null, disposition }. The
                                 : SINGLE authoritative record of every sim-driver request (miner join / ordinary reserve deficit);
                                 : it REPLACES the AG4 bare pending sets (pending_join_requests / pending_ordinary_reserve_deficits)
-  driver_request_seq          : AH4 — monotonic per-run ordinal for DriverRequestID = (RunID, driver_request_seq)
+  driver_request_seq          : AH4 — monotonic per-run ordinal for DriverRequestID = (RunID, driver_request_seq); AI3: advanced
+                                : ONLY when a GENUINELY NEW logical request is admitted (never on a replay)
   pending_driver_request_index : AH4 — the SET of DriverRequestIDs whose status = PENDING (the admission worklist). A request is
                                 : REMOVED from the index (and terminalised in the registry) on a successful seat or a rejection;
                                 : a SEATED/CONSUMED/REJECTED/CANCELLED request never lingers in the index
+  driver_request_by_logical_id : AI3 — map DriverRequestLogicalID -> DriverRequestID. The STABLE-identity replay registry:
+                                : AdmitDriverRequest derives the logical id (ExternalDriverRequestID: a deterministic JoinRequestID
+                                : for a MINER_JOIN, a deterministic ReserveActivationRequestID for an ORDINARY_RESERVE_DEFICIT)
+                                : BEFORE advancing driver_request_seq, checks this registry, and on a HIT returns
+                                : driver_request_already_admitted with the SAME DriverRequestID — so a replayed admission NEVER
+                                : mints a second DriverRequestID / EventRef / protocol effect. Initialised empty at run start
+  driver_request_by_seat_event_ref : AI4 — map EventRef -> DriverRequestID. The IMMUTABLE reverse binding published ATOMICALLY with
+                                : the seat by the seat owner (SeatMinerRegister / SeatReserveActivate): it lets the dispatcher's
+                                : request-completion owner (CompleteDriverRequestOnDispatch, called by ProcessEventTime after the
+                                : seat event dispatches) resolve the EXACT request from the TRUSTED seat EventRef (never the payload)
+                                : and transition it SEATED -> CONSUMED, and lets CancelQueuedEvent reconcile a cancelled seat to
+                                : CANCELLED. Initialised empty at run start
   genesis_miner_registry      : AH5 (Option A) — the DECLARED initial miner set for the FIRST round (from config), imported by the
                                 : first RoundInitialise so first-round admission is NOT skipped; empty after the first round imports it
-  # DriverRequestStatus in { PENDING, SEATED, CONSUMED, REJECTED, CANCELLED }   # AH4
+  # DriverRequestStatus in { PENDING, SEATED, CONSUMED, REJECTED, CANCELLED }   # AH4/AI4
   # DriverRequestKind   in { MINER_JOIN, ORDINARY_RESERVE_DEFICIT }             # AH4
+  # AI4 — DriverRequestStatus LEGAL TRANSITION TABLE (the ONLY edges SetDriverRequestStatus permits; any other edge is a
+  #   declared driver_request_illegal_transition, NEVER a silent overwrite):
+  #     PENDING -> SEATED   | REJECTED | CANCELLED
+  #     SEATED  -> CONSUMED | CANCELLED
+  #     CONSUMED and REJECTED and CANCELLED are TERMINAL (no outgoing edge).
+  #   In particular a CONSUMED / CANCELLED request can NEVER be driven back to SEATED (no SEATED-while-CONSUMED/CANCELLED),
+  #   and every mutation goes through the single guarded mutator SetDriverRequestStatus (no procedure writes dr.status directly).
+  # AI5 — DriverRoundScope in { EXACT_ROUND(RoundID), NEXT_AVAILABLE_ROUND, RUN_LEVEL }: the round scope a driver_request is
+  #   validated against. EXACT_ROUND(rid) may execute ONLY against the RoundContext whose RoundID = rid (never a different /
+  #   later round); NEXT_AVAILABLE_ROUND is a join that may be satisfied by the current admitting round or wait for the next;
+  #   RUN_LEVEL is a run-scoped request not bound to any single round. An ORDINARY_RESERVE_DEFICIT is ALWAYS EXACT_ROUND (a
+  #   reserve activation is meaningless against a different round); a MINER_JOIN declares EXACT_ROUND (genesis) or
+  #   NEXT_AVAILABLE_ROUND (a later external join). SeatPendingDriverRequests checks round state + scope BEFORE seating.
+  # AI5 — Notation `SCOPE_ADMITS(round_scope, kind, rc)` denotes the scope/round-state gate the intake consults, returning one of
+  #   { SCOPE_ADMIT, SCOPE_WAIT, SCOPE_STALE } (a lowercase notation, NOT a CALL target). `round_admits(kind, rc)` is TRUE iff rc's
+  #   round_state still admits kind's event_type (a MINER_JOIN needs a registration-admitting state; an ORDINARY_RESERVE_DEFICIT
+  #   needs rc.round_state in {SECURITY_RECOVERY, ASSIGNMENT}) and rc is NOT terminal (ROUND_ACCEPTED / ROUND_ABORTED). Then:
+  #     EXACT_ROUND(rid):        rid = rc.RoundID AND round_admits(kind, rc) -> SCOPE_ADMIT;
+  #                              rid = rc.RoundID AND NOT round_admits(kind, rc) -> SCOPE_STALE;   # its round is terminal / no longer admits
+  #                              rid != rc.RoundID -> SCOPE_STALE                                  # a DIFFERENT round is active — never seat here
+  #     NEXT_AVAILABLE_ROUND:    round_admits(kind, rc) -> SCOPE_ADMIT ELSE SCOPE_WAIT             # waits (stays PENDING) for the next admitting round
+  #     RUN_LEVEL:               SCOPE_STALE                                                       # a bootstrap-only scope; never routed through the join/reserve intake
+  #   SCOPE_STALE -> the intake REJECTS the request (declared driver_request_scope_stale); SCOPE_WAIT -> it is left PENDING; only
+  #   SCOPE_ADMIT routes to the seat owner. This is why no EXACT_ROUND request is ever silently seated under a terminal round and
+  #   then executed against a new round (AI5).
   # AH2: round_bootstrap_time (the AG fixed `config.run_start_time` target for EVERY round) is REMOVED — every round's
   #   bootstrap target is the per-round BootstrapRequest.target_time (STAGE_01AH_SUPERSESSION_REGISTER.md).
 
@@ -2714,15 +3057,30 @@ STRUCTURE BootstrapRequest (AH2/AH3 — the IMMUTABLE per-round bootstrap reques
                                 : target_time > predecessor_terminal_time (a rotation) AND target_time <= run_horizon_T; NO
                                 : subsequent bootstrap ever reuses config.run_start_time
 
-STRUCTURE driver_request (AH4 — the EXPLICIT record of one sim-driver request; REPLACES the AG bare pending sets)
+STRUCTURE driver_request (AH4/AI2/AI3/AI4/AI5 — the EXPLICIT record of one sim-driver request; REPLACES the AG bare pending sets)
   DriverRequestID             : (RunID, driver_request_seq) — the immutable per-run identity (AH3/AH4: distinct requests -> distinct ids)
+  logical_request_id          : AI3 — the STABLE logical identity (ExternalDriverRequestID) derived at admission from the request's
+                                : own content (a deterministic JoinRequestID for a MINER_JOIN; a deterministic
+                                : ReserveActivationRequestID for an ORDINARY_RESERVE_DEFICIT), BEFORE any DriverRequestID is minted.
+                                : It is the key of driver_request_by_logical_id; a replayed admission of the SAME logical request
+                                : returns the SAME DriverRequestID and mints NO second identity / EventRef / effect (AI3)
   kind                        : DriverRequestKind in { MINER_JOIN, ORDINARY_RESERVE_DEFICIT }
-  requested_event_time        : the admissible SOURCE/target event_time for the seated event (the join arrival time; the deficit
-                                : detection time). A seat targets requested_event_time; AH1 rejects a target before it.
+  driver_admission_time       : AI2 — the AUTHORITATIVE time at which this request was admitted (from the run-level simulation
+                                : frontier RunContext.last_finalised_event_time, NOT a copy of requested_event_time). It is the
+                                : source_event_time the seat owner carries to ScheduleEvent, and the floor requested_event_time
+                                : must not fall below (AdmitDriverRequest rejects a requested_event_time earlier than this)
+  requested_event_time        : the admissible TARGET event_time for the seated event (the join arrival time; the deficit detection
+                                : time). A seat targets requested_event_time; AI2 requires requested_event_time >= driver_admission_time
+                                : AND (at seat time) not behind the simulation frontier (ScheduleEvent DRIVER validation).
+  round_scope                 : AI5 — the DriverRoundScope this request is validated against (EXACT_ROUND(RoundID) /
+                                : NEXT_AVAILABLE_ROUND / RUN_LEVEL). ORDINARY_RESERVE_DEFICIT is ALWAYS EXACT_ROUND; a MINER_JOIN
+                                : is EXACT_ROUND (genesis) or NEXT_AVAILABLE_ROUND (a later external join)
   payload                     : MINER_JOIN -> { join_request }; ORDINARY_RESERVE_DEFICIT -> { RoundID_at_seat, deficit }
-  status                      : DriverRequestStatus in { PENDING, SEATED, CONSUMED, REJECTED, CANCELLED }
+  status                      : DriverRequestStatus in { PENDING, SEATED, CONSUMED, REJECTED, CANCELLED }   # AI4: mutated ONLY via SetDriverRequestStatus
   seated_event_ref            : EventRef | null — the seated wrapper EventRef (set on SEATED; null while PENDING/REJECTED)
-  disposition                 : the terminal disposition recorded on SEATED / REJECTED / CANCELLED (audit)
+  disposition                 : the disposition recorded on each transition (SEATED / CONSUMED / REJECTED / CANCELLED) (audit)
+  consumed_result             : AI4 — the ACTUAL handler result recorded when the seat event dispatches and the request becomes
+                                : CONSUMED (the driver_request_consumed(handler_result) disposition's payload); null until CONSUMED
 
 PROCEDURE RunInitialise                                         # Q5: creates ALL per-run fields ONCE at run start
   INPUTS: config (horizon T, ...)
@@ -2735,6 +3093,9 @@ PROCEDURE RunInitialise                                         # Q5: creates AL
     INITIALISE RunHookContext WITH run_hook_seq = 0, applied_run_hook_ids = empty set        # P2 (run-hook envelope owner)
     INITIALISE rebased_boundaries          <- empty set     # L5
     INITIALISE run_finalised               <- false         # N1
+    INITIALISE last_finalised_event_time   <- NONE          # AI2: the authoritative simulation frontier (advanced ONLY by ProcessEventTime; NONE until the first event_time is finalised)
+    INITIALISE terminal_publication_result <- null          # AI6: the stored last terminal-round publication result (null until the first terminal closure)
+    SET        next_round_bootstrap_status  <- OK           # AI6: run-level next-bootstrap health (-> NEXT_ROUND_BOOTSTRAP_FAILED on a failed publication)
     INITIALISE security_census_dirty       <- empty map     # I-01
     INITIALISE latest_security_census      <- empty map     # I-01
     INITIALISE security_census_write_seq_by_event_time <- empty map   # R5: explicit census-write ordinal (sole owner: CommitSecurityCensus)
@@ -2763,8 +3124,13 @@ PROCEDURE RunInitialise                                         # Q5: creates AL
     INITIALISE driver_request_registry     <- empty map       # AH4: DriverRequestID -> driver_request (REPLACES the AG bare pending sets)
     SET        driver_request_seq          <- 0               # AH4: monotonic DriverRequestID ordinal
     INITIALISE pending_driver_request_index <- empty set      # AH4: the PENDING DriverRequestID worklist (admission)
+    INITIALISE driver_request_by_logical_id <- empty map      # AI3: DriverRequestLogicalID -> DriverRequestID (stable-identity replay registry)
+    INITIALISE driver_request_by_seat_event_ref <- empty map  # AI4: EventRef -> DriverRequestID (immutable reverse binding, published with the seat)
     SET        genesis_miner_registry      <- config.initial_miner_set        # AH5 (Option A): the declared first-round miner set
   RETURNS: RunContext(RunID, EventQueueContext = EQ, RunHookContext, rebased_boundaries, run_finalised,
+                      last_finalised_event_time = NONE,   # AI2: the authoritative simulation frontier
+                      terminal_publication_result = null, next_round_bootstrap_status = OK,   # AI6
+
                       run_horizon_T = config.horizon_T, security_census_dirty, latest_security_census,
                       security_census_write_seq_by_event_time,   # R5
                       applied_transition_registry, transition_rejection_log,
@@ -2774,7 +3140,8 @@ PROCEDURE RunInitialise                                         # Q5: creates AL
                       driver_event_seat, next_round_setup_seq,
                       bootstrap_request_registry, current_bootstrap_request,       # AH2/AH3
                       driver_request_registry, driver_request_seq, pending_driver_request_index,   # AH4
-                      genesis_miner_registry)   # Z1/Z5/AF6/AG4/AH2/AH3/AH4/AH5
+                      driver_request_by_logical_id, driver_request_by_seat_event_ref,   # AI3/AI4
+                      genesis_miner_registry)   # Z1/Z5/AF6/AG4/AH2/AH3/AH4/AH5/AI3/AI4
   NOTE: Q5/AF6: the ONE-TIME owner of EVERY per-run field. RunContext CONTAINS and RunInitialise RETURNS all of them —
         EventQueueContext (EQ), queued_event_registry, setup_retry_records, setup_retry_by_seat_event_ref,
         applied_transition_registry, transition_rejection_log, the security-census maps/counters
@@ -2856,17 +3223,22 @@ PROCEDURE RoundInitialise
       SET boundary_id <- (prior_state.RoundID, RoundID_current)                     # L5: deterministic boundary id
       CALL SettleResidencyBoundary(this RoundContext, mode = REBASE_TO_NEXT_ROUND,
                                    boundary_id = boundary_id, prior_state = prior_state)   # M4/L5 (single owner; idempotent)
-    # AH5 (Option A): FIRST-ROUND MINER ADMISSION — the genesis set is IMPORTED here so first-round admission is NEVER skipped.
-    #   RoundInitialise itself performs NO ApplyMinerStateTransition (§0.7g-driver): it ADMITS a MINER_JOIN driver_request per
-    #   genesis miner (AH4 producer) at the round-setup event_time and records the initial-registration BARRIER = the declared
-    #   genesis MinerID set that must register before participant setup. SeatPendingDriverRequests (run BEFORE the next
-    #   selection, §0.7d-run) seats those MinerRegisterEvents; MinerRegister satisfies the barrier as each genesis miner
-    #   registers. genesis_miner_registry is consumed EXACTLY ONCE. (Later arrivals use AdmitDriverRequest directly — AH4.)
+    # AH5 (Option A) / AI1 / AI5: FIRST-ROUND MINER ADMISSION — the genesis set is IMPORTED here so first-round admission is NEVER
+    #   skipped. RoundInitialise itself performs NO ApplyMinerStateTransition (§0.7g-driver): it ADMITS a MINER_JOIN driver_request
+    #   per genesis miner (AH4 producer) at the round-setup event_time t0, with round_scope = EXACT_ROUND(RoundID_current) (AI5: a
+    #   genesis registration belongs to THIS round, never a later one), and records the initial-registration BARRIER = the declared
+    #   genesis MinerID set that must register before participant setup. AI1: the SEATING of these requests is NOT deferred to the
+    #   outer-loop SeatPendingDriverRequests (which runs after t0 is finalised -> rejected_finalised_time); the RoundInitialiseEvent
+    #   handler seats each one SYNCHRONOUSLY at t0 (IN_DISPATCH_GENESIS) immediately after this returns. MinerRegister satisfies the
+    #   barrier as each genesis miner registers. genesis_miner_registry is consumed EXACTLY ONCE. (Later arrivals use
+    #   AdmitDriverRequest directly with NEXT_AVAILABLE_ROUND scope — AH4/AI5.)
     IF prior_state = null AND RunContext.genesis_miner_registry is non-empty:
       SET expected <- empty set
       FOR EACH genesis_entry g IN SORT(RunContext.genesis_miner_registry BY MinerID ascending):
-        CALL AdmitDriverRequest(RunContext, kind = MINER_JOIN, requested_event_time = EQ.current_event_time,
-                                payload = { join_request = g.join_request })   # AH4/AH5: a genesis join request
+        SET g_adm <- CALL AdmitDriverRequest(RunContext, kind = MINER_JOIN, requested_event_time = EQ.current_event_time,
+                                round_scope = EXACT_ROUND(RoundID_current),
+                                payload = { join_request = g.join_request })   # AH4/AH5/AI5: a genesis join request scoped to THIS round
+        ASSERT g_adm = driver_request_admitted(_)               # AI1/AI3: a fresh genesis join always admits (distinct logical ids; t0 >= admission time)
         ADD MinerID(g.join_request) TO expected
       SET initial_registration_barrier <- { expected = expected, registered = empty set, satisfied = false }   # AH5: not yet complete
       SET RunContext.genesis_miner_registry <- empty          # AH5: imported exactly once
@@ -3614,21 +3986,40 @@ PROCEDURE MinerRegister
     #   and — if the template has already committed (round_state = ASSIGNMENT, so TemplateCommitEvent deferred participant
     #   setup) — seat participant setup EXACTLY ONCE through its idempotent owner. This guarantees
     #   PrepareParticipantsForNewRound never runs before the declared initial miner set is complete (AH5).
-    IF MinerID in RoundContext.initial_registration_barrier.expected:
-      ADD MinerID TO RoundContext.initial_registration_barrier.registered
-      IF RoundContext.initial_registration_barrier.registered CONTAINS every member of RoundContext.initial_registration_barrier.expected
-         AND NOT RoundContext.initial_registration_barrier.satisfied:
-        SET RoundContext.initial_registration_barrier.satisfied <- true          # AH5: declared initial miner set complete
-        IF round_state = ASSIGNMENT AND TemplateID_committed != null:
-          SET abort_envelope <- { envelope_namespace = ORDINARY_EVENT, event_time = EQ.current_event_time,
-                                  delta_cycle = EQ.current_delta_cycle, event_seq = EQ.current_event_seq, hook_id = null }   # dispatched MinerRegisterEvent frame
-          CALL SeatParticipantSetupOrAbort(RoundContext.RunContext, RoundContext,
-                 RoundID_at_seat = RoundID_current, TemplateID_at_seat = TemplateID_committed, abort_envelope = abort_envelope)   # AH5/AH6: seat once ready (idempotent)
-  RETURNS: MinerID
+    # AI7: this registration is NOT a barrier member (or the barrier was already satisfied) -> plain success.
+    IF MinerID NOT in RoundContext.initial_registration_barrier.expected:
+      RETURN miner_registered(MinerID)                                          # AI7: ordinary (non-genesis) registration
+    ADD MinerID TO RoundContext.initial_registration_barrier.registered
+    IF NOT ( RoundContext.initial_registration_barrier.registered CONTAINS every member of RoundContext.initial_registration_barrier.expected )
+       OR RoundContext.initial_registration_barrier.satisfied:
+      RETURN miner_registered_barrier_pending(MinerID)                          # AI7: registered; the declared genesis set is not yet complete
+    SET RoundContext.initial_registration_barrier.satisfied <- true            # AH5: declared initial miner set complete
+    # AH5: the barrier just completed. If the template already committed (round_state = ASSIGNMENT, TemplateCommitEvent deferred
+    #   participant setup), seat participant setup NOW through the idempotent owner and INSPECT the result (AI7): a seat failure
+    #   is a declared round abort, NOT a plain success. If the template has not yet committed, participant setup will be seated by
+    #   TemplateCommitEvent itself (barrier now satisfied), so this registration reports barrier_pending-complete via _seated only
+    #   once a seat actually occurs here.
+    IF NOT (round_state = ASSIGNMENT AND TemplateID_committed != null):
+      RETURN miner_registered_barrier_pending(MinerID)                          # AI7: barrier complete but template not yet committed — TemplateCommitEvent will seat participant setup
+    SET abort_envelope <- { envelope_namespace = ORDINARY_EVENT, event_time = EQ.current_event_time,
+                            delta_cycle = EQ.current_delta_cycle, event_seq = EQ.current_event_seq, hook_id = null }   # dispatched MinerRegisterEvent frame
+    SET ps <- CALL SeatParticipantSetupOrAbort(RoundContext.RunContext, RoundContext,
+                 RoundID_at_seat = RoundID_current, TemplateID_at_seat = TemplateID_committed, abort_envelope = abort_envelope)   # AH5/AH6/AI7: seat once ready (idempotent) + INSPECT
+    SWITCH ps:
+      CASE participant_setup_seated(_):          RETURN miner_registered_participant_setup_seated(MinerID)          # AI7
+      CASE participant_setup_already_seated:      RETURN miner_registered_participant_setup_already_seated(MinerID)  # AI7
+      CASE participant_setup_aborted(reason):     RETURN miner_registered_participant_setup_aborted(MinerID, reason) # AI7: NO plain success after an abort
+  RETURNS: miner_registered(MinerID) | miner_registered_barrier_pending(MinerID) |
+           miner_registered_participant_setup_seated(MinerID) | miner_registered_participant_setup_already_seated(MinerID) |
+           miner_registered_participant_setup_aborted(MinerID, participant_setup_seat_failed_round_abort(reason))
   NOTE: Registration is the precondition for any assignment. Sybil considerations are OUT OF
         SCOPE at Stage 1 (see STAGE_01_THREAT_MODEL.md); this procedure does not claim Sybil
-        resistance. AH5: MinerRegister also advances the FIRST round's initial-registration barrier and, on the barrier's
-        completion during ASSIGNMENT, seats participant setup through the idempotent SeatParticipantSetupOrAbort owner.
+        resistance. AH5/AI7: MinerRegister also advances the FIRST round's initial-registration barrier and, on the barrier's
+        completion during ASSIGNMENT, seats participant setup through the idempotent SeatParticipantSetupOrAbort owner AND
+        INSPECTS the result — returning a DISTINCT disposition (barrier_pending / participant_setup_seated / _already_seated /
+        _aborted(reason)) so no caller returns a plain success after a participant-setup abort. The driver_request the seat came
+        from stores this SAME final disposition as its consumed_result when the MinerRegisterEvent dispatch completes
+        (CompleteDriverRequestOnDispatch, AI4).
 ```
 
 ## 4. Range assignment
@@ -6389,8 +6780,14 @@ PROCEDURE ValidBlockAccept
     TRANSITION round_state -> ROUND_ACCEPTED                      # bumps state_version (G10)
     # D7: centralised round closure (the SINGLE closure path); paused miners of cancelled candidates
     #     are closed by round closure (ROUND_ACCEPTED), NOT resumed.
-    CALL CloseRoundAssignments(RoundContext, disposition = ROUND_ACCEPTED, stop_reason = ROUND_ACCEPTED,
-                               dispatch_envelope = dispatch_envelope)   # M1: threaded envelope
+    SET clo <- CALL CloseRoundAssignments(RoundContext, disposition = ROUND_ACCEPTED, stop_reason = ROUND_ACCEPTED,
+                               dispatch_envelope = dispatch_envelope)   # M1: threaded envelope; AI6: INSPECT the closure record
+    # AI6: INSPECT the terminal-publication disposition (never discard it, the AH defect). CloseRoundAssignments has already
+    #   stored clo.publication_result in RunContext.terminal_publication_result and, on a next-round seat failure, set the
+    #   run-level NEXT_ROUND_BOOTSTRAP_FAILED state that RunEventLoopToHorizon acts on — so a failed rotation after an
+    #   ordinary acceptance is propagated to the run controller, not swallowed here.
+    ASSERT clo = closure_record(publication_result = RoundContext.RunContext.terminal_publication_result)   # AI6: the run controller sees the same result
+    RETURN accepted_block                                          # G8: acceptance result unchanged; the publication disposition rides on RunContext (AI6)
   RETURNS: accepted_block | not_selected
   NOTE: G8: a valid accepted candidate closes the round from SOLUTION_PROPAGATION OR SECURITY_RECOVERY.
         Acceptance sets the winner ACCEPTED, marks all other live candidates COMPETING/STALE/CANCELLED,
@@ -6511,8 +6908,16 @@ PROCEDURE CloseRoundAssignments
     #   BootstrapRequest with a PER-ROUND target time -> seat the next bootstrap -> inspect + store the seating result). This
     #   UNIFIES ordinary acceptance (ValidBlockAccept), ordinary abort (RoundAbort), and horizon closure (CloseRoundAtHorizon)
     #   through a single procedure; a horizon / run-hook close publishes the terminal state but seats NO next round (AH2).
-    CALL PublishTerminalRoundAndSeatNext(RoundContext, disposition = disposition, dispatch_envelope = dispatch_envelope)   # AH2/AH6
-  RETURNS: closure_record
+    # AI6: CAPTURE the publication result — do NOT discard it (the AH defect). STORE it in RunContext.terminal_publication_result
+    #   and, on a next-round seat failure, set the run-level NEXT_ROUND_BOOTSTRAP_FAILED state so the run controller applies the
+    #   deterministic failure policy (bounded retry / declared PARTIAL-RUN terminate). Return the closure_record WITH the disposition.
+    SET pub <- CALL PublishTerminalRoundAndSeatNext(RoundContext, disposition = disposition, dispatch_envelope = dispatch_envelope)   # AH2/AH6/AI6
+    SET RoundContext.RunContext.terminal_publication_result <- pub   # AI6: stored (never discarded)
+    IF pub = terminal_round_published_seat_failed(_, reason):
+      SET RoundContext.RunContext.next_round_bootstrap_status <- NEXT_ROUND_BOOTSTRAP_FAILED   # AI6: run controller will act
+      RECORD next_round_bootstrap_failed(RoundID_current, reason)    # AI6
+    RETURN closure_record(publication_result = pub)                  # AI6: the closure carries the publication disposition
+  RETURNS: closure_record(publication_result)
   NOTE: This is the ONLY round-closure path. ValidBlockAccept calls it with ROUND_ACCEPTED;
         RoundAbort calls it with ROUND_ABORTED. Only an ACTIVE_HASHING holder receives the
         disposition as its entry_stop_reason (it had none); every already-stopped holder keeps its
@@ -6879,9 +7284,13 @@ PROCEDURE RoundAbort
     #     dispatch_envelope.event_time` (the abort event_time), publishes prior_round_terminal_state (which the next round's
     #     RoundInitialise / SettleResidencyBoundary REBASE_TO_NEXT_ROUND or the run-end FinalizeSimulationRun reads), and — for
     #     an ordinary (non-horizon) abort with simulated time remaining — creates the immutable next BootstrapRequest and seats it.
-    CALL CloseRoundAssignments(RoundContext, disposition = ROUND_ABORTED, stop_reason = ROUND_ABORTED,
+    SET clo <- CALL CloseRoundAssignments(RoundContext, disposition = ROUND_ABORTED, stop_reason = ROUND_ABORTED,
                                dispatch_envelope = dispatch_envelope,
-                               recovery_finalising = recovery_finalising)   # M1: threaded envelope; S4: finalising-abort flag
+                               recovery_finalising = recovery_finalising)   # M1: threaded envelope; S4: finalising-abort flag; AI6: INSPECT the closure
+    # AI6: INSPECT the terminal-publication disposition (never discard it). CloseRoundAssignments stored clo.publication_result
+    #   in RunContext.terminal_publication_result and, on a next-round seat failure, set the run-level NEXT_ROUND_BOOTSTRAP_FAILED
+    #   state RunEventLoopToHorizon acts on — so a failed rotation after an ordinary abort reaches the run controller.
+    ASSERT clo = closure_record(publication_result = RoundContext.RunContext.terminal_publication_result)   # AI6
     # N1: RoundAbort performs NO residency settle. The former `SettleResidencyBoundary(FINAL_RUN_END)` and
     #     the `ASSERT durations reconcile to horizon T` are REMOVED -- an abort at t < T must NEVER close
     #     residency at the horizon T. The residency boundary is settled ONLY by SettleResidencyBoundary, via
@@ -6954,6 +7363,8 @@ PROCEDURE FinalizeSimulationRunNoRound                          # AH6: safe run 
     #   finalise T (so no ordinary event can later be scheduled), and set run_finalised. No null RoundContext is dereferenced.
     RECORD run_no_round_disposition(RunID, reason)               # AH6: declared run-abort disposition (bootstrap_seat_failed_run_abort)
     ADD run_horizon_T TO EQ.finalised_event_times               # close T to ordinary events (no epilogue: no round/census exists)
+    IF RunContext.last_finalised_event_time = NONE OR run_horizon_T > RunContext.last_finalised_event_time:
+      SET RunContext.last_finalised_event_time <- run_horizon_T  # AI2: the frontier reaches T on the no-round finalisation too
     SET run_finalised <- true
   RETURNS: run_finalised_no_round(reason)
   NOTE: AH6: the ONLY run-finalisation path for a run whose first-round bootstrap could not be seated. It performs NO
@@ -7005,8 +7416,13 @@ PROCEDURE CloseRoundAtHorizon
     # close ALL open assignments/miner paths through the single closure path (D7); records
     # round_terminal_time(RoundID) <- run_horizon_T and moves miners off ACTIVE_HASHING. CloseRoundAssignments
     # performs NO residency finalisation (M4) — that is the subsequent FinalizeSimulationRun FINAL_RUN_END settle.
-    CALL CloseRoundAssignments(RoundContext, disposition = ROUND_ABORTED, stop_reason = ROUND_ABORTED,
-                               dispatch_envelope = horizon_envelope)       # declared horizon-end closure (D7); Q6 tagged envelope
+    SET clo <- CALL CloseRoundAssignments(RoundContext, disposition = ROUND_ABORTED, stop_reason = ROUND_ABORTED,
+                               dispatch_envelope = horizon_envelope)       # declared horizon-end closure (D7); Q6 tagged envelope; AI6: INSPECT
+    # AI6: INSPECT the terminal-publication disposition. A horizon / RUN_HOOK close publishes the terminal state but seats NO
+    #   next round (PublishTerminalRoundAndSeatNext returns terminal_round_published_no_seat), so it NEVER sets
+    #   NEXT_ROUND_BOOTSTRAP_FAILED — the run simply ends. The result is still captured (not discarded) for the record.
+    ASSERT clo = closure_record(publication_result = RoundContext.RunContext.terminal_publication_result)   # AI6
+    ASSERT RoundContext.RunContext.terminal_publication_result = terminal_round_published_no_seat(RoundID)   # AI6: horizon close seats no next round
     # Q6: mark APPLIED atomically with the completed close, so any later replay is the deterministic no-op above.
     SET RunHookContext.applied_run_hook_ids[HorizonHookID] <- APPLIED
   RETURNS: round_closed_at_horizon(RoundID, run_horizon_T, HorizonHookID)

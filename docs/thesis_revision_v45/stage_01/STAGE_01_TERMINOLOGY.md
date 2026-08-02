@@ -1263,3 +1263,51 @@ Catalogue" denotes the separate document defining I1..I19.
   not a queue key.
 - **Historical freeze.** Stage-1A–1AG lettered artifacts are unchanged; Stage-1AH supersessions (including the inaccurate
   Stage-1AG audit claims) are recorded in `STAGE_01AH_SUPERSESSION_REGISTER.md`.
+
+## Stage-1AI terminology addendum (genesis-admission, driver-request completion & rotation-result lock)
+
+- **`last_finalised_event_time` (AI2).** The AUTHORITATIVE run-level simulation frontier declared in `STRUCTURE RunContext`:
+  the latest `event_time` whose `ProcessEventTime` epilogue has completed, advanced SOLELY by `ProcessEventTime` (never a
+  copy of any requested time). It is the single source of truth for how far the simulation has advanced; `AdmitDriverRequest`
+  reads it as the `driver_admission_time` floor, and `ScheduleEvent`'s `DRIVER`/`TERMINAL_ROTATION` cases reject a target
+  behind it (`rejected_driver_target_before_simulation_frontier`).
+- **`driver_admission_time` (AI2).** The authoritative admission time recorded on every `driver_request`, derived from
+  `last_finalised_event_time` (or `config.run_start_time` before any finalisation) — NOT a copy of `requested_event_time`.
+  It is the `source_event_time` the seat owner carries to `ScheduleEvent`, and the floor `requested_event_time` may not fall
+  below (`driver_request_time_before_admission_rejected`).
+- **AI2 `ScheduleEvent` context rejections.** `rejected_driver_context_mismatch` (the carried `EventQueueContext`/`RunContext`
+  are not the ones `ScheduleEvent` was called with), `rejected_driver_kind_event_type_mismatch` (the driver kind may not seat
+  this `event_type` under `driver_kind_may_seat`), `rejected_driver_target_context_mismatch` (target ≠ the carried target),
+  `rejected_driver_target_before_simulation_frontier` (target behind the frontier). The notation
+  `driver_kind_may_seat(kind, event_type)` is the fixed kind→event_type permission predicate.
+- **`logical_request_id` / `driver_request_by_logical_id` / `driver_request_already_admitted` (AI3).** The STABLE logical
+  identity (a deterministic `JoinRequestID` for a `MINER_JOIN`, a deterministic `ReserveActivationRequestID` for an
+  `ORDINARY_RESERVE_DEFICIT`) `AdmitDriverRequest` derives BEFORE minting a `DriverRequestID`, keyed in
+  `driver_request_by_logical_id`; a replayed admission returns `driver_request_already_admitted` with the SAME
+  `DriverRequestID` and mints no second identity/event/effect.
+- **`SetDriverRequestStatus` / `CompleteDriverRequestOnDispatch` / `driver_request_by_seat_event_ref` (AI4).** The single
+  guarded status mutator (declared legal transitions `PENDING → SEATED/REJECTED/CANCELLED`, `SEATED → CONSUMED/CANCELLED`;
+  every other edge is `driver_request_illegal_transition`); the dispatcher-owned request-completion owner that resolves the
+  exact request from the TRUSTED seat `EventRef` and marks it `CONSUMED`; and the immutable reverse binding
+  `EventRef → DriverRequestID` published atomically with the seat. `consumed_result` records the actual handler result.
+- **`DriverRoundScope` (AI5).** The scope a `driver_request` is validated against:
+  `EXACT_ROUND(RoundID)` / `NEXT_AVAILABLE_ROUND` / `RUN_LEVEL`. A reserve activation is always `EXACT_ROUND`; a genesis join
+  is `EXACT_ROUND`, a later external join `NEXT_AVAILABLE_ROUND`. The notation `SCOPE_ADMITS(round_scope, kind, rc)` returns
+  `SCOPE_ADMIT` / `SCOPE_WAIT` / `SCOPE_STALE`; `SeatPendingDriverRequests` rejects a `SCOPE_STALE` request
+  (`driver_request_scope_stale`) rather than seating it under a terminal or different round.
+- **`IN_DISPATCH_GENESIS` / `DRIVER_INTAKE` (AI1).** The `admission_mode` of `SeatMinerRegister`: `IN_DISPATCH_GENESIS` seats
+  a genesis `MinerRegisterEvent` synchronously inside the dispatched `RoundInitialiseEvent` at the non-finalised `t0` (an
+  `ORDINARY_DISPATCH` origin); `DRIVER_INTAKE` seats a later external join outside dispatch (a `DRIVER` origin).
+- **`terminal_publication_result` / `NEXT_ROUND_BOOTSTRAP_FAILED` / `run_completed_partial` (AI6).** The stored result of the
+  most recent `PublishTerminalRoundAndSeatNext` (captured by `CloseRoundAssignments`, never discarded); the run-level state
+  set on a next-round seat failure; and the declared PARTIAL-RUN disposition `RunEventLoopToHorizon` returns rather than
+  spinning with no next round.
+- **`miner_registered_*` dispositions (AI7).** `MinerRegister` returns `miner_registered` (ordinary),
+  `miner_registered_barrier_pending`, `miner_registered_participant_setup_seated`,
+  `miner_registered_participant_setup_already_seated`, or `miner_registered_participant_setup_aborted(reason)` — no plain
+  success after a participant-setup abort.
+- **`TerminalRotationSchedulingContext` / `TERMINAL_ROTATION` (AI8).** The distinct fourth `SchedulingOrigin` for the
+  next-round bootstrap seated synchronously by `PublishTerminalRoundAndSeatNext`; its truthful source is a terminal rotation,
+  not a plain outside-dispatch `DRIVER` seat. `ROUND_ROTATION_BOOTSTRAP` is a `TERMINAL_ROTATION`-carried kind.
+- **Historical freeze.** Stage-1A–1AH lettered artifacts are unchanged; Stage-1AI supersessions (including the inaccurate
+  Stage-1AH audit claims) are recorded in `STAGE_01AI_SUPERSESSION_REGISTER.md`.

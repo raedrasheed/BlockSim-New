@@ -517,6 +517,34 @@ point, planned test stage, and consequence of violation.
   identity fields (`RoundID`/`TemplateID`/`CandidateID`/`MinerID`/`AssignmentID`) are payload, NOT `dispatch_envelope` fields;
   all driver/bootstrap fields are declared in `STRUCTURE RunContext`. **AH10:** inaccurate Stage-1AG audit claims are
   superseded in `STAGE_01AH_SUPERSESSION_REGISTER.md`.
+- **Stage-1AI clause (genesis-admission, driver-request completion & rotation-result lock).**
+  **AI1:** the first round's genesis `MINER_JOIN` requests are SEATED synchronously inside the dispatched `RoundInitialiseEvent`
+  at the non-finalised round-setup time `t0` (an `ORDINARY_DISPATCH` seat), never left for the outer-loop intake that runs
+  after `t0` is finalised — the `rejected_finalised_time` genesis deadlock is removed; the initial-registration barrier still
+  gates participant setup so all genesis registrations execute before participant preparation. **AI2:** a run-level
+  `RunContext.last_finalised_event_time` (advanced solely by `ProcessEventTime`) is the authoritative simulation frontier;
+  `AdmitDriverRequest` records a frontier-derived `driver_admission_time` (never a copy of the requested target) and rejects
+  a target behind it, and `ScheduleEvent`'s `DRIVER`/`TERMINAL_ROTATION` cases reject a context-identity mismatch, a
+  kind↔event_type mismatch, a target ≠ carried target, or a target behind the frontier
+  (`rejected_driver_context_mismatch` / `rejected_driver_kind_event_type_mismatch` / `rejected_driver_target_context_mismatch`
+  / `rejected_driver_target_before_simulation_frontier`) — so the simulation never moves from a later processed time back to
+  an earlier newly-admitted driver time. **AI3:** `AdmitDriverRequest` derives a STABLE logical identity BEFORE minting a
+  `DriverRequestID`; a replayed admission returns the same `DriverRequestID` and mints no second identity/event/effect.
+  **AI4:** a `driver_request` runs `PENDING → SEATED → CONSUMED` (or `→ REJECTED`/`→ CANCELLED`) through the single guarded
+  mutator `SetDriverRequestStatus` (declared legal-transition table; never SEATED-while-CONSUMED/CANCELLED); an immutable
+  reverse binding `EventRef → DriverRequestID` is published with the seat; the dispatcher marks the exact request `CONSUMED`
+  with the actual handler result; a cancelled seat reconciles it to `CANCELLED`. **AI5:** every `driver_request` carries a
+  `DriverRoundScope` (`EXACT_ROUND`/`NEXT_AVAILABLE_ROUND`/`RUN_LEVEL`); a reserve activation is always `EXACT_ROUND`;
+  `SeatPendingDriverRequests` checks round state + scope before seating and rejects a stale `EXACT_ROUND` scope rather than
+  seating it under a terminal round. **AI6:** `CloseRoundAssignments` captures the terminal-round publication result, stores
+  it in `RunContext.terminal_publication_result`, and on a next-round seat failure sets `NEXT_ROUND_BOOTSTRAP_FAILED`; the run
+  controller terminates with a declared PARTIAL-RUN disposition; `ValidBlockAccept`/`RoundAbort`/`CloseRoundAtHorizon` inspect
+  the captured disposition. **AI7:** the barrier-completing `MinerRegister` inspects `SeatParticipantSetupOrAbort` and returns
+  a distinct disposition (`miner_registered_barrier_pending`/`_participant_setup_seated`/`_already_seated`/`_participant_setup_aborted`),
+  never a plain success after a participant-setup abort; the driver_request records the same final disposition. **AI8:** the
+  synchronous next-round bootstrap carries a distinct `TERMINAL_ROTATION` origin (not `DRIVER`) matching its call stack; the
+  run-start bootstrap remains a genuine outside-dispatch `DRIVER(RUN_BOOTSTRAP)` seat. **AI10:** inaccurate Stage-1AH audit
+  claims are superseded in `STAGE_01AI_SUPERSESSION_REGISTER.md`.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest
@@ -727,8 +755,16 @@ replaced by two consistent invariants** (the old form was impossible while a lin
   `envelope_namespace, event_time, delta_cycle, event_seq, hook_id`), the `immutable_payload` (the domain identity fields
   `RoundID`/`TemplateID`/`CandidateID`/`MinerID`/`AssignmentID`/`assignment_version`), the `queued_event_record`, and the
   `stable_tie_key` are FIVE distinct things — the domain identity fields are payload, NEVER `dispatch_envelope` fields.
-- **Scope.** The scheduler/dispatcher (`ScheduleEvent`, `ProcessEventTime`, `CancelQueuedEvent`); a structural coherence
-  invariant. It does not change the A1 baseline (`8.420833333 kWh`).
+- **Stage-1AI clause (AI4 — driver_request lifecycle coheres with the queue).** A sim-driver `driver_request` and its seated
+  ordinary event stay coherent: the immutable reverse binding `driver_request_by_seat_event_ref[EventRef] = DriverRequestID`
+  is published ATOMICALLY with the seat, so the SEATED `driver_request` and the `QUEUED` `queued_event_record` are created
+  together; when `ProcessEventTime` completes the seat event's dispatch (`DISPATCHING → CONSUMED`), it marks the EXACT
+  `driver_request` `CONSUMED` via that binding; when `CancelQueuedEvent` removes a seated event (`QUEUED → CANCELLED`), it
+  reconciles the EXACT `driver_request` to `CANCELLED`. Every status change routes through the single guarded mutator
+  `SetDriverRequestStatus` (legal-transition table), so a `driver_request` is never left `SEATED` after its seat event is
+  `CONSUMED`/`CANCELLED`, and the queue-status and driver-request-status views never diverge.
+- **Scope.** The scheduler/dispatcher (`ScheduleEvent`, `ProcessEventTime`, `CancelQueuedEvent`, `SetDriverRequestStatus`,
+  `CompleteDriverRequestOnDispatch`); a structural coherence invariant. It does not change the A1 baseline (`8.420833333 kWh`).
 - **Required inputs.** `EQ.event_queue`; `queued_event_registry`; `EQ.current_event_ref`.
 - **Enforcement point.** `ScheduleEvent` (atomic add of registry entry + EQ entry ordered by the descriptor tie key, AE8/AF3);
   `CancelQueuedEvent` (atomic remove + `QUEUED → CANCELLED`, AE1); `ProcessEventTime` (atomic POP + `QUEUED → DISPATCHING`

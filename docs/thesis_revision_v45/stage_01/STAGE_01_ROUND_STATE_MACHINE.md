@@ -1262,6 +1262,67 @@ inaccuracies AH corrects (the AG run-bootstrap audit did not verify the driver-s
 the AG driver-event-seating audit proved only syntactic reachability; the AG acceptance-batch audit missed the
 record-vs-EventRef cancellation and the FAILED-in-active-set defects).
 
+### 3.10m Stage-1AI addendum (genesis-admission, driver-request completion, rotation-result lock)
+
+Stage 1AI removes the genesis-admission timestamp deadlock and makes the driver-request lifecycle, round scope, and
+round-rotation scheduling origin *executable and truthful*. It changes no round state or transition edge; it corrects WHEN
+and HOW the first round's genesis registrations are seated, HOW every sim-driver request completes, and HOW the
+terminal-round rotation is classified. §3.10a–§3.10l are retained as the frozen W…AH layers.
+
+- **AI1 (genesis admission during ROUND_INITIALISING, not after t0 is finalised).** The first `RoundInitialise` still
+  admits one `MINER_JOIN` driver request per declared genesis miner (scope `EXACT_ROUND(RoundID)`) and holds the
+  initial-registration BARRIER, but the `RoundInitialiseEvent` handler now SEATS each genesis `MinerRegisterEvent`
+  SYNCHRONOUSLY, inside its own dispatch at the round-setup time `t0` (an `ORDINARY_DISPATCH` origin, target
+  `EQ.current_event_time = t0`), rather than leaving them for the outer-loop intake that runs only AFTER `t0` is finalised.
+  This removes the `rejected_finalised_time` deadlock in which every genesis registration targeted a time already closed.
+  The barrier still defers `TEMPLATE_COMMITMENT → ASSIGNMENT` participant setup until every genesis miner has registered,
+  so all genesis registrations execute BEFORE participant preparation regardless of the `REGISTRATION` vs `TEMPLATE_COMMIT`
+  microphase order. A genesis registration that cannot seat at `t0` aborts the round with a declared disposition.
+- **AI2 (authoritative driver time; scheduler frontier guard).** A new run-level `RunContext.last_finalised_event_time`
+  (advanced solely by `ProcessEventTime` as each event_time finalises) is the authoritative simulation frontier.
+  `AdmitDriverRequest` records a `driver_admission_time` derived from that frontier (never a copy of the requested target)
+  and rejects a requested time behind it; `ScheduleEvent`'s `DRIVER` / `TERMINAL_ROTATION` cases reject a seat whose
+  context identities mismatch, whose driver kind may not seat the event_type, whose target ≠ the carried target, or whose
+  target is behind the frontier — so a round-setup / driver transition can NEVER be seated before where the simulation has
+  already advanced.
+- **AI3 (idempotent admission).** `AdmitDriverRequest` derives a STABLE logical identity (a deterministic `JoinRequestID` /
+  `ReserveActivationRequestID`) BEFORE minting a `DriverRequestID`; a replayed admission of the same logical request returns
+  the SAME `DriverRequestID` and mints no second identity, event, or protocol effect — replay idempotence now holds at the
+  ADMISSION layer, not only the seat layer.
+- **AI4 (executable driver-request lifecycle).** A `driver_request` runs `PENDING → SEATED → CONSUMED` (or `→ REJECTED` /
+  `→ CANCELLED`) through the SINGLE guarded mutator `SetDriverRequestStatus` (a declared legal-transition table; no
+  SEATED-while-CONSUMED/CANCELLED). The seat owner publishes an immutable reverse binding `EventRef → DriverRequestID`
+  atomically with the seat; when the seat event dispatches, `ProcessEventTime` marks the EXACT request `CONSUMED` with the
+  actual handler result; a cancelled seat reconciles the EXACT request to `CANCELLED`. No driver transition into a round
+  state is left with a dangling `SEATED` request.
+- **AI5 (explicit round scope).** Every `driver_request` carries a `DriverRoundScope`
+  (`EXACT_ROUND(RoundID)` / `NEXT_AVAILABLE_ROUND` / `RUN_LEVEL`). A reserve activation is ALWAYS `EXACT_ROUND`; a genesis
+  join is `EXACT_ROUND`, a later external join `NEXT_AVAILABLE_ROUND`. `SeatPendingDriverRequests` checks round state +
+  scope BEFORE seating: a stale `EXACT_ROUND` scope (its round terminal, or a different round active) is REJECTED, never
+  silently seated under a terminal round and executed against a new one.
+- **AI6 (rotation result reaches the run controller).** `CloseRoundAssignments` CAPTURES `PublishTerminalRoundAndSeatNext`'s
+  result and STORES it in `RunContext.terminal_publication_result`; a next-round seat failure sets the run-level
+  `NEXT_ROUND_BOOTSTRAP_FAILED` state, and `RunEventLoopToHorizon` TERMINATES the run with a declared PARTIAL-RUN
+  disposition rather than spinning with no next round. `ValidBlockAccept` / `RoundAbort` / `CloseRoundAtHorizon` inspect the
+  captured disposition (a horizon close is always `terminal_round_published_no_seat`).
+- **AI7 (participant-setup result surfaced through registration).** The barrier-completing `MinerRegister` now inspects
+  `SeatParticipantSetupOrAbort` and returns a DISTINCT disposition (`miner_registered_barrier_pending` /
+  `_participant_setup_seated` / `_already_seated` / `_participant_setup_aborted(reason)`); no plain success is returned after
+  a participant-setup abort, and the driver_request records the same final disposition as its `consumed_result`.
+- **AI8 (truthful rotation scheduling origin).** The synchronous next-round bootstrap seated from inside
+  `PublishTerminalRoundAndSeatNext` now carries a DISTINCT `TERMINAL_ROTATION(TerminalRotationSchedulingContext)` origin
+  (not `DRIVER`), so the scheduling-origin classification matches the actual call stack; the run-start bootstrap remains a
+  genuine outside-dispatch `DRIVER(RUN_BOOTSTRAP)` seat. `ROUND_ROTATION_BOOTSTRAP` is now a `TERMINAL_ROTATION`-carried
+  kind whose `RoundInitialiseEvent` permission is still checked through the one `driver_kind_may_seat` table.
+
+**AI10 (supersession of inaccurate Stage-1AH audits).** `STAGE_01AI_SUPERSESSION_REGISTER.md` records the Stage-1AH audit
+inaccuracies AI corrects (the AH bootstrap-chain-result audit missed the finalised-time genesis deadlock; the AH
+driver-request-lifecycle audit treated `SEATED` as terminalisation and found no `CONSUMED`/`CANCELLED` producer; the AH
+driver-scheduling-context audit missed the `source_event_time = requested_event_time` copy; the AH bootstrap-time-idempotence
+audit did not test admission-level replay; the AH bootstrap-chain-result audit missed the bare `SeatParticipantSetupOrAbort`
+in `MinerRegister`; the AH runcontext-terminal-publication audit missed `CloseRoundAssignments` discarding the publication
+result; the AH cross-document audit therefore marked the affected gates PASS).
+
 ### 3.11 What causes a template refresh
 
 A template refresh (`TEMPLATE_REFRESH`) is caused by (a) exhaustion of the committed
