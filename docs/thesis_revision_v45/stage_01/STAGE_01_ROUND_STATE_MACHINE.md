@@ -1022,6 +1022,73 @@ failure during `RoundAbort`; TV247 did not test queue-state consumption; TV248 p
 the AC1/AC2 audit did not verify complete-payload storage/dispatch; and `ScheduleEvent`'s declared RETURNS omitted rejection
 variants.
 
+### 3.10i Stage-1AE addendum (global-event cancellation & dispatch-schema lock)
+
+Stage 1AE introduces one global queue-owner cancellation operation, reconciles every cancel site through it, makes the
+event-time dispatch loop robust to mid-batch cancellation, declares the authoritative event-type dispatch schema, fixes
+dispatch-envelope signature agreement, binds corrupt-retry ownership by EventRef, returns a structured payload-schema
+rejection, makes scheduler registration atomic, reports fire-and-forget scheduling results truthfully, and adds
+queue/registry coherence invariants. These statements supersede the Stage-1AD ones they name; §3.10a–§3.10h are retained as
+the frozen W/X/Y/Z/AA/AB/AC/AD layers.
+
+**AE1 (one global cancellation operation).** `CancelQueuedEvent(EventRef, cancellation_reason, cancellation_context)` is the
+SOLE operation that removes an EventRef from EQ. Unknown → `cancellation_unknown_event`; `QUEUED` → atomically remove from EQ
+and set `QUEUED → CANCELLED`, return `event_cancelled`; `DISPATCHING` → `event_already_dispatching` with no mutation;
+`CONSUMED`/`CANCELLED` → `cancellation_terminal_noop`. It owns the atomic EQ-removal + central-registry state update.
+
+**AE2 (every cancel site reconciled).** Every wake / resume / certificate-arrival / block-arrival / hash-work / recovery /
+setup-retry / acceptance-batch / round-or-template-closure cancellation calls `CancelQueuedEvent`; a set cancellation
+iterates its EventRefs in stable order and calls it once each. No procedure executes a raw `CANCEL <ref> on EQ`; no event
+removed from EQ remains `QUEUED` in the registry.
+
+**AE3 (mid-batch cancellation robustness).** `ProcessEventTime` no longer iterates a stale snapshot of all `QUEUED` events at
+one `(t, delta_cycle)`. It re-selects and re-reads the smallest current `QUEUED` EventRef each iteration; if the re-read
+shows it is not `QUEUED` (or absent from EQ), it skips it (no assert, no dispatch); otherwise it moves `QUEUED → DISPATCHING`,
+dispatches exactly one event, completes `DISPATCHING → CONSUMED`, and re-queries. A handler that cancels a later same-time
+event never causes that event to be dispatched or an assertion to fail.
+
+**AE4 (authoritative dispatch schema).** §0.7g-schema declares, per queued event type, the handler, required
+`immutable_payload` fields, whether it receives `dispatch_envelope`, whether it receives `dispatched_event_ref`, the target
+microphase, and the stable tie key. `ScheduleEvent` validates `immutable_payload` against this table; `ProcessEventTime`
+dispatches only the arguments it declares.
+
+**AE5 (dispatch-envelope signature agreement, Design B).** The dispatcher passes `dispatch_envelope` to a handler IFF the
+schema's `recv env` = yes and `dispatched_event_ref` IFF `recv ref` = yes — never an undeclared argument. This closes the
+AD5 defect whereby `dispatch_envelope` was passed to every ordinary handler including ones (like `BlockAcceptancePoint`)
+that do not declare it.
+
+**AE6 (corrupt retry ownership by EventRef).** An immutable reverse binding `setup_retry_by_seat_event_ref : EventRef →
+SetupRetryID` is published atomically at seating. `HandleDispatchIntegrityFailure` resolves the owner from
+`setup_retry_by_seat_event_ref[er]` (verified against `seat_event_ref`), NEVER from the corrupt payload's `SetupRetryID`: a
+missing payload id still resolves the owner from `er`; a payload naming a foreign valid id leaves that foreign record
+untouched (mismatch audited); an event with no reverse-bound owner mutates nothing. A corrupt payload can never choose which
+retry record is aborted.
+
+**AE7 (structured payload-schema rejection).** `ScheduleEvent` validates `event_type` + `immutable_payload` against
+§0.7g-schema BEFORE minting `seq`, deriving the `EventRef`, registering the record, or inserting into EQ, returning the
+structured `rejected_payload_schema_mismatch(event_type, missing_or_invalid_fields)` (added to its RETURNS union). No
+malformed scheduling request terminates the simulation through a raw assertion.
+
+**AE8 (atomic registration).** The successful seat is one atomic transaction — validate time, validate payload, mint
+seq + EventRef, create the `QUEUED` record, add the registry entry, and insert into EQ, committing both-or-neither — so no
+registry entry is ever `QUEUED` without a pending EQ entry and no EQ entry ever lacks a registry entry.
+
+**AE9 (truthful fire-and-forget results).** `ScheduleNextHashWork` captures the `ScheduleEvent` result and returns
+`hash_work_seated(EventRef)` or `hash_work_not_seated(reason)` — never `scheduled` after a `post_horizon_event_rejected`.
+Every remaining for-effect `ScheduleEvent` caller handles every reachable result or relies only on the deterministic O2
+post-horizon rejection.
+
+**AE10 (queue/registry coherence invariants).** An EventRef is present in EQ IFF its registry status is `QUEUED`; the
+executing EventRef is absent from pending EQ and is `DISPATCHING`; `CONSUMED`/`CANCELLED` EventRefs are absent from EQ; every
+`QUEUED` entry is present exactly once in EQ; no EventRef is dispatched more than once; after `ProcessEventTime(t)` no event
+at `t` is `QUEUED` or `DISPATCHING`; every cancellation changes EQ membership and registry status atomically (I21).
+
+**AE11 (supersession of incomplete Stage-1AD audits).** `STAGE_01AE_SUPERSESSION_REGISTER.md` records the Stage-1AD audit
+gaps AE corrects (the AD queue-status-ownership audit did not audit all raw CANCEL sites; the payload-dispatch audit did not
+establish a complete payload/signature schema; the dispatch-integrity audit trusted the corrupt payload's `SetupRetryID`;
+TV257–TV261 did not exercise cancellation of non-`SetupRetryEvent` events or mid-batch cancellation; `ScheduleNextHashWork`
+still returned `scheduled` after a rejection).
+
 ### 3.11 What causes a template refresh
 
 A template refresh (`TEMPLATE_REFRESH`) is caused by (a) exhaustion of the committed

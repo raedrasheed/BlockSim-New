@@ -207,12 +207,21 @@ PROCEDURE ProcessEventTime
     LOOP:
       IF no QUEUED ordinary event remains at event_time = t: BREAK   # AD4: quiescent (all delta-cycles drained; empty at a synthetic horizon)
       SET current_delta_cycle <- smallest delta_cycle with a QUEUED event at t
-      FOR EACH EventRef er of a QUEUED event at (t, current_delta_cycle) IN ASCENDING (er.microphase, stable_tie_key, er.seq):
+      # AE3: do NOT iterate a STALE snapshot of all QUEUED events at (t, current_delta_cycle) — a handler may CANCEL a LATER
+      #      same-cycle event mid-batch (via CancelQueuedEvent, AE1), and a snapshot would try to dispatch that now-CANCELLED
+      #      event and trip the QUEUED assertion. Instead RE-SELECT and RE-READ the smallest current QUEUED EventRef each
+      #      iteration, dispatch EXACTLY ONE, and RE-QUERY the queue.
+      WHILE a QUEUED EventRef exists at (t, current_delta_cycle):
         ASSERT t not in finalised_event_times                     # never dispatch into a finalised time
-        SET record <- queued_event_registry[er]                   # AD1: the ONE central authoritative record
-        # AD4: ProcessEventTime is the SOLE queue-status owner. ONLY a QUEUED event dispatches; move QUEUED -> DISPATCHING
+        SET er <- the SMALLEST QUEUED EventRef at (t, current_delta_cycle) by (er.microphase, stable_tie_key, er.seq)  # AE3: re-selected
+        SET record <- queued_event_registry[er]                   # AD1/AE3: RE-READ the ONE central authoritative record
+        # AE3: a handler earlier this cycle may have CANCELLED this event (CancelQueuedEvent set CANCELLED + removed it from
+        #      EQ). If it is no longer dispatchable, SKIP it — do NOT assert, do NOT dispatch — and re-query. (In the
+        #      single-threaded model a non-QUEUED event is never re-selected; this guard makes that structural.)
+        IF record does not exist OR record.queue_status != QUEUED OR er is NOT pending on EQ.event_queue:
+          CONTINUE                                                # AE3: reconcile — a cancelled/absent event is never dispatched
+        # AD4/AE3: ProcessEventTime is the SOLE queue-status owner. Dispatch EXACTLY ONE event; move QUEUED -> DISPATCHING
         #      BEFORE the handler. No handler writes queue_status.
-        ASSERT record.queue_status = QUEUED                       # AD4: only a QUEUED event may be dispatched
         SET queued_event_registry[er].queue_status <- DISPATCHING # AD4: QUEUED -> DISPATCHING (dispatcher-owned)
         # L1: MATERIALISE the dispatch identity from the STORED record (er + record.dispatch_envelope), never from ambient state.
         SET EQ.current_microphase <- er.microphase; SET EQ.current_event_seq <- er.seq
@@ -222,26 +231,25 @@ PROCEDURE ProcessEventTime
         SET ctx <- OrdinaryDispatchContext(dispatch_envelope = record.dispatch_envelope, dispatched_event_ref = er)   # AD5
         # AD8 (defensive): if the registry entry is nevertheless detected CORRUPT (missing a required payload field / an
         #      incomplete envelope), DO NOT dispatch it into a handler; take the declared dispatcher integrity path
-        #      (record an integrity terminal disposition; if the payload's SetupRetryID resolves and its record's round is the
-        #      current nonterminal round, terminalise via a COMPLETE dispatcher-integrity context; NEVER pass an incomplete
-        #      envelope onward), then continue the drain.
+        #      (record an integrity terminal disposition; if the payload's OWNER — resolved from er, AE6 — is a current
+        #      nonterminal-round SEATED retry, terminalise via a COMPLETE dispatcher-integrity context; NEVER pass an
+        #      incomplete envelope onward), then consume it and re-query.
         IF record is detected corrupt (immutable_payload incomplete for record.event_type OR dispatch_envelope incomplete):
-          CALL HandleDispatchIntegrityFailure(RoundContext, er, record)   # AD8: dispatcher-owned; uses a complete integrity context
+          CALL HandleDispatchIntegrityFailure(RoundContext, er, record)   # AD8/AE6: dispatcher-owned; owner resolved from er
           SET queued_event_registry[er].queue_status <- CONSUMED  # AD4: DISPATCHING -> CONSUMED (the corrupt event is drained, never re-QUEUED)
           SET EQ.current_event_ref <- null
           CONTINUE
-        # AD2/AD5 (Design B): deliver the STORED immutable_payload (payload at dispatch = payload at seating) + the complete
-        #      dispatch_envelope to the handler; pass dispatched_event_ref ONLY to a handler whose declared signature includes
-        #      it (currently only SetupRetryEvent). No undeclared named argument is injected into a handler that omits it.
-        DISPATCH record.event_type WITH immutable_payload = record.immutable_payload, dispatch_envelope = ctx.dispatch_envelope,
-                 (AND dispatched_event_ref = ctx.dispatched_event_ref IFF record.event_type's signature declares it)   # AD2/AD5-B
+        # AE5 (Design B): dispatch ONLY the arguments the §0.7g-schema DECLARES for record.event_type — always the STORED
+        #      immutable_payload (AD2: payload at dispatch = payload at seating); dispatch_envelope IFF recv env = yes;
+        #      dispatched_event_ref IFF recv ref = yes. No undeclared named argument is injected into any handler.
+        DISPATCH record.event_type WITH immutable_payload = record.immutable_payload,
+                 (AND dispatch_envelope = ctx.dispatch_envelope IFF §0.7g-schema[record.event_type].recv_env = yes),
+                 (AND dispatched_event_ref = ctx.dispatched_event_ref IFF §0.7g-schema[record.event_type].recv_ref = yes)   # AE5
         # AD4: after the handler returns, the dispatcher completes the lifecycle. DISPATCHING -> CONSUMED, clear the EventRef.
         SET queued_event_registry[er].queue_status <- CONSUMED    # AD4: DISPATCHING -> CONSUMED (no handler wrote it)
         SET EQ.current_event_ref <- null                          # AC2/AD4: cleared after the handler returns
-                                                                  # its handler threaded dispatch_envelope onward,
-                                                                  #   may have scheduled further events at t per the
-                                                                  #   delta-cycle rule (§0.7-H2) or at a later time
-      # loop re-evaluates: a handler may have added a (t, current_delta_cycle+1) event (forward only)
+        # AE3: the WHILE RE-QUERIES the queue — a handler may have CANCELLED a later same-cycle event (never dispatched) or
+        #      added a (t, current_delta_cycle+1) event (forward only; handled by the outer LOOP, §0.7-H2).
     # ---- HORIZON CLOSURE (O1/P1: run-level hook, ONLY at t = T, interposed BETWEEN drain and epilogue) ----
     # After T is drained to quiescence (possibly an EMPTY drain for a synthetic horizon invocation, P1), if the
     # run's current round is still NONTERMINAL, close it at the horizon through the named CloseRoundAtHorizon
@@ -287,7 +295,7 @@ PROCEDURE ProcessEventTime
     CALL FinalizePostRecoveryApplicationState(RoundContext, t)    # R2 step 3: single post-application settlement (NOT a 2nd decision)
     # (5) R1/R2/T7/U4 FINALISATION ASSERTION. t may be finalised ONLY when it is quiescent, its census is settled, and
     #     no recovery-continuation / recovery-work application remains due at t (checked via the EXPLICIT due status, U4).
-    ASSERT no QUEUED ordinary event remains with event_time = t   # R1/AD4: the post-epilogue application enqueued NOTHING at t (T7: incl. StartWake/re-arm strictly later)
+    ASSERT no ordinary event with event_time = t has queue_status QUEUED OR DISPATCHING   # R1/AD4/AE10(e): drained to quiescence; the post-epilogue application enqueued NOTHING at t (T7: incl. StartWake/re-arm strictly later)
     ASSERT security_census_dirty[t] = false                       # R2: FinalizePostRecoveryApplicationState settled t (no dirty census left)
     ASSERT no recovery_decisions[*].continuation_due_status = DUE with continuation_due_at_event_time = t
                                                                   # U4/T7: every DUE continuation at t was explicitly CONSUMED/SUPERSEDED/CANCELLED (not inferred from a timestamp)
@@ -307,11 +315,12 @@ PROCEDURE ProcessEventTime
         is a terminal_stale_noop; the run-level FinalizeSimulationRun (§20a) is then invoked by the RUN DRIVER
         (§0.7d-run) AFTER ProcessEventTime(T) returns — it is NOT a queued event.
 
-PROCEDURE HandleDispatchIntegrityFailure                         # AD8: dispatcher-owned integrity path for a CORRUPT queued record
+PROCEDURE HandleDispatchIntegrityFailure                         # AD8/AE6: dispatcher-owned integrity path for a CORRUPT queued record
   INPUTS: RoundContext, er, record   # er = the dispatched EventRef; record = queued_event_registry[er] detected corrupt
   PRECONDITIONS: called by ProcessEventTime ONLY when a registry entry is detected corrupt (an incomplete immutable_payload
-                 for record.event_type or an incomplete dispatch_envelope). ScheduleEvent asserts completeness at
-                 construction (AD8), so this is a DEFENSIVE last resort; it NEVER passes an incomplete envelope onward.
+                 for record.event_type or an incomplete dispatch_envelope). ScheduleEvent validates completeness at seating
+                 (AE7), so this is a DEFENSIVE last resort; it NEVER passes an incomplete envelope onward, and (AE6) NEVER
+                 trusts the corrupt payload's SetupRetryID to choose which record is aborted.
   EFFECTS:
     # AD8: mark the event through a declared integrity TERMINAL disposition (audit) and build a COMPLETE dispatcher-owned
     #   integrity context from the TRUSTED EventRef fields (never from the corrupt payload) — er alone yields a complete
@@ -319,29 +328,43 @@ PROCEDURE HandleDispatchIntegrityFailure                         # AD8: dispatch
     RECORD dispatch_integrity_failure(er, record.event_type)                                   # AD8: declared integrity terminal disposition
     SET integrity_envelope <- { envelope_namespace = er.envelope_namespace, event_time = er.event_time,
                                 delta_cycle = er.delta_cycle, event_seq = er.seq, hook_id = null }   # AD8: COMPLETE, dispatcher-owned
-    # AD8: if the event_type is SetupRetryEvent AND its SetupRetryID resolves to a KNOWN retry record, terminalise that
-    #   record. Scope the abort to the record's OWN round (AC4): a current nonterminal-round record takes the declared
-    #   integrity abort with the COMPLETE integrity_envelope; a record of an older/terminal round is terminalised WITHOUT
-    #   aborting the current round.
-    IF record.event_type = SetupRetryEvent AND the payload's SetupRetryID resolves to setup_retry_records[SetupRetryID]:
-      SET rec <- setup_retry_records[SetupRetryID]
-      IF rec.status = SEATED AND rec.RoundID = RoundID_current AND round_state NOT in {ROUND_ACCEPTED, ROUND_ABORTED}:
-        CALL SetSetupRetryStatus(SetupRetryID, APPLYING)                                       # AC6: leave SEATED first
-        SET disp <- CALL RoundAbort(RoundContext, reason = setup_retry_payload_integrity_failure(SetupRetryEvent),
-                          dispatch_envelope = integrity_envelope, recovery_finalising = false) # AD8: COMPLETE envelope, never the corrupt one
-        UPDATE setup_retry_records[SetupRetryID].target_disposition <- disp
-        CALL SetSetupRetryStatus(SetupRetryID, ABORTED)                                        # AC6/AC7: APPLYING -> ABORTED
-      ELSE IF rec.status = SEATED:
-        # record belongs to an older / terminal round -> terminalise WITHOUT aborting the current round (AC4/AD8)
-        CALL SetSetupRetryStatus(SetupRetryID, SUPERSEDED)
-        UPDATE setup_retry_records[SetupRetryID].target_disposition <- setup_retry_stale_noop(SetupRetryID)
-      # a non-SEATED record is already terminal — left unchanged (AC7)
+    # AE6: for a corrupt SetupRetryEvent, resolve the OWNER from the IMMUTABLE reverse binding keyed by the trusted EventRef
+    #   (setup_retry_by_seat_event_ref[er], published atomically at seating) — NEVER from the corrupt payload's SetupRetryID.
+    #   A corrupt payload may NEVER choose which retry record is aborted.
+    IF record.event_type = SetupRetryEvent:
+      IF er is a key of setup_retry_by_seat_event_ref:
+        SET owner_id <- setup_retry_by_seat_event_ref[er]                                      # AE6: owner from the TRUSTED er
+        ASSERT setup_retry_records[owner_id] EXISTS AND setup_retry_records[owner_id].seat_event_ref = er   # AE6: verify the binding
+        # AE6 (mismatch audit): if the corrupt payload happens to NAME a different (foreign) SetupRetryID, DO NOT touch that
+        #   foreign record — audit the mismatch and disposition ONLY the actual owner resolved from er. A MISSING payload
+        #   SetupRetryID is fine: the owner is still resolved from er.
+        IF the payload's SetupRetryID is PRESENT AND the payload's SetupRetryID != owner_id:
+          RECORD setup_retry_owner_mismatch(er, owner_id, payload_setup_retry_id = the payload's SetupRetryID)   # AE6: foreign id IGNORED
+        SET rec <- setup_retry_records[owner_id]
+        IF rec.status = SEATED AND rec.RoundID = RoundID_current AND round_state NOT in {ROUND_ACCEPTED, ROUND_ABORTED}:
+          CALL SetSetupRetryStatus(owner_id, APPLYING)                                         # AC6: leave SEATED first
+          SET disp <- CALL RoundAbort(RoundContext, reason = setup_retry_payload_integrity_failure(SetupRetryEvent),
+                            dispatch_envelope = integrity_envelope, recovery_finalising = false) # AD8: COMPLETE envelope, never the corrupt one
+          UPDATE setup_retry_records[owner_id].target_disposition <- disp
+          CALL SetSetupRetryStatus(owner_id, ABORTED)                                          # AC6/AC7: APPLYING -> ABORTED
+        ELSE IF rec.status = SEATED:
+          # owner belongs to an older / terminal round -> terminalise WITHOUT aborting the current round (AC4/AD8)
+          CALL SetSetupRetryStatus(owner_id, SUPERSEDED)
+          UPDATE setup_retry_records[owner_id].target_disposition <- setup_retry_stale_noop(owner_id)
+        # a non-SEATED owner is already terminal — left unchanged (AC7)
+      ELSE:
+        # AE6: NO EventRef owner exists (er not in the reverse binding). Record the integrity failure; ProcessEventTime
+        #   CONSUMES the queued event; do NOT mutate ANY unrelated retry record.
+        RECORD dispatch_integrity_no_owner(er)
     RETURN dispatch_integrity_handled(er)
   RETURNS: dispatch_integrity_handled(er)
-  NOTE: AD8: the ONE dispatcher-owned integrity path. A malformed/corrupt queued record NEVER reaches a handler and its
+  NOTE: AD8/AE6: the ONE dispatcher-owned integrity path. A malformed/corrupt queued record NEVER reaches a handler and its
         untrusted payload/envelope NEVER becomes the transition identity for round closure; any abort uses the COMPLETE
-        integrity_envelope built from the trusted EventRef, scoped to the record's own round. ProcessEventTime marks the
-        corrupt event CONSUMED (never re-QUEUED) after this returns.
+        integrity_envelope built from the trusted EventRef, scoped to the OWNER's own round. AE6: the owner is resolved from
+        the trusted EventRef via setup_retry_by_seat_event_ref (verified against seat_event_ref), never from the corrupt
+        payload — a corrupt payload naming a FOREIGN SetupRetryID leaves that foreign record untouched (mismatch audited) and
+        an event with NO reverse-bound owner mutates nothing. ProcessEventTime marks the corrupt event CONSUMED (never
+        re-QUEUED) after this returns.
 
 PROCEDURE RunEventLoopToHorizon                                   # O1/P1: the RUN-LEVEL driver (top-level loop)
   INPUTS: RunContext, RoundContext
@@ -503,14 +526,29 @@ STRUCTURE queued_event_record (AD1 — the ONE central record of a queued ordina
 
 # queued_event_registry : map EventRef -> queued_event_record (AD1). The ONE authoritative queue-status source. The priority
 #   queue orders EventRefs (equivalently records) by the total-order key; a record's fields index the registry entry.
-# EventQueueStatus in { QUEUED, DISPATCHING, CONSUMED, CANCELLED } (AC8/AD1). Transition table (AD1) — ProcessEventTime is
-#   the SOLE writer (AD4):
+# EventQueueStatus in { QUEUED, DISPATCHING, CONSUMED, CANCELLED } (AC8/AD1). Transition table (AD1):
 #     QUEUED      -> DISPATCHING | CANCELLED
 #     DISPATCHING -> CONSUMED
 #     CONSUMED and CANCELLED are TERMINAL.
+#   OWNERSHIP (AD4/AE1): ProcessEventTime is the SOLE writer of the DISPATCH lifecycle (QUEUED -> DISPATCHING -> CONSUMED);
+#   CancelQueuedEvent is the SOLE writer of the CANCELLATION edge (QUEUED -> CANCELLED) and the SOLE operation that removes an
+#   EventRef from EQ. No other procedure writes queue_status or removes an EventRef from EQ.
 # A setup_retry_record keeps its IMMUTABLE seat_event_ref (never destroyed, used for ownership/audit) and a SetupRetryStatus,
 #   but NO writable event_queue_status field (AD1: the Stage-1AC per-record mirror is REMOVED — the central registry is
 #   authoritative). Cancellation/consumption change queued_event_registry[seat_event_ref].queue_status only.
+# AE10 QUEUE/REGISTRY COHERENCE INVARIANTS (see STAGE_01_INVARIANT_CATALOGUE I16 Stage-1AE clause / new I21):
+#   CONVENTION: EQ.event_queue is the QUEUED PROJECTION of the registry — "present/pending in EQ" == queue_status = QUEUED.
+#     A status change to DISPATCHING (dispatch, ProcessEventTime), CONSUMED (dispatch completion), or CANCELLED
+#     (CancelQueuedEvent) therefore REMOVES the EventRef from the pending frontier by construction. CancelQueuedEvent is the
+#     sole operation that removes a QUEUED event from the frontier by CANCELLATION (never by dispatch); dispatch removes it by
+#     CONSUMPTION (QUEUED -> DISPATCHING -> CONSUMED). So (a)-(c) hold literally under this projection.
+#   (a) an EventRef is present in EQ.event_queue IFF its registry queue_status = QUEUED;
+#   (b) the currently-executing EventRef (EQ.current_event_ref) is ABSENT from pending EQ and has queue_status = DISPATCHING;
+#   (c) a CONSUMED or CANCELLED EventRef is NOT pending in EQ;
+#   (d) every QUEUED registry entry is present EXACTLY ONCE in EQ; no EventRef is dispatched more than once;
+#   (e) after ProcessEventTime(t) returns, NO event at t is QUEUED or DISPATCHING;
+#   (f) every cancellation changes EQ membership and registry status ATOMICALLY (AE1: ScheduleEvent adds both together, AE8;
+#       CancelQueuedEvent removes both together, AE1) — the two structures never diverge.
 
 STRUCTURE OrdinaryDispatchContext (AD5 — the complete dispatcher-owned context for one ordinary dispatch)
   # AD5: ProcessEventTime CONSTRUCTS this from the queued_event_record + its EventRef; it is complete and dispatcher-owned.
@@ -558,41 +596,91 @@ PROCEDURE ScheduleEvent
       ELSE:                                          SET dc <- EQ.current_delta_cycle + 1   # never backward
     ELSE:                                    # target_event_time < current_event_time
       RETURN rejected_backward_time          # K8: never schedule into the past
-    # J9 (3): assign the per-run monotonic seq ATOMICALLY, AFTER the deterministic ordering is established.
-    SET EQ.event_creation_seq <- EQ.event_creation_seq + 1
-    SET seq <- EQ.event_creation_seq
-    # AC1 (4): DERIVE the ONE canonical EventRef. seq is globally unique per run (J4), so it identifies EXACTLY one event.
-    SET event_ref <- EventRef(envelope_namespace = ORDINARY_EVENT, event_type = event_type,
-                              event_time = target_event_time, delta_cycle = dc, microphase = target_microphase, seq = seq)
-    # AD2/AD8 (5): capture the COMPLETE immutable handler PAYLOAD — EVERY caller-supplied event argument required by the
-    #     target handler — plus the complete dispatch envelope. ScheduleEvent does NOT construct or insert an INCOMPLETE
-    #     queued_event_record (AD8): a missing required field is a construction-invariant violation, not a silent drop and
-    #     not a substitution with current global values.
+    # AE7 (3): VALIDATE event_type + immutable_payload against the AUTHORITATIVE dispatch schema (§0.7g-schema) BEFORE any
+    #     state mutation — BEFORE the seq is minted, the EventRef derived, the record registered, or the queue inserted. A
+    #     malformed request is a STRUCTURED rejection, NEVER a raw assertion that terminates the simulation. (AE7 supersedes
+    #     the AD8 construction ASSERT: assemble the payload, then validate it here.)
     SET immutable_payload <- the COMPLETE caller-supplied argument set for event_type (from envelope_fields), e.g. for
                              #   SetupRetryEvent EXACTLY { RoundID, setup_kind, SetupRetryID, TemplateID_at_seat,
                              #   TemplateRefreshSetupID, retry_generation, reason }
-    ASSERT immutable_payload contains EVERY required field of the declared payload schema for event_type   # AD8: reject incomplete construction
-    SET dispatch_envelope <- { envelope_namespace = ORDINARY_EVENT, event_time = target_event_time, delta_cycle = dc,
-                               event_seq = seq, hook_id = null }         # AD1/R3: the COMPLETE immutable ordinary-event envelope (§0.2)
-    # AD1 (6): CREATE the ONE central queued_event_record and REGISTER it with queue_status = QUEUED — the SINGLE
-    #     authoritative queue-status source. RoundID_current/TemplateID_committed epoch fields travel inside immutable_payload
-    #     / the total-order key derived below; no separate mutable envelope copy is kept.
-    SET record <- queued_event_record(event_ref = event_ref, event_type = event_type, dispatch_envelope = dispatch_envelope,
-                                      immutable_payload = immutable_payload, queue_status = QUEUED)
-    SET queued_event_registry[event_ref] <- record                       # AD1: the ONE authoritative registry
-    # J9 (7): insert the EventRef into the priority queue using the deterministic TOTAL-ORDER key (fields read from the record).
-    INSERT event_ref INTO EQ.event_queue ORDERED BY (event_time, delta_cycle, microphase,
-                                                    (CandidateID, MinerID, AssignmentID), seq)   # keys from queued_event_registry[event_ref]
+    SET missing_or_invalid_fields <- the required immutable_payload fields of event_type (per §0.7g-schema) that are ABSENT
+                                     from immutable_payload OR fail their declared type
+    IF event_type is NOT declared in §0.7g-schema OR missing_or_invalid_fields is non-empty:
+      RECORD payload_schema_mismatch(event_type, missing_or_invalid_fields)               # audit-only log
+      RETURN rejected_payload_schema_mismatch(event_type, missing_or_invalid_fields)      # AE7: STRUCTURED; NO state mutated yet
+    # AE8 (4): ATOMIC REGISTRATION. From here the seat is ONE atomic transaction — mint seq + EventRef, create the QUEUED
+    #     queued_event_record, add the registry entry, AND insert the EventRef into EQ, committing BOTH-OR-NEITHER. There is
+    #     no observable intermediate state, so a partial seat is impossible by construction: no registry entry is ever left
+    #     QUEUED without a pending EQ entry, and no EQ entry ever exists without a registry entry (AE8/AE10 coherence).
+    ATOMICALLY:
+      # J9: assign the per-run monotonic seq, AFTER the deterministic ordering is established (payload already validated).
+      SET EQ.event_creation_seq <- EQ.event_creation_seq + 1
+      SET seq <- EQ.event_creation_seq
+      # AC1: DERIVE the ONE canonical EventRef. seq is globally unique per run (J4), so it identifies EXACTLY one event.
+      SET event_ref <- EventRef(envelope_namespace = ORDINARY_EVENT, event_type = event_type,
+                                event_time = target_event_time, delta_cycle = dc, microphase = target_microphase, seq = seq)
+      SET dispatch_envelope <- { envelope_namespace = ORDINARY_EVENT, event_time = target_event_time, delta_cycle = dc,
+                                 event_seq = seq, hook_id = null }       # AD1/R3: the COMPLETE immutable ordinary-event envelope (§0.2)
+      # AD1: CREATE the ONE central queued_event_record (queue_status = QUEUED) — the SINGLE authoritative queue-status source.
+      SET record <- queued_event_record(event_ref = event_ref, event_type = event_type, dispatch_envelope = dispatch_envelope,
+                                        immutable_payload = immutable_payload, queue_status = QUEUED)
+      # AE8: COMMIT the registry entry AND the EQ insertion together (both-or-neither); the INSERT uses the deterministic
+      #      TOTAL-ORDER key. If the enqueue cannot complete, the whole transaction rolls back — neither the registry entry
+      #      nor an EQ entry persists — so the two structures never diverge.
+      SET queued_event_registry[event_ref] <- record
+      INSERT event_ref INTO EQ.event_queue ORDERED BY (event_time, delta_cycle, microphase,
+                                                      (CandidateID, MinerID, AssignmentID), seq)   # keys from queued_event_registry[event_ref]
   RETURNS: scheduled(event_ref, record) | rejected_finalised_time | post_horizon_event_rejected |
-           rejected_post_epilogue_not_strictly_later | rejected_backward_time
-           # AD3: the COMPLETE result union — every success and rejection variant ScheduleEvent can return. scheduled carries
-           #   the canonical EventRef AND the central queued_event_record (was scheduled(event_ref, envelope)).
-  NOTE: K8/J9/AD1/AD2/AD3: the SOLE enqueue interface. It DERIVES delta_cycle (caller supplies only event_time + microphase),
-        owns event_creation_seq (J4), rejects finalised (I-02), post-horizon (O2: target_event_time > T), and backward
-        event_times, CAPTURES the complete immutable handler payload + dispatch envelope into the ONE central
-        queued_event_record (registered QUEUED), and inserts the EventRef by the deterministic total-order key (G7/H2).
-        Every `SCHEDULE` elsewhere is shorthand for a call here. O2: because this is the ONLY enqueue path and it rejects
+           rejected_post_epilogue_not_strictly_later | rejected_backward_time | rejected_payload_schema_mismatch(event_type, missing_or_invalid_fields)
+           # AD3/AE7: the COMPLETE result union — every success and rejection variant ScheduleEvent can return. scheduled
+           #   carries the canonical EventRef AND the central queued_event_record; AE7 adds the structured
+           #   rejected_payload_schema_mismatch (returned BEFORE any state mutation).
+  NOTE: K8/J9/AD1/AD2/AD3/AE7/AE8: the SOLE enqueue interface. It DERIVES delta_cycle (caller supplies only event_time +
+        microphase), owns event_creation_seq (J4), rejects finalised (I-02), post-horizon (O2: target_event_time > T), and
+        backward event_times, then VALIDATES the payload against §0.7g-schema and returns a STRUCTURED
+        rejected_payload_schema_mismatch on a malformed request BEFORE any mutation (AE7 — no raw assertion). The successful
+        seat is ONE atomic transaction (AE8): mint seq + EventRef, create the QUEUED queued_event_record, add the registry
+        entry, and insert the EventRef into EQ together (both-or-neither), so the registry and EQ never diverge (AE10). Every
+        `SCHEDULE` elsewhere is shorthand for a call here. O2: because this is the ONLY enqueue path and it rejects
         target_event_time > T, the queue can never hold an ordinary event beyond the horizon T.
+
+PROCEDURE CancelQueuedEvent                                     # AE1: the SOLE queue-owner cancellation operation
+  INPUTS: EventRef, cancellation_reason, cancellation_context
+          # cancellation_context: the cancelling procedure's dispatch / run-hook / closure envelope (audit provenance only).
+  PRECONDITIONS: the ONLY operation that removes a QUEUED event from the pending frontier by CANCELLATION (dispatch removes a
+                 QUEUED event by CONSUMPTION, ProcessEventTime; §0.7e projection convention). NO procedure executes a raw
+                 `CANCEL <ref> on EQ`; every wake / resume / certificate-arrival / block-arrival / hash-work / recovery /
+                 setup-retry / acceptance-batch / round-or-template-closure cancellation routes through here (AE2). It owns the
+                 ATOMIC EQ-removal + central queued_event_registry state update for cancellation (AE1/AE10), so EQ membership
+                 and registry status never diverge.
+  EFFECTS:
+    # AE1: resolve the central record. An unknown EventRef is a DECLARED no-op — never an assertion.
+    IF queued_event_registry[EventRef] does not exist:
+      RETURN cancellation_unknown_event(EventRef)
+    SET status <- queued_event_registry[EventRef].queue_status
+    IF status = QUEUED:
+      # AE1/AE10: ATOMICALLY remove the EventRef from EQ and set the central state QUEUED -> CANCELLED together, so no event
+      #   ever leaves EQ while still QUEUED in the registry and no QUEUED ghost survives.
+      ATOMICALLY:
+        REMOVE EventRef FROM EQ.event_queue
+        SET queued_event_registry[EventRef].queue_status <- CANCELLED
+        RECORD queued_event_cancelled(EventRef, cancellation_reason, cancellation_context)
+      RETURN event_cancelled(EventRef)
+    IF status = DISPATCHING:
+      # AE1: the event is MID-DISPATCH (owned by ProcessEventTime, AD4). Do NOT mutate the queue state; the dispatcher
+      #   completes DISPATCHING -> CONSUMED on return. The caller learns the event could not be cancelled now.
+      RETURN event_already_dispatching(EventRef)
+    # AE1: status in { CONSUMED, CANCELLED } — terminal. Nothing to remove; no rewrite (AD1).
+    RETURN cancellation_terminal_noop(EventRef)
+  RETURNS: cancellation_unknown_event(EventRef) | event_cancelled(EventRef) | event_already_dispatching(EventRef) |
+           cancellation_terminal_noop(EventRef)
+  NOTE: AE1/AE2/AE10: the ONE queue-owner cancellation. It is the sole path that removes an EventRef from EQ, and it does so
+        ATOMICALLY with the central queued_event_registry state change (QUEUED -> CANCELLED), so no event ever leaves EQ while
+        still QUEUED and no terminal/dispatching event is silently removed. A DISPATCHING event is never cancelled here (the
+        dispatcher owns its DISPATCHING -> CONSUMED completion, AD4) — the caller gets event_already_dispatching with no
+        mutation; a CONSUMED/CANCELLED event is a terminal no-op; an unknown EventRef is a declared no-op. Every protocol
+        cancellation — set or singular — calls this (AE2); a set cancellation iterates its EventRefs in stable order and
+        calls this once each.
 ```
 
 **(0.7f) Driver event envelopes (K4; single sanctioned source L1).** A miner-state transition originated
@@ -704,6 +792,49 @@ A driver entry point that performs a miner transition or a `StartWake` THREADS i
 `ApplyMinerStateTransition`, no `StartWake`), so they thread nothing onward and declare NO
 `dispatch_envelope` INPUT — their dispatched event still carries the standard envelope, and no entry point
 ever receives an envelope without the `ScheduleEvent` seating rule above.
+
+**(0.7g-schema) Authoritative event-type dispatch schema (AE4).** This table is the SINGLE authoritative schema for every
+queued event type. It is the source of truth that `ScheduleEvent` validates a request's `immutable_payload` against (AE7 —
+a request whose `event_type` is absent here, or whose payload omits a required field or fails its declared type, is a
+structured `rejected_payload_schema_mismatch`), and that `ProcessEventTime` uses to dispatch to each handler ONLY the
+declared arguments (AE5 Design B). The "recv env" column = the handler receives `dispatch_envelope`; the "recv ref" column
+= the handler receives `dispatched_event_ref`. Design B (AE5): the dispatcher passes `dispatch_envelope` to a handler IFF
+`recv env` = yes, and `dispatched_event_ref` IFF `recv ref` = yes — it NEVER injects an argument the handler does not
+declare. (`ReserveActivate` receives the envelope wrapped as `scheduling_context = ORDINARY_DISPATCH(dispatch_envelope)`,
+its declared parameter — the dispatcher supplies that wrapper, not a bare `dispatch_envelope`.) The §0.7g microphase map and
+the §0.7g-driver seating table remain consistent VIEWS of this schema (target microphase, stable tie key). Run-level hooks
+(`CloseRoundAtHorizon`, `FinalizeSimulationRun`, the post-epilogue application hooks) are NOT queued and do NOT appear here.
+
+| Event type | Handler procedure | Required immutable_payload fields | recv env | recv ref | Target microphase | Stable tie key |
+|-----------|-------------------|-----------------------------------|:--:|:--:|-------------------|----------------|
+| `RoundInitialise` | `RoundInitialise` | `RoundID` | no | no | `ROUND_SETUP` | `(RoundID)` |
+| `TemplateCommit` | `TemplateCommit` | `RoundID, TemplateID` | no | no | `TEMPLATE_COMMIT` | `(RoundID, TemplateID)` |
+| `PrepareParticipants` | `PrepareParticipantsForNewRound` | `RoundID, TemplateID` | yes | no | `ASSIGNMENT_SETUP` | `(RoundID, TemplateID)` |
+| `MinerRegister` | `MinerRegister` | `MinerID` | yes | no | `REGISTRATION` | `(MinerID)` |
+| `ReserveActivate` | `ReserveActivate` | `deficit` | yes (as `scheduling_context`) | no | `RECOVERY_ACTIVATE` | `(MinerID)` |
+| `FullRangeExhaust` | `FullRangeExhaustNoSolution` | `RoundID, TemplateID` | yes | no | `RANGE_EXHAUST_ADJUDICATE` | `(RoundID, TemplateID)` |
+| `HashWorkEvent` | `HashWorkEvent` | `MinerID, AssignmentID, assignment_version, RoundID, TemplateID, from_cursor` (the handler binds `from_cursor` locally as `cursor`) | yes | no | `HASH_WORK` | `(MinerID, AssignmentID, assignment_version)` |
+| `CertificateArrival` | `CertificateArrival` | `recipient, certificate, snapshot, CandidateID, PropagationID` | yes | no | `CERTIFICATE_ARRIVAL` | `(recipient, CandidateID, PropagationID)` |
+| `BlockAcceptancePoint` | `BlockAcceptancePoint` | `certificate, snapshot, CandidateID, PropagationID, outcome` | no | no | `FULL_BLOCK_ARRIVAL` | `(CandidateID, PropagationID)` |
+| `AcceptanceBatchFinalize` | `AcceptanceBatchFinalize` | `acceptance_timestamp, acceptance_point` | yes | no | `ACCEPTANCE_ARBITRATION` | `(acceptance_timestamp, acceptance_point)` |
+| `WakeCompleteEvent` | `WakeCompleteEvent` | `MinerID, AssignmentID` | yes | no | `WAKE_COMPLETE` | `(MinerID, AssignmentID, assignment_version)` |
+| `ResumeFromPause` | `ResumeFromPause` | `MinerID, trigger, pause_cause_candidate_id, pause_cause_propagation_id` | yes | no | `RESUME` | `(MinerID, CandidateID, PropagationID)` |
+| `LeaseExpiry` | `LeaseExpiry` | `assignment (AssignmentID, assignment_version), time t` | yes | no | `LEASE_EXPIRY` | `(MinerID, AssignmentID, assignment_version)` |
+| `AdversarialParticipationChangeEvent` | `AdversarialParticipationChangeEvent` | `MinerID, direction` | yes | no | `PARTICIPATION_CHANGE` | `(MinerID)` |
+| `ActiveHashRateUpdate` | `ActiveHashRateUpdate` | `time t` | no | no | `MONITORING` | `(RoundID)` |
+| `RecoveryDeadlineEvent` | `RecoveryDeadlineEvent` | `RecoveryEpisodeID, RoundID_at_entry, TemplateID_at_entry, state_version_at_entry` | yes | no | `RECOVERY_DEADLINE` | `(RoundID, RecoveryEpisodeID)` |
+| `RecoveryCompletionDueEvent` | `RecoveryCompletionDueEvent` | `RecoveryEpisodeID, RecoveryDecisionID, RecoveryOutcome, RecoveryCensusVersion, RoundID_at_decision, TemplateID_at_decision, state_version_at_decision` | yes | no | `RECOVERY_COMPLETION_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryDecisionID)` |
+| `RecoveryAssignmentContinuationDueEvent` | `RecoveryAssignmentContinuationDueEvent` | `RecoveryEpisodeID, RecoveryDecisionID, ContinuationGeneration, RecoveryOutcome, RoundID_at_decision, TemplateID_at_decision, state_version_at_decision` | yes | no | `RECOVERY_ASSIGNMENT_CONTINUATION_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryDecisionID, ContinuationGeneration)` |
+| `RecoveryWorkDueEvent` | `RecoveryWorkDueEvent` | `RecoveryEpisodeID, RecoveryWorkID, WorkGeneration, RecoveryWorkAction, RecoveryCensusVersion, RoundID_at_work, TemplateID_at_work, state_version_at_work` | yes | no | `RECOVERY_WORK_DUE` | `(RoundID, RecoveryEpisodeID, RecoveryWorkID, WorkGeneration)` |
+| `SetupRetryEvent` | `SetupRetryEvent` | `RoundID, setup_kind, SetupRetryID, TemplateID_at_seat, TemplateRefreshSetupID, retry_generation, reason` | yes | **yes** | `ROUND_SETUP` | `(RoundID, setup_kind, SetupRetryID, TemplateID_at_seat, TemplateRefreshSetupID, retry_generation)` |
+| `RoundAbort` | `RoundAbort` | `RoundID` | yes | no | `TERMINAL_ABORT` | `(RoundID)` |
+
+`SetupRetryEvent` is the ONLY handler with `recv ref` = yes (AC2/AD5: `dispatched_event_ref` is a mandatory input the
+dispatcher injects). `BlockAcceptancePoint`, `RoundInitialise`, `TemplateCommit`, and `ActiveHashRateUpdate` are the
+handlers with `recv env` = no — the dispatcher does NOT pass them a `dispatch_envelope` (AE5: this closes the AD5 defect
+whereby `dispatch_envelope` was passed to every ordinary handler including ones, like `BlockAcceptancePoint`, that do not
+declare it). Every handler's declared INPUTS agree with this row (`STAGE_01AE_EVENT_HANDLER_SCHEMA_AUDIT.md`,
+`STAGE_01AE_DISPATCH_SIGNATURE_AUDIT.md`).
 
 ### 0.8 Core data model (Stage 1F)
 
@@ -1157,8 +1288,9 @@ STRUCTURE RoundContext registries (initialised by RoundInitialise, cleared on cl
   #   dispatch can NEVER leave the registry at QUEUED and a later CloseRoundAssignments never finds a terminal retry record
   #   whose central event is falsely QUEUED.
   # --- AD8 completeness + integrity of the dispatched record ---
-  # ScheduleEvent REJECTS constructing an incomplete queued_event_record (it asserts the payload carries every required
-  #   field). ProcessEventTime builds a COMPLETE dispatcher-owned OrdinaryDispatchContext. On detected registry corruption it
+  # ScheduleEvent REJECTS constructing an incomplete queued_event_record (AD8 used a construction assert; AE7 SUPERSEDES that
+  #   with the STRUCTURED rejected_payload_schema_mismatch returned before any mutation — no raw assertion).
+  #   ProcessEventTime builds a COMPLETE dispatcher-owned OrdinaryDispatchContext. On detected registry corruption it
   #   uses the declared integrity terminal disposition (HandleDispatchIntegrityFailure): resolve + terminalise the
   #   SetupRetryID's record, use a COMPLETE dispatcher-integrity envelope for a current-round abort, and do NOT abort if the
   #   record belongs to an old/terminal round. A malformed untrusted envelope may NEVER become the transition identity for
@@ -1574,7 +1706,7 @@ PROCEDURE StartWake                                             # V3/V9: a TRANS
       #     the seat -> CANCEL the seated WakeCompleteEvent so no orphan wake survives; leave the miner in from_state
       #     (NOT WAKING). W6: `tr` is one of the four declared ApplyMinerStateTransition results; only transition_applied
       #     retains the wake.
-      IF wake_event_ref is still pending on EQ: CANCEL wake_event_ref on EQ
+      CALL CancelQueuedEvent(wake_event_ref, cancellation_reason = wake_rollback_before_transition, cancellation_context = scheduling_context)   # AE2: queue-owner cancellation (idempotent; no-op if not QUEUED)
       RECORD wake_transition_failed(MinerID, wake_event_ref, tr)
       RETURN wake_transition_failed_after_seat(reason = tr, WakeEventRef = wake_event_ref)
     # (6) PUBLISH the WakeEventRef on the assignment's wake registry, so a later rollback/cancel (V4/V8) can find it.
@@ -1794,6 +1926,7 @@ PROCEDURE RunInitialise                                         # Q5: creates AL
     INITIALISE transition_rejection_log    <- empty log     # K5
     INITIALISE setup_retry_records         <- empty map     # Z1: SetupRetryID -> setup_retry_record (the single retry registry)
     INITIALISE queued_event_registry       <- empty map     # AD1: EventRef -> queued_event_record (the ONE authoritative queue-status source)
+    INITIALISE setup_retry_by_seat_event_ref <- empty map   # AE6: EventRef -> SetupRetryID (IMMUTABLE reverse binding; corrupt-retry owner is resolved from the trusted seat EventRef, never the payload)
     INITIALISE waking_origin_assignment_ref <- empty map    # Z5: MinerID -> assignment_version_ref (set on WAKING entry, cleared on WAKING exit)
     SET        maximum_setup_retries       <- config.maximum_setup_retries   # W8/Y3: bounded retry budget per scope
   RETURNS: RunContext(RunID, EventQueueContext = EQ, RunHookContext, rebased_boundaries, run_finalised,
@@ -2095,10 +2228,12 @@ PROCEDURE PrepareParticipantsForNewRound
         #   (immutable), AFTER the successful ScheduleEvent. The queued_event_record `record` is already registered QUEUED
         #   (AD1) — the retry record keeps NO event_queue_status mirror; its queue state is
         #   queued_event_registry[seat_event_ref].queue_status. The seat is the ONLY CREATE of the retry record (AB3).
-        ATOMICALLY: SET setup_retry_records[srid] <- setup_retry_record(SetupRetryID = srid, setup_kind = PARTICIPANT_SETUP,
+        ATOMICALLY:
+          SET setup_retry_records[srid] <- setup_retry_record(SetupRetryID = srid, setup_kind = PARTICIPANT_SETUP,
               RoundID = RoundID_current, TemplateID_at_seat = TemplateID_committed, TemplateRefreshSetupID = null,
               retry_generation = g, seat_event_ref = event_ref, status = SEATED,
               target_disposition = null, terminal_closure_pending = false)   # Z1/AA2/AC1/AD1
+          SET setup_retry_by_seat_event_ref[event_ref] <- srid              # AE6: IMMUTABLE reverse binding published with the record
         RETURN participant_set_setup_retry_seated(srid, setup_reason)
     RETURN CALL RoundAbort(RoundContext, reason = participant_setup_failed(setup_reason),
                            dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # declared abort
@@ -2129,7 +2264,7 @@ PROCEDURE AbortPendingWakeForRollback                          # Y5: the ONE nam
   EFFECTS:
     # (1) Y4/Z3: cancel the exact WakeCompleteEvent FIRST so no wake can activate anything mid-rollback. WakeEventRef may be
     #   null (a pre-transition wake-schedule failure) — cancel ONLY when it is non-null AND still pending (no undefined lookup).
-    IF WakeEventRef != null AND WakeEventRef is still pending on EQ: CANCEL WakeEventRef on EQ
+    IF WakeEventRef != null: CALL CancelQueuedEvent(WakeEventRef, cancellation_reason = wake_abort_for_rollback, cancellation_context = WAKE_ROLLBACK)   # AE2: queue-owner cancellation (idempotent; no-op if not QUEUED)
     # (2) Y5/Z5: depart a still-WAKING miner WAKING -> OFFLINE via the LEGAL T12 ValidationAbort trigger. FIRST verify the
     #   immutable wake-origin association: the rollback is legal ONLY when this miner's CURRENT WAKING residency was
     #   initiated by the EXACT AssignmentID/version of this rollback item (waking_origin_assignment_ref[MinerID]) — the head
@@ -2421,11 +2556,11 @@ PROCEDURE CancelSetupRetriesForRound                            # AA2: terminali
       #   NO LONGER carries an event_queue_status mirror — the decision keys off queued_event_registry[seat_event_ref].queue_status.
       SET qstatus <- queued_event_registry[snapshot.seat_event_ref].queue_status       # AD1/AD9: single authoritative queue state
       IF qstatus = QUEUED:
-        # AD9: a still-QUEUED (never-dispatched) retry — its record is SEATED. Cancel the pending event on EQ, set the CENTRAL
-        #   queue state CANCELLED (QUEUED -> CANCELLED), then TERMINALISE the record by key through the transition guard
+        # AD9/AE1: a still-QUEUED (never-dispatched) retry — its record is SEATED. The ONE queue owner CancelQueuedEvent
+        #   ATOMICALLY removes the event from EQ and sets the CENTRAL queue state QUEUED -> CANCELLED (no separate
+        #   queue_status write here — AE1 owns it); then TERMINALISE the record by key through the transition guard
         #   (SEATED -> CANCELLED, AC7). The IMMUTABLE seat_event_ref is PRESERVED for replay auditing (AC8).
-        IF snapshot.seat_event_ref is still pending on EQ: CANCEL snapshot.seat_event_ref on EQ
-        SET queued_event_registry[snapshot.seat_event_ref].queue_status <- CANCELLED   # AD9: QUEUED -> CANCELLED (central registry only)
+        CALL CancelQueuedEvent(snapshot.seat_event_ref, cancellation_reason = cancellation_reason, cancellation_context = dispatch_or_run_hook_context)   # AE2/AE1: atomic EQ-removal + QUEUED -> CANCELLED
         CALL SetSetupRetryStatus(srid, CANCELLED)                                      # AA2/AC7: SEATED -> CANCELLED (legal)
         UPDATE setup_retry_records[srid].target_disposition <- cancellation_reason     # AA2/AB3
       ELSE IF qstatus = DISPATCHING:
@@ -2646,7 +2781,7 @@ PROCEDURE RangeAssignFromPlan                                   # W5: plan-bound
     # V3/V9: the wake FAILED after the PENDING assignment was created. StartWake left the miner in fs (never WAKING)
     #   and cancelled any seated event; ROLL BACK the un-activated head legally and restore the ledgers.
     IF wr = wake_transition_failed_after_seat(reason2, wref):
-      IF wref is still pending on EQ: CANCEL wref on EQ                # idempotent; StartWake already cancelled
+      CALL CancelQueuedEvent(wref, cancellation_reason = wake_superseded_rollback, cancellation_context = RANGE_ASSIGN_ROLLBACK)   # AE2: queue-owner cancellation (idempotent; no-op if not QUEUED)
     CLOSE assignment as CLOSED (status = CLOSED, custody_status = revoked, termination_reason = wake_failure,
           revocation_reason = assignment_revoked, closure_detail = range_assign_wake_failed)   # X7 canonical (J7/I18b): no live head
     RESTORE the coverage-state / custody ledgers for range (I8a/I8b)
@@ -2676,20 +2811,31 @@ PROCEDURE StartHashing
   PRECONDITIONS: miner_state(MinerID) = ACTIVE_HASHING; assignment VALID and CURRENT
   EFFECTS:
     # G9: begin EVENT-SCHEDULED hashing; do NOT loop. Schedule the first unit and return.
-    CALL ScheduleNextHashWork(RoundContext, MinerID, assignment,
+    # AE9: CAPTURE the result and report it truthfully. The only reachable rejection is post_horizon_event_rejected (O2:
+    #   the first unit at now + modeled_hash_step_time falls beyond the horizon T) — then hashing does NOT begin.
+    SET hw <- CALL ScheduleNextHashWork(RoundContext, MinerID, assignment,
                               from_cursor = next unsearched nonce in range(assignment))
-  RETURNS: hashing_started
+    IF hw = hash_work_not_seated(reason):
+      RETURN hashing_not_started(reason)                       # AE9/O2: at the horizon — deterministic terminal, not an error
+  RETURNS: hashing_started | hashing_not_started(reason)
 
 PROCEDURE ScheduleNextHashWork
   INPUTS: RoundContext, MinerID, assignment, from_cursor
   PRECONDITIONS: none
   EFFECTS:
     # G9/M5: schedule ONE bounded unit of hash work through ScheduleEvent with an EXPLICIT target microphase.
-    CALL ScheduleEvent(EQ, RoundContext, HashWorkEvent,
+    # AE9: CAPTURE the ScheduleEvent result and REPORT it TRUTHFULLY — never return `scheduled` when the seat was rejected.
+    #      The only reachable rejection here is post_horizon_event_rejected (O2: now + modeled_hash_step_time > T ends hashing
+    #      at the horizon); the schema/time/backward rejections are unreachable (a valid in-schema HashWorkEvent at a
+    #      forward, non-finalised time), but ANY non-scheduled result maps to hash_work_not_seated(reason).
+    SET r <- CALL ScheduleEvent(EQ, RoundContext, HashWorkEvent,
                        target_event_time = now + modeled_hash_step_time, target_microphase = HASH_WORK,
                        {MinerID, AssignmentID(assignment), assignment_version(assignment),
                         RoundID, TemplateID, from_cursor})   # M5: explicit microphase; carries identity keys
-  RETURNS: scheduled
+    IF r = scheduled(event_ref, record):
+      RETURN hash_work_seated(event_ref)                     # AE9: the canonical EventRef of the seated HashWorkEvent
+    RETURN hash_work_not_seated(r)                           # AE9: r is the exact ScheduleEvent rejection (e.g. post_horizon_event_rejected)
+  RETURNS: hash_work_seated(EventRef) | hash_work_not_seated(reason)
 
 PROCEDURE HashWorkEvent
   INPUTS: RoundContext, MinerID, AssignmentID, assignment_version, RoundID, TemplateID, cursor, dispatch_envelope
@@ -2741,8 +2887,11 @@ PROCEDURE HashWorkEvent
       RETURN CALL ExhaustionAdjudicate(RoundContext, assignment, MinerID, mode,
                                        dispatch_envelope = dispatch_envelope)   # M1: threaded envelope
     # G9: schedule the NEXT unit and return to the loop (non-blocking; other miners/events interleave).
+    # AE9: the continuation disposition IS the ScheduleNextHashWork result — hash_work_seated(EventRef) for a scheduled next
+    #   unit, or hash_work_not_seated(post_horizon_event_rejected) when the next unit would fall beyond T (hashing ends at
+    #   the horizon). It is never reported as a bare `scheduled`.
     RETURN CALL ScheduleNextHashWork(RoundContext, MinerID, assignment, from_cursor = cursor)
-  RETURNS: hash_work_result (solution | exhausted | continued | noop)
+  RETURNS: hash_work_result (solution | exhausted | continued(hash_work_seated(EventRef) | hash_work_not_seated(reason)) | noop)
   NOTE: G9: hashing is a chain of discrete units, so a certificate-arrival (or any event) scheduled
         between two units is processed in queue order -- no blocking loop delays it (TV48). Multiple
         miners hash through independently scheduled units, never through nested blocking calls from
@@ -2979,7 +3128,11 @@ PROCEDURE AdversarialParticipationChangeEvent
       RECORD provenance(X): previous_assignment_reference, custody_status = revoked, revocation_reason = adversarial_withdrawal
       # H7/G9: cancel this version's pending hash-work units explicitly (they would self-cancel by the
       #        stale guard, but the exit CANCELS them so no unit is charged after the census leaves H_active).
-      CANCEL pending HashWorkEvent units for (MinerID, AssignmentID(X), assignment_version(X))
+      FOR EACH er IN SORT({ er : queued_event_registry[er].queue_status = QUEUED
+                            AND queued_event_registry[er].event_type = HashWorkEvent
+                            AND er's immutable_payload (MinerID, AssignmentID, assignment_version) = (MinerID, AssignmentID(X), assignment_version(X)) }
+                          IN stable EventRef order):
+        CALL CancelQueuedEvent(er, cancellation_reason = adversarial_withdrawal, cancellation_context = dispatch_envelope)   # AE2: queue-owner cancellation
       # J7: adversarial withdrawal TERMINATES the version -- status = CLOSED (never SUPERSEDED; SUPERSEDED
       #     is renewal-only). custody_status = revoked, revocation_reason = adversarial_withdrawal (I-07).
       #     After this, the lineage has ZERO live heads (I18b).
@@ -3309,9 +3462,9 @@ PROCEDURE CancelActiveRecoveryEpisode                           # S4: terminal c
     FOR EACH decision_id in pending_recovery_decisions[episode] (stable order by decision_id):
       SET D <- recovery_decisions[decision_id]
       IF D.due_event_ref != null AND D.due_event_ref is still pending on EQ:
-        CANCEL D.due_event_ref on EQ                            # cancel the queued RecoveryCompletionDueEvent
+        CALL CancelQueuedEvent(D.due_event_ref, cancellation_reason = recovery_episode_cancelled, cancellation_context = RECOVERY_EPISODE_CANCEL)   # AE2: queue-owner cancellation (idempotent; no-op if not QUEUED)
       IF D.continuation_event_ref != null AND D.continuation_event_ref is still pending on EQ:
-        CANCEL D.continuation_event_ref on EQ                   # S3/S4/T1: cancel the queued RecoveryAssignmentContinuationDueEvent
+        CALL CancelQueuedEvent(D.continuation_event_ref, cancellation_reason = recovery_episode_cancelled, cancellation_context = RECOVERY_EPISODE_CANCEL)   # AE2: queue-owner cancellation (idempotent; no-op if not QUEUED)
       IF D.continuation_due_status = DUE: SET recovery_decisions[decision_id].continuation_due_status <- CANCELLED   # U4: explicit terminal consumption
       CALL SetRecoveryDecisionStatus(RoundContext, decision_id, CANCELLED)   # S4/R6: cancel + keep the mirror consistent
     SET pending_recovery_decisions[episode] <- empty set
@@ -3321,7 +3474,7 @@ PROCEDURE CancelActiveRecoveryEpisode                           # S4: terminal c
              AND recovery_work[work_id].status in {CREATED, ARMED, DUE, APPLYING} (stable order by work_id):
       SET W <- recovery_work[work_id]
       IF W.work_due_event_ref != null AND W.work_due_event_ref is still pending on EQ:
-        CANCEL W.work_due_event_ref on EQ                       # V7: cancel the queued RecoveryWorkDueEvent
+        CALL CancelQueuedEvent(W.work_due_event_ref, cancellation_reason = recovery_episode_cancelled, cancellation_context = RECOVERY_EPISODE_CANCEL)   # AE2: queue-owner cancellation (idempotent; no-op if not QUEUED)
       SET recovery_work[work_id].status <- CANCELLED
       IF W.due_status = DUE: SET recovery_work[work_id].due_status <- CANCELLED   # U4/V7: explicit terminal consumption
     SET pending_recovery_work[episode] <- null                  # V7: no live in-flight work remains
@@ -3365,9 +3518,9 @@ PROCEDURE ReconcilePendingRecoveryDecisions                     # Q1/Q3: superse
         #        attempt to seat a replacement. Cancel its due event when the queue still holds it.
         CALL SetRecoveryDecisionStatus(RoundContext, decision_id, SUPERSEDED)   # Q1/Q3/R6: supersede + keep the mirror consistent
         IF D.due_event_ref != null AND D.due_event_ref is still pending on EQ:
-          CANCEL D.due_event_ref on EQ                          # Q3: cancel the pending due event when possible (same CANCEL idiom as G8/M3)
+          CALL CancelQueuedEvent(D.due_event_ref, cancellation_reason = recovery_decision_superseded, cancellation_context = RECOVERY_DECISION_RECONCILE)   # AE2: queue-owner cancellation (idempotent; no-op if not QUEUED)
         IF D.continuation_event_ref != null AND D.continuation_event_ref is still pending on EQ:
-          CANCEL D.continuation_event_ref on EQ                 # S3/T1: cancel a superseded DEFERRED branch-C continuation Due event (it would stale-noop anyway)
+          CALL CancelQueuedEvent(D.continuation_event_ref, cancellation_reason = recovery_decision_superseded, cancellation_context = RECOVERY_DECISION_RECONCILE)   # AE2: queue-owner cancellation (idempotent; no-op if not QUEUED)
         REMOVE decision_id from pending_recovery_decisions[episode]
       ELSE:
         # still consistent with the FINAL census -> RE-AFFIRM to the newest version (its justification is current)
@@ -3403,7 +3556,7 @@ PROCEDURE ReconcilePendingRecoveryWork                          # V1: reconcile 
         RETURN recovery_work_reconciled_rebound(W.work_id, latest_census_version)
       # (2) no longer warranted -> SUPERSEDE the DUE record and let the outcome path govern.
       SET recovery_work[W.work_id].status <- SUPERSEDED ; SET recovery_work[W.work_id].due_status <- SUPERSEDED   # V1/V7
-      IF W.work_due_event_ref != null AND W.work_due_event_ref is still pending on EQ: CANCEL W.work_due_event_ref on EQ
+      IF W.work_due_event_ref != null: CALL CancelQueuedEvent(W.work_due_event_ref, cancellation_reason = recovery_work_superseded, cancellation_context = RECOVERY_WORK_RECONCILE)   # AE2: queue-owner cancellation (idempotent; no-op if not QUEUED)
       SET pending_recovery_work[episode] <- null
       RETURN recovery_work_reconciled_superseded(W.work_id)
     # (3) the work is ARMED for a FUTURE event (not due at THIS event_time). POLICY: RE-AFFIRM the SAME work identity to
@@ -3413,7 +3566,7 @@ PROCEDURE ReconcilePendingRecoveryWork                          # V1: reconcile 
         SET recovery_work[W.work_id].bound_census_version <- latest_census_version   # V1: re-affirm the same ARMED identity
         RETURN recovery_work_reconciled_reaffirmed(W.work_id, latest_census_version)
       SET recovery_work[W.work_id].status <- SUPERSEDED ; SET recovery_work[W.work_id].due_status <- SUPERSEDED   # V1/V7
-      IF W.work_due_event_ref != null AND W.work_due_event_ref is still pending on EQ: CANCEL W.work_due_event_ref on EQ
+      IF W.work_due_event_ref != null: CALL CancelQueuedEvent(W.work_due_event_ref, cancellation_reason = recovery_work_superseded, cancellation_context = RECOVERY_WORK_RECONCILE)   # AE2: queue-owner cancellation (idempotent; no-op if not QUEUED)
       SET pending_recovery_work[episode] <- null
       RETURN recovery_work_reconciled_superseded(W.work_id)
     RETURN recovery_work_reconciled_noop(W.work_id)
@@ -3600,7 +3753,7 @@ PROCEDURE SeatRecoveryWork                                       # U1/U3: seat O
       #   consume its due fact BEFORE publishing the replacement, so two live in-flight work records NEVER coexist.
       SET recovery_work[W0.work_id].status <- SUPERSEDED
       IF W0.due_status = DUE: SET recovery_work[W0.work_id].due_status <- SUPERSEDED   # V7: consume the stale due fact
-      IF W0.work_due_event_ref != null AND W0.work_due_event_ref is still pending on EQ: CANCEL W0.work_due_event_ref on EQ
+      IF W0.work_due_event_ref != null: CALL CancelQueuedEvent(W0.work_due_event_ref, cancellation_reason = recovery_work_stale_superseded, cancellation_context = RECOVERY_WORK_SEAT_SUPERSEDE)   # AE2: queue-owner cancellation (idempotent; no-op if not QUEUED)
       SET pending_recovery_work[episode] <- null
     # U3/V7 ATOMIC SEAT. Compute identity + target BEFORE mutating; publish the active work identity ONLY after
     #   ScheduleEvent succeeds (the prior stale record was already superseded/cancelled above). Never advance the work
@@ -3814,7 +3967,7 @@ PROCEDURE ReserveActivateFromPlan                               # V4/V5: plan-bo
     # V4: wake seating (or its post-seat transition) FAILED after the PENDING assignment was created -> ROLL BACK legally:
     #   close the assignment, restore coverage/custody ledgers, and leave the reserve miner in RESERVE (never stranded WAKING).
     IF wr = wake_transition_failed_after_seat(reason2, wref):
-      IF wref is still pending on EQ: CANCEL wref on EQ                 # StartWake already cancelled; idempotent
+      CALL CancelQueuedEvent(wref, cancellation_reason = wake_superseded_rollback, cancellation_context = RESERVE_ACTIVATE_ROLLBACK)   # AE2: queue-owner cancellation (idempotent; no-op if not QUEUED)
     CLOSE assignment as CLOSED (status = CLOSED, custody_status = revoked, termination_reason = wake_failure,
           revocation_reason = assignment_revoked, closure_detail = reserve_activation_wake_failed)   # X7 canonical (J7/I18b): no live head
     RESTORE the coverage-state / custody ledgers for candidate_range (I8a/I8b)
@@ -4393,7 +4546,7 @@ PROCEDURE RollbackRecoveryAssignmentPlan                        # U5/X1: revert 
     SET rolled_to_offline <- false ; SET rolled_back_items <- empty   # X1: structured result
     # (1) X1: cancel every captured WakeCompleteEvent FIRST (so no wake can activate a head being closed).
     FOR EACH item in rollback_record.items (stable order):
-      IF item.WakeEventRef is still pending on EQ: CANCEL item.WakeEventRef on EQ
+      CALL CancelQueuedEvent(item.WakeEventRef, cancellation_reason = recovery_plan_rolled_back, cancellation_context = RECOVERY_PLAN_ROLLBACK)   # AE2: queue-owner cancellation (idempotent; no-op if not QUEUED)
     # (2) Y4/Y5/X1/X2/X8: resolve EVERY affected miner through the ONE named rollback operation, UNCONDITIONALLY — it does
     #   NOT require item.AssignmentID to remain a live bound head (a CLOSED / revoked / detached head does NOT make a
     #   WAKING miner safe, Y4). AbortPendingWakeForRollback departs a still-WAKING miner via the LEGAL T12 ValidationAbort
@@ -4554,9 +4707,18 @@ PROCEDURE LeaseExpiry
                AND entry_stop_reason(holder) = VALID_SOLUTION_VERIFIED
         # M3: explicitly CANCEL any candidate-specific resume/wake events targeting THIS closed assignment, so
         #     no scheduled ResumeFromPause / WakeCompleteEvent can later re-activate the miner onto a CLOSED head.
-        CANCEL every scheduled ResumeFromPause for (holder, pause_cause_candidate_id(assignment),
-               pause_cause_propagation_id(assignment))
-        CANCEL any scheduled WakeCompleteEvent for (holder, AssignmentID(assignment), assignment_version(assignment))
+        FOR EACH er IN SORT({ er : queued_event_registry[er].queue_status = QUEUED
+                              AND queued_event_registry[er].event_type = ResumeFromPause
+                              AND er's immutable_payload (MinerID, pause_cause_candidate_id, pause_cause_propagation_id)
+                                  = (holder, pause_cause_candidate_id(assignment), pause_cause_propagation_id(assignment)) }
+                            IN stable EventRef order):
+          CALL CancelQueuedEvent(er, cancellation_reason = assignment_closed_lease_expiry, cancellation_context = dispatch_envelope)   # AE2
+        FOR EACH er IN SORT({ er : queued_event_registry[er].queue_status = QUEUED
+                              AND queued_event_registry[er].event_type = WakeCompleteEvent
+                              AND er's immutable_payload (MinerID, AssignmentID) = (holder, AssignmentID(assignment))
+                              AND queued_event_registry[er].stable tie key version = assignment_version(assignment) }
+                            IN stable EventRef order):
+          CALL CancelQueuedEvent(er, cancellation_reason = assignment_closed_lease_expiry, cancellation_context = dispatch_envelope)   # AE2
         ATOMICALLY:
           SET status(assignment)                 <- CLOSED
           SET custody_status(range(assignment))  <- expired
@@ -4570,7 +4732,12 @@ PROCEDURE LeaseExpiry
         #     pre-wake). Resolve the pending wake and the miner state EXPLICITLY before closing/reassigning --
         #     do NOT rely on the HashWorkEvent G9 stale guard (which does not protect WakeCompleteEvent).
         # (1)-(2) M3: identify and CANCEL the exact pending WakeCompleteEvent for this head BEFORE closing.
-        CANCEL the scheduled WakeCompleteEvent for (holder, AssignmentID(assignment), assignment_version(assignment))
+        FOR EACH er IN SORT({ er : queued_event_registry[er].queue_status = QUEUED
+                              AND queued_event_registry[er].event_type = WakeCompleteEvent
+                              AND er's immutable_payload (MinerID, AssignmentID) = (holder, AssignmentID(assignment))
+                              AND queued_event_registry[er].stable tie key version = assignment_version(assignment) }
+                            IN stable EventRef order):
+          CALL CancelQueuedEvent(er, cancellation_reason = pending_lease_expiry, cancellation_context = dispatch_envelope)   # AE2: exact pending WakeCompleteEvent
         # (3) M3: if the holder is WAKING for THIS head, resolve it OFF WAKING via the legal edge (T12) with the
         #     exact dispatch_envelope; a pre-wake holder (REGISTERED/RESERVE/LOW_POWER_LISTEN) needs no edge.
         IF miner_state(holder) = WAKING AND target_assignment(holder) = assignment:
@@ -4679,7 +4846,7 @@ PROCEDURE RangeReassignFromPlan                                 # W5: plan-bound
       # V3/V9: the wake FAILED after the REASSIGNED PENDING head was created. StartWake left the miner in fs (never
       #   WAKING) and cancelled any seated event; ROLL BACK the un-activated head legally so the suffix stays reassignable.
       IF wr = wake_transition_failed_after_seat(reason2, wref):
-        IF wref is still pending on EQ: CANCEL wref on EQ            # idempotent; StartWake already cancelled
+        CALL CancelQueuedEvent(wref, cancellation_reason = wake_superseded_rollback, cancellation_context = RANGE_REASSIGN_ROLLBACK)   # AE2: queue-owner cancellation (idempotent; no-op if not QUEUED)
       CLOSE assignment as CLOSED (status = CLOSED, custody_status = revoked, termination_reason = wake_failure,
           revocation_reason = assignment_revoked, closure_detail = range_reassign_wake_failed)   # X7 canonical (J7/I18b)
       RESTORE the coverage-state / custody ledgers for range (I8a/I8b) so it remains reassignable
@@ -5049,8 +5216,8 @@ PROCEDURE HandlePropagationFailure
     REMOVE cpc from active_propagation_set                          # F3: ONLY this candidate leaves the set
     # (1) cancel ONLY this candidate's obsolete events (F2): its per-recipient certificate-arrival
     #     events and its block-arrival event. Another candidate's events are NEVER cancelled here.
-    CANCEL every event in certificate_arrival_events(cpc)              # AD3: every stored element is a real EventRef
-    IF block_arrival_event(cpc) != null: CANCEL block_arrival_event(cpc)   # AD3: null when the seat was post-horizon rejected (no-op)
+    FOR EACH er IN certificate_arrival_events(cpc) IN stable EventRef order: CALL CancelQueuedEvent(er, cancellation_reason = propagation_failed(failure_reason), cancellation_context = dispatch_envelope)   # AE2: set cancellation via the queue owner
+    IF block_arrival_event(cpc) != null: CALL CancelQueuedEvent(block_arrival_event(cpc), cancellation_reason = propagation_failed(failure_reason), cancellation_context = dispatch_envelope)   # AE2 (null if the block seat was post-horizon rejected)
     # (2) resume ONLY miners whose pause cause matches BOTH ids of THIS candidate (F2/G11). Iterate in a
     #     STABLE sorted order by MinerID (G7). A miner paused by another candidate is left unchanged.
     FOR EACH miner M in SORT({ m : m has a PAUSED assignment
@@ -5190,8 +5357,8 @@ PROCEDURE ValidBlockAccept
     #     cross-candidate cancellation is legitimate (acceptance).
     FOR EACH other cpc in SORT(active_propagation_set BY CandidateID ascending), other.CandidateID != winner_CandidateID:
       SET status(other) <- (other was a same-timestamp valid loser ? COMPETING : CANCELLED)
-      CANCEL every event in certificate_arrival_events(other)
-      IF block_arrival_event(other) != null: CANCEL block_arrival_event(other)   # AD3: null if the block seat was post-horizon rejected (no-op)
+      FOR EACH er IN certificate_arrival_events(other) IN stable EventRef order: CALL CancelQueuedEvent(er, cancellation_reason = candidate_superseded_by_acceptance, cancellation_context = dispatch_envelope)   # AE2: set cancellation via the queue owner
+      IF block_arrival_event(other) != null: CALL CancelQueuedEvent(block_arrival_event(other), cancellation_reason = candidate_superseded_by_acceptance, cancellation_context = dispatch_envelope)   # AE2 (null if the block seat was post-horizon rejected)
     CLEAR active_propagation_set                                  # no live candidate remains after acceptance
     # E6/G8: a SINGLE transition to ROUND_ACCEPTED, from SOLUTION_PROPAGATION or SECURITY_RECOVERY.
     TRANSITION round_state -> ROUND_ACCEPTED                      # bumps state_version (G10)
@@ -5260,7 +5427,11 @@ PROCEDURE CloseRoundAssignments
           # a pending activation: cancel it; the miner never reaches ACTIVE_HASHING for this round.
           # F6/F8: WAKING -> LOW_POWER_LISTEN is ILLEGAL (miner SM §3.1); the legal closure edge is
           #        WAKING -> OFFLINE (T12), which also prevents activation into a closed round (TV37).
-          CANCEL the pending WakeCompleteEvent for h
+          FOR EACH er IN SORT({ er : queued_event_registry[er].queue_status = QUEUED
+                                AND queued_event_registry[er].event_type = WakeCompleteEvent
+                                AND er's immutable_payload (MinerID, AssignmentID) = (h, AssignmentID(X)) }
+                              IN stable EventRef order):
+            CALL CancelQueuedEvent(er, cancellation_reason = round_closed_while_waking, cancellation_context = dispatch_envelope)   # AE2
           CLOSE X as round-ended                                 # bound PENDING assignment left un-activated
           CALL ApplyMinerStateTransition(h, WAKING, OFFLINE,
                  transition_envelope = dispatch_envelope,   # S1: ONE envelope object (RUN_HOOK+HorizonHookID at horizon close)
@@ -5278,9 +5449,14 @@ PROCEDURE CloseRoundAssignments
           # miner_state(h) unchanged (OFFLINE stays OFFLINE; DISQUALIFIED stays DISQUALIFIED)
     # cancel pending events belonging to the closed round (G9: including HashWorkEvents; G5: clear the
     # acceptance batch registry so no stale batch finalizes after closure; S4: including the recovery-timeline events).
-    CANCEL all pending wake / resume / certificate-arrival / BlockAcceptancePoint / HashWorkEvent /
-           AdversarialParticipationChangeEvent / RecoveryDeadlineEvent / RecoveryCompletionDueEvent /
-           RecoveryAssignmentContinuationDueEvent / RecoveryWorkDueEvent / SetupRetryEvent events for RoundID   # S4/T1/U1/AA2: recovery-timeline AND setup-retry events cancelled at closure
+    # AE2: iterate every QUEUED event of this closing RoundID (any event type — WakeCompleteEvent / ResumeFromPause /
+    #   CertificateArrival / BlockAcceptancePoint / HashWorkEvent / AdversarialParticipationChangeEvent / the recovery-timeline
+    #   events / SetupRetryEvent) in stable EventRef order and cancel it through the ONE queue owner, so no closed-round event
+    #   can be removed from EQ without its central registry status changing to CANCELLED atomically.
+    FOR EACH er IN SORT({ er : queued_event_registry[er].queue_status = QUEUED
+                          AND er belongs to RoundID (its immutable_payload RoundID / RoundID_at_* = RoundID) }
+                        IN stable EventRef order):
+      CALL CancelQueuedEvent(er, cancellation_reason = round_closed(RoundID), cancellation_context = dispatch_envelope)   # AE2
     # AA2: TERMINALISE every setup-retry record of this closing RoundID through the ONE named terminaliser — a SEATED
     #   record has its (now-cancelled) event_ref released and becomes CANCELLED; an APPLYING record is left for its
     #   executing handler to finish (ABORTED/CANCELLED). No terminal/superseded round leaves a SEATED retry record.
@@ -5390,7 +5566,12 @@ PROCEDURE CloseTemplateAssignments
           # miner_state(h) stays LOW_POWER_LISTEN; entry_stop_reason(h) unchanged; no transition
         CASE WAKING:
           # the bound assignment is on the discarded template -> fails TemplateID validation (legal T12).
-          CANCEL the pending WakeCompleteEvent for h ; release the bound range
+          FOR EACH er IN SORT({ er : queued_event_registry[er].queue_status = QUEUED
+                                AND queued_event_registry[er].event_type = WakeCompleteEvent
+                                AND er's immutable_payload (MinerID, AssignmentID) = (h, AssignmentID(X)) }
+                              IN stable EventRef order):
+            CALL CancelQueuedEvent(er, cancellation_reason = template_refresh_wake_abort, cancellation_context = dispatch_envelope)   # AE2
+          RELEASE the bound range
           CALL ApplyMinerStateTransition(h, WAKING, OFFLINE,
                  transition_envelope = dispatch_envelope, reason = template_refresh_wake_abort,   # S1: ONE envelope object
                  assignment_ref = X, candidate_id = null, propagation_id = null)                               # T12 (F6/M1)
@@ -5401,11 +5582,15 @@ PROCEDURE CloseTemplateAssignments
     # WITHOUT modifying any historical record.
     FOR EACH cpc in SORT(active_propagation_set BY CandidateID ascending) WHERE TemplateID(cpc) = old_TemplateID:
       SET status(cpc) <- CANCELLED
-      CANCEL every event in certificate_arrival_events(cpc)
-      IF block_arrival_event(cpc) != null: CANCEL block_arrival_event(cpc)   # AD3: null if the block seat was post-horizon rejected (no-op)
+      FOR EACH er IN certificate_arrival_events(cpc) IN stable EventRef order: CALL CancelQueuedEvent(er, cancellation_reason = template_refresh_discard, cancellation_context = dispatch_envelope)   # AE2: set cancellation via the queue owner
+      IF block_arrival_event(cpc) != null: CALL CancelQueuedEvent(block_arrival_event(cpc), cancellation_reason = template_refresh_discard, cancellation_context = dispatch_envelope)   # AE2 (null if the block seat was post-horizon rejected)
       REMOVE cpc from active_propagation_set
-    CANCEL all pending certificate-arrival / BlockAcceptancePoint / resume / HashWorkEvent events bound
-           to old_TemplateID
+    # AE2: cancel every remaining QUEUED event bound to old_TemplateID (CertificateArrival / BlockAcceptancePoint /
+    #   ResumeFromPause / HashWorkEvent) in stable EventRef order through the ONE queue owner.
+    FOR EACH er IN SORT({ er : queued_event_registry[er].queue_status = QUEUED
+                          AND er is bound to old_TemplateID (its immutable_payload TemplateID / TemplateID_at_* = old_TemplateID) }
+                        IN stable EventRef order):
+      CALL CancelQueuedEvent(er, cancellation_reason = template_closure(old_TemplateID), cancellation_context = dispatch_envelope)   # AE2
     CLEAR every acceptance_batch_registry entry whose acceptance_point candidates are bound to old_TemplateID
     RECORD template_closure(RoundID, old_TemplateID)
   RETURNS: template_closure_record
@@ -5544,10 +5729,12 @@ PROCEDURE ContinueTemplateRefreshAssignmentSetup               # X3: SOLE owner 
         #   (immutable), AFTER the successful ScheduleEvent. The queued_event_record `record` is already registered QUEUED
         #   (AD1) — the retry record keeps NO event_queue_status mirror; its queue state is
         #   queued_event_registry[seat_event_ref].queue_status. The seat is the ONLY CREATE of the retry record (AB3).
-        ATOMICALLY: SET setup_retry_records[srid] <- setup_retry_record(SetupRetryID = srid, setup_kind = TEMPLATE_REFRESH_SETUP,
+        ATOMICALLY:
+          SET setup_retry_records[srid] <- setup_retry_record(SetupRetryID = srid, setup_kind = TEMPLATE_REFRESH_SETUP,
               RoundID = RoundID_current, TemplateID_at_seat = TemplateID, TemplateRefreshSetupID = TemplateRefreshSetupID,
               retry_generation = g, seat_event_ref = event_ref, status = SEATED,
               target_disposition = null, terminal_closure_pending = false)   # Z1/AA2/AC1/AD1
+          SET setup_retry_by_seat_event_ref[event_ref] <- srid              # AE6: IMMUTABLE reverse binding published with the record
         RETURN template_refresh_retry_seated(srid, setup_reason)
     RETURN CALL RoundAbort(RoundContext, reason = template_refresh_failed(setup_reason),
                            dispatch_envelope = dispatch_envelope, recovery_finalising = false)   # declared abort
@@ -5584,8 +5771,8 @@ PROCEDURE RoundAbort
     #     CloseRoundAssignments with stop_reason = ROUND_ABORTED.
     FOR EACH cpc in SORT(active_propagation_set BY CandidateID ascending):
       SET status(cpc) <- CANCELLED
-      CANCEL every event in certificate_arrival_events(cpc)
-      IF block_arrival_event(cpc) != null: CANCEL block_arrival_event(cpc)   # AD3: null if the block seat was post-horizon rejected (no-op)
+      FOR EACH er IN certificate_arrival_events(cpc) IN stable EventRef order: CALL CancelQueuedEvent(er, cancellation_reason = round_aborted_cleanup, cancellation_context = dispatch_envelope)   # AE2: set cancellation via the queue owner
+      IF block_arrival_event(cpc) != null: CALL CancelQueuedEvent(block_arrival_event(cpc), cancellation_reason = round_aborted_cleanup, cancellation_context = dispatch_envelope)   # AE2 (null if the block seat was post-horizon rejected)
     CLEAR active_propagation_set
     CLEAR acceptance_batch_registry                             # cancel any pending acceptance batches
     # N1 (2)-(3): centralised closure of ALL open assignments and miner paths (D7; wires the ROUND_ABORTED

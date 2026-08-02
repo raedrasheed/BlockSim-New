@@ -1112,3 +1112,32 @@ Catalogue" denotes the separate document defining I1..I19.
 - **Historical freeze.** Stage-1A–1AC lettered artifacts are unchanged; Stage-1AD supersessions (including the AC8
   per-record `event_queue_status` mirror and the incomplete Stage-1AC audit claims) are recorded in
   `STAGE_01AD_SUPERSESSION_REGISTER.md`.
+
+## Stage-1AE terminology addendum (global-event cancellation & dispatch-schema lock)
+
+- **`CancelQueuedEvent` (AE1).** The ONE queue-owner cancellation operation: `CancelQueuedEvent(EventRef,
+  cancellation_reason, cancellation_context)`. It is the sole operation that removes an `EventRef` from `EQ` and does so
+  ATOMICALLY with the central `queue_status` update (`QUEUED → CANCELLED`). Results: `cancellation_unknown_event(EventRef)` |
+  `event_cancelled(EventRef)` | `event_already_dispatching(EventRef)` (no mutation) | `cancellation_terminal_noop(EventRef)`.
+- **`setup_retry_by_seat_event_ref` (AE6).** `map EventRef → SetupRetryID`, an IMMUTABLE reverse binding published
+  atomically at retry seating alongside the `setup_retry_record`. `HandleDispatchIntegrityFailure` resolves a corrupt
+  `SetupRetryEvent`'s owner from this map keyed by the trusted dispatched `EventRef` (verified against `seat_event_ref`),
+  never from the corrupt payload's `SetupRetryID`.
+- **`rejected_payload_schema_mismatch` (AE7).** The structured `ScheduleEvent` rejection
+  `rejected_payload_schema_mismatch(event_type, missing_or_invalid_fields)`, returned when `event_type` is not declared in
+  §0.7g-schema or the `immutable_payload` omits a required field / fails its declared type — returned BEFORE any state
+  mutation (no raw assertion). A member of the `ScheduleEvent` RETURNS union.
+- **Authoritative event-type dispatch schema (§0.7g-schema, AE4).** The single table declaring, per queued event type, the
+  handler procedure, required `immutable_payload` fields, whether the handler receives `dispatch_envelope` (`recv env`),
+  whether it receives `dispatched_event_ref` (`recv ref`), the target microphase, and the stable tie key. `ScheduleEvent`
+  validates against it; `ProcessEventTime` dispatches only its declared arguments (Design B, AE5).
+- **`hash_work_seated` / `hash_work_not_seated` (AE9).** The truthful `ScheduleNextHashWork` results —
+  `hash_work_seated(EventRef)` for a scheduled next hash unit, or `hash_work_not_seated(reason)` when the seat was rejected
+  (the only reachable rejection being the deterministic O2 `post_horizon_event_rejected`). It never reports `scheduled`
+  after a rejection.
+- **Queue/registry coherence invariants (I21, AE10).** The structural invariants binding `EQ.event_queue` and
+  `queued_event_registry`: present-in-EQ IFF `QUEUED`; the executing EventRef absent-from-EQ and `DISPATCHING`;
+  `CONSUMED`/`CANCELLED` absent from EQ; each `QUEUED` entry present exactly once; no double dispatch; nothing
+  `QUEUED`/`DISPATCHING` at `t` after `ProcessEventTime(t)`; atomic enqueue/cancellation.
+- **Historical freeze.** Stage-1A–1AD lettered artifacts are unchanged; Stage-1AE supersessions (including the incomplete
+  Stage-1AD audit claims) are recorded in `STAGE_01AE_SUPERSESSION_REGISTER.md`.

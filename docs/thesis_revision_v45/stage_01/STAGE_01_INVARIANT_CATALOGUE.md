@@ -440,6 +440,22 @@ point, planned test stage, and consequence of violation.
   closing-round event remains `QUEUED`, none remains `DISPATCHING` once its handler returns, every SEATED retry is
   terminalised, and no terminal retry owns a live `QUEUED` event. **AD10:** the incomplete Stage-1AC audit claims are
   superseded in `STAGE_01AD_SUPERSESSION_REGISTER.md`.
+- **Stage-1AE clause (global-event cancellation & dispatch-schema lock).**
+  **AE1:** `CancelQueuedEvent(EventRef, cancellation_reason, cancellation_context)` is the SOLE operation that removes an
+  EventRef from EQ (`QUEUED` → atomic remove + `QUEUED → CANCELLED`; `DISPATCHING` → `event_already_dispatching` no-op;
+  `CONSUMED`/`CANCELLED` → terminal no-op; unknown → `cancellation_unknown_event`). **AE2:** every cancel site routes through
+  it; no raw `CANCEL <ref> on EQ` remains; a set cancellation iterates EventRefs in stable order. **AE3:** `ProcessEventTime`
+  re-selects/re-reads the smallest current `QUEUED` EventRef each iteration and skips a now-cancelled one — never dispatches a
+  mid-batch-cancelled event or trips an assertion. **AE4:** §0.7g-schema is the authoritative event-type schema
+  (payload/env/ref/microphase/tie-key) that `ScheduleEvent` validates against and `ProcessEventTime` dispatches from.
+  **AE5:** Design B — the dispatcher passes `dispatch_envelope`/`dispatched_event_ref` to a handler IFF the schema declares
+  it (no undeclared argument to `BlockAcceptancePoint` etc.). **AE6:** corrupt-retry ownership is resolved from
+  `setup_retry_by_seat_event_ref[er]` (verified against `seat_event_ref`), never the corrupt payload; a foreign named id is
+  untouched, a no-owner event mutates nothing. **AE7:** `ScheduleEvent` returns the structured
+  `rejected_payload_schema_mismatch` before any state mutation (no raw assertion). **AE8:** scheduler registration is atomic
+  (registry entry + EQ entry both-or-neither). **AE9:** `ScheduleNextHashWork` returns `hash_work_seated`/`hash_work_not_seated`
+  truthfully. **AE10:** the queue/registry coherence invariants hold (I21). **AE11:** incomplete Stage-1AD audit claims are
+  superseded in `STAGE_01AE_SUPERSESSION_REGISTER.md`.
 - **Planned test stage.** Stage 3 (security-floor breach behaviour) with Stage 5 (adversarial) and
   Stage 8 (reporting-integrity) checks.
 - **Consequence of violation.** Hidden security degradation; overstated safety; dishonest
@@ -622,6 +638,29 @@ replaced by two consistent invariants** (the old form was impossible while a lin
 - **Consequence of violation.** A rollback that restores a post-mutation ledger state (leaving a range marked
   `original`/`reassigned`/searched by an assignment that was rolled back), so coverage/custody accounting diverges from
   the true pre-setup state.
+
+### I21 — The event queue and the queued-event registry are coherent at all times (Stage 1AE, AE10).
+
+- **Formal statement.** Let `EQ.event_queue` be the pending priority queue and `queued_event_registry` the central
+  queue-status registry (`AD1`). Then: **(a)** an `EventRef` is present in `EQ.event_queue` IFF
+  `queued_event_registry[EventRef].queue_status = QUEUED`; **(b)** the currently-executing `EventRef`
+  (`EQ.current_event_ref`) is ABSENT from `EQ.event_queue` and has `queue_status = DISPATCHING`; **(c)** a `CONSUMED` or
+  `CANCELLED` `EventRef` is NOT present in `EQ.event_queue`; **(d)** every `QUEUED` registry entry appears EXACTLY ONCE in
+  `EQ.event_queue`, and no `EventRef` is dispatched more than once; **(e)** after `ProcessEventTime(t)` returns, NO event
+  with `event_time = t` is `QUEUED` or `DISPATCHING`; **(f)** every enqueue (`ScheduleEvent`, AE8) and every cancellation
+  (`CancelQueuedEvent`, AE1) changes `EQ` membership and `queue_status` ATOMICALLY (both-or-neither), so the two structures
+  never diverge.
+- **Scope.** The scheduler/dispatcher (`ScheduleEvent`, `ProcessEventTime`, `CancelQueuedEvent`); a structural coherence
+  invariant. It does not change the A1 baseline (`8.420833333 kWh`).
+- **Required inputs.** `EQ.event_queue`; `queued_event_registry`; `EQ.current_event_ref`.
+- **Enforcement point.** `ScheduleEvent` (atomic add of registry entry + EQ entry, AE8); `CancelQueuedEvent` (atomic
+  remove + `QUEUED → CANCELLED`, AE1); `ProcessEventTime` (`QUEUED → DISPATCHING → CONSUMED`, sole dispatch owner, AD4/AE3;
+  the drain-to-quiescence assertion that no event at `t` remains `QUEUED` or `DISPATCHING`, AE10(e)).
+- **Consequence of violation.** A `QUEUED` ghost in the registry with no pending EQ entry (or an EQ entry with no registry
+  record); a cancelled event still dispatched from a stale batch; an event dispatched twice; or an event removed from EQ
+  without its central status changing — any of which breaks the single-authoritative-queue-status guarantee (AD1).
+- **Planned test stage.** Stage 2 (structural), with Stage 4 (cancellation under leases/closure) and Stage 5 (adversarial
+  mid-batch cancellation) checks (TV262–TV272).
 
 ---
 
