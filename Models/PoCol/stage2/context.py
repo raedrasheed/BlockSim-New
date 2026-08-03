@@ -92,6 +92,7 @@ class EvaluationRecord:
     contained_solution: bool
     winning_nonce: Optional[int]
     event_ref: Any
+    assignment_kind: str = "PRIMARY_ASSIGNMENT"   # S3-7: PRIMARY_ASSIGNMENT | ACTIVATED_RESERVE_ASSIGNMENT
 
     def count(self) -> int:
         return self.interval_end - self.interval_start
@@ -120,6 +121,9 @@ class RoundContext:
     # participants (assignments) of this round
     assignments: Dict[Any, Dict[str, Any]] = field(default_factory=dict)
     participant_setup_seated: bool = False
+    # Stage-3 per-round security-floor breach tracking (S3-4/S3-13).
+    below_floor_since: Optional[float] = None
+    current_breach_id: Any = None
 
     def transition(self, new_state: str) -> None:
         self.round_state = new_state
@@ -171,6 +175,24 @@ class RunContext:
         self.final_searched: Dict[Any, int] = {}   # (RoundID, MinerID) -> final searched_count
         self.round_first_completion: Dict[Any, float] = {}  # (RoundID, MinerID) -> first batch completion time
         self.max_search_time_residual: float = 0.0   # S2B-2: max |searched_count - rate*elapsed|
+        self.search_assignment_kind: Dict[Any, str] = {}  # (RoundID, MinerID) -> PRIMARY/RESERVE kind
+        # Stage-3 security-floor + reserve-activation state.
+        self.security_observations: List[Any] = []
+        self.activation_decisions: List[Any] = []
+        self.activation_requests: Dict[Any, Any] = {}   # ReserveActivationRequestID -> request (replay)
+        self.reserve_records: Dict[Any, Any] = {}       # (RoundID, MinerID) -> ReserveMinerRecord
+        self.reserve_slices: Dict[Any, List[Any]] = {}  # RoundID -> [RangeSlice]
+        self.reserve_slice_by_id: Dict[str, Any] = {}   # RangeSliceID -> RangeSlice
+        self.activations_per_round: Dict[Any, int] = {}  # RoundID -> activations seated
+        self.observation_seq: int = 0
+        self.decision_seq: int = 0
+        self.security_stats: Dict[str, Any] = {
+            "observation_count": 0, "breach_observation_count": 0, "distinct_breach_count": 0,
+            "decision_count": 0, "activations_seated": 0, "activations_completed": 0,
+            "activations_cancelled": 0, "floor_unattainable_count": 0,
+            "total_duration_below_floor": 0.0, "max_hash_rate_deficit": 0.0,
+            "activated_reserve_evaluation_count": 0,
+        }
         # audit log
         self.log: List[Outcome] = []
 

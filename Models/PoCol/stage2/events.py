@@ -63,7 +63,17 @@ MICROPHASE_ORDINAL: Dict[str, int] = {
     "RANGE_EXHAUST_ADJUDICATE": 13,
     "RESUME": 14,
     "MONITOR": 15,
+    # Stage-3 reserve-activation lifecycle (after range-exhaust adjudication).
+    "RESERVE_ACTIVATION_START": 16,
+    "RESERVE_ACTIVATION_COMPLETE": 17,
 }
+
+# Stage-3 activation-event payload identity (S3-6): full round/template/assignment identity.
+_ACTIVATION_PAYLOAD_KEYS = (
+    "ReserveActivationRequestID", "SecurityFloorObservationID", "ReserveActivationDecisionID",
+    "RoundID_at_seat", "TemplateID_at_seat", "MinerID", "ReserveSliceID",
+    "activation_generation", "expected_reserve_status", "expected_round_state_version",
+)
 
 
 # --------------------------------------------------------------------------- descriptors
@@ -111,6 +121,13 @@ DESCRIPTORS: Dict[str, EventDescriptor] = {
         EventDescriptor("AcceptanceEvent", "ACCEPTANCE_FINALIZE",
                         ("RoundID_at_seat", "acceptance_seq"),
                         ("RoundID_at_seat", "acceptance_seq"), recv_env=True),
+        # Stage-3 two-step reserve-activation lifecycle (S3-6).
+        EventDescriptor("ReserveActivationStartEvent", "RESERVE_ACTIVATION_START",
+                        ("MinerID", "ReserveSliceID"), _ACTIVATION_PAYLOAD_KEYS,
+                        recv_env=True),
+        EventDescriptor("ReserveActivationCompleteEvent", "RESERVE_ACTIVATION_COMPLETE",
+                        ("MinerID", "ReserveSliceID"), _ACTIVATION_PAYLOAD_KEYS,
+                        recv_env=True),
     ]
 }
 

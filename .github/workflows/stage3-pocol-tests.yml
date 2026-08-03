@@ -1,0 +1,49 @@
+name: Stage 3 PoCol tests
+
+# S3-8 evidence: runs the COMPLETE Stage-2B + Stage-3 PoCol test suite (TV325-TV338,
+# E2E-1..E2E-5, SCI-1..SCI-10, target tests, adapter, and S3-01..S3-18) on the Stage-3
+# branch, and uploads the pytest log + JUnit XML.
+
+on:
+  push:
+    branches:
+      - "thesis-v45-pocol-stage3-security-floor-reserve-activation"
+  pull_request:
+    paths:
+      - "Models/PoCol/stage2/**"
+      - "tests/thesis_revision_v45/stage2/**"
+      - ".github/workflows/stage3-pocol-tests.yml"
+  workflow_dispatch: {}
+
+jobs:
+  stage3-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pytest
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Run complete Stage-2B + Stage-3 test suite
+        run: |
+          python -m pytest tests/thesis_revision_v45/stage2/ -v --durations=0 \
+            -p no:cacheprovider \
+            --junitxml=stage3_ci.junit.xml | tee stage3_ci.log
+
+      - name: Run standalone demo (smoke)
+        run: python -m Models.PoCol.stage2.demo
+
+      - name: Upload pytest evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage3-pytest-evidence
+          path: |
+            stage3_ci.log
+            stage3_ci.junit.xml

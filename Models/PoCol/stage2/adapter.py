@@ -21,7 +21,7 @@ from .simulator import run_simulation
 from .search import SUCCESS_MODEL
 
 # Declared result schema keys (stable contract for BlockSim consumers).
-RESULT_SCHEMA_VERSION = "stage2b.1"
+RESULT_SCHEMA_VERSION = "stage3.1"
 
 
 def stage2config_from_blocksim(blocksim_config: Optional[Dict[str, Any]] = None
@@ -65,7 +65,7 @@ def results_schema(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
     request_terminal = {}
     for dr in run_ctx.driver_request_registry.values():
         request_terminal[dr.status] = request_terminal.get(dr.status, 0) + 1
-    return {
+    out = {
         "schema_version": RESULT_SCHEMA_VERSION,
         "algorithm": "PoCol",
         "mechanism": "idle policy within PoCol",
@@ -87,6 +87,47 @@ def results_schema(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
         "driver_request_terminal_state_counts": request_terminal,
         "config": {"num_miners": cfg.num_miners, "horizon_T": cfg.horizon_T,
                    "nonce_domain_size": cfg.nonce_domain_size, "difficulty": cfg.difficulty},
+    }
+    out.update(_security_floor_results(run_ctx, cfg))
+    return out
+
+
+def _security_floor_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
+    """S3 result fields: security-floor + reserve-activation metrics and reserve energy.
+
+    The security floor is an OPERATIONAL capacity floor only — these fields never assert
+    consensus-security equivalence.  Reserve activation may INCREASE energy; it never saves.
+    """
+    s = run_ctx.security_stats
+    pol = cfg.security_floor
+    reserve_ids = getattr(run_ctx, "reserve_miner_ids", set())
+    P = cfg.per_miner_power
+    standby = wake = active = 0.0
+    for mid in reserve_ids:
+        m = run_ctx.miners.get(mid)
+        if m is None:
+            continue
+        standby += P("RESERVE") * m.duration.get("RESERVE", 0.0)
+        wake += P("WAKING") * m.duration.get("WAKING", 0.0)
+        active += P("ACTIVE_HASHING") * m.duration.get("ACTIVE_HASHING", 0.0)
+    return {
+        "security_floor_enabled": pol.enabled,
+        "configured_minimum_active_hash_rate": pol.minimum_active_hash_rate,
+        "minimum_active_miner_count": pol.minimum_active_miner_count,
+        "floor_unattainable_policy": cfg.floor_unattainable_policy,
+        "security_floor_observation_count": s["observation_count"],
+        "breach_count": s["distinct_breach_count"],
+        "reserve_activation_decision_count": s["decision_count"],
+        "reserve_activations_seated": s["activations_seated"],
+        "reserve_activations_completed": s["activations_completed"],
+        "reserve_activations_cancelled": s["activations_cancelled"],
+        "floor_unattainable_count": s["floor_unattainable_count"],
+        "total_duration_below_floor": s["total_duration_below_floor"],
+        "maximum_hash_rate_deficit": s["max_hash_rate_deficit"],
+        "reserve_standby_energy_kwh": standby / 3_600_000.0,
+        "reserve_wake_energy_kwh": wake / 3_600_000.0,
+        "reserve_active_energy_kwh": active / 3_600_000.0,
+        "activated_reserve_evaluation_count": s["activated_reserve_evaluation_count"],
     }
 
 

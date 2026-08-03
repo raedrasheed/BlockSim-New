@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .security import SecurityFloorPolicy
+
 # A1 accounting invariant — the frozen matched control (kWh).
 A1_BASELINE_KWH = 8.420833333
 JOULES_PER_KWH = 3_600_000.0
@@ -59,7 +61,12 @@ class Stage2Config:
         return self.base_hash_rate * (1.0 + (index % 4))   # 1x .. 4x
 
     # --- participation (idle policy) ---
-    reserve_fraction: float = 0.2   # fraction of genesis miners held in RESERVE (P_listen)
+    reserve_fraction: float = 0.2   # fraction of genesis miners held in RESERVE (reserve pool)
+    P_reserve: float = 2.15         # reserve standby power (== P_listen by default)
+
+    # --- Stage-3 security floor + reserve activation (disabled by default) ---
+    security_floor: SecurityFloorPolicy = SecurityFloorPolicy()
+    floor_unattainable_policy: str = "CONTINUE_DEGRADED"   # or ABORT_ROUND
 
     # --- scenario injection (tests only; empty in confirmatory runs) ---
     abort_round_seqs: frozenset = frozenset()   # round seqs that abort instead of accepting
@@ -71,7 +78,7 @@ class Stage2Config:
         """Canonical single residency power for a miner state (STAGE_01 s.1.0)."""
         return {
             "REGISTERED": self.P_listen,
-            "RESERVE": self.P_listen,
+            "RESERVE": self.P_reserve,
             "ACTIVE_HASHING": self.P_hash,
             "EXHAUSTED_PENDING": self.P_hash,
             "LOW_POWER_LISTEN": self.P_listen,

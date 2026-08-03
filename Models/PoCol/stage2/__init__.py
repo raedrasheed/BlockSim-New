@@ -22,9 +22,15 @@ from .driver import (SeatMinerRegister, SeatReserveActivate, SeatNextRoundBootst
 from .search import (Template, MinerSearchState, make_template, partition_domain,
                      sha256_int, target_for_difficulty, success_probability,
                      SUCCESS_MODEL, WORK_PRIMITIVE)
+from .security import (SecurityFloorPolicy, RangeSlice, ReserveMinerRecord,
+                       SecurityFloorObservation, ReserveActivationDecision,
+                       ReserveActivationRequest, compute_h_effective,
+                       partition_primary_and_reserve, RESERVE_STATUSES, POLICY_RESULTS,
+                       PRIMARY_ASSIGNMENT, ACTIVATED_RESERVE_ASSIGNMENT)
 from .simulator import (RunInitialise, RunEventLoopToHorizon, ProcessEventTime,
                         RoundAbort, FinalizeSimulationRun, FinalizeSimulationRunNoRound,
-                        FinalizeSimulationRunPartial, run_simulation)
+                        FinalizeSimulationRunPartial, run_simulation,
+                        EvaluateSecurityFloor, SeatReserveActivation)
 from .energy_experiment import (run_energy_experiment, EnergyExperimentResult,
                                 MinerEnergyRow)
 from .adapter import (run_pocol_stage2, stage2config_from_blocksim, results_schema,
@@ -50,4 +56,9 @@ __all__ = [
     "run_energy_experiment", "EnergyExperimentResult", "MinerEnergyRow",
     "run_pocol_stage2", "stage2config_from_blocksim", "results_schema",
     "RESULT_SCHEMA_VERSION",
+    "SecurityFloorPolicy", "RangeSlice", "ReserveMinerRecord", "SecurityFloorObservation",
+    "ReserveActivationDecision", "ReserveActivationRequest", "compute_h_effective",
+    "partition_primary_and_reserve", "RESERVE_STATUSES", "POLICY_RESULTS",
+    "PRIMARY_ASSIGNMENT", "ACTIVATED_RESERVE_ASSIGNMENT",
+    "EvaluateSecurityFloor", "SeatReserveActivation",
 ]

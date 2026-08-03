@@ -1,0 +1,36 @@
+{
+  "canonical_floor_scenario": {
+    "num_miners": 4,
+    "reserve_fraction": 0.5,
+    "nonce_domain_size": 400,
+    "min_active_hash_rate": 250.0,
+    "difficulty_target": 0,
+    "rounds": 49,
+    "observations": 342,
+    "distinct_breaches": 146,
+    "decisions": 195,
+    "activations_seated": 98,
+    "activations_completed": 98,
+    "activations_cancelled": 0,
+    "floor_unattainable": 48,
+    "total_duration_below_floor": 98.0,
+    "max_hash_rate_deficit": 250.0,
+    "activated_reserve_evaluations": 9750,
+    "nonce_duplicate_count": 0,
+    "post_round_evaluation_count": 0,
+    "max_search_time_residual": 2.8421709430404007e-12,
+    "max_reserve_energy_identity_residual_j": 0.0,
+    "residency_reconciles": true
+  },
+  "continue_degraded": {
+    "floor_unattainable": 296,
+    "dur_below": 56.99999999999965,
+    "loop": "run_completed"
+  },
+  "abort_round": {
+    "security_floor_aborts": 99,
+    "loop": "run_completed"
+  },
+  "adapter_schema_version": "stage3.1",
+  "adapter_security_keys_present": true
+}
