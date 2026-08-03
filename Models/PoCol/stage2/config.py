@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 
 from .security import SecurityFloorPolicy
 from .leases import RangeLeasePolicy
+from .adversarial import AdversarialPolicy, IncentivePolicy
 
 # A1 accounting invariant — the frozen matched control (kWh).
 A1_BASELINE_KWH = 8.420833333
@@ -71,6 +72,14 @@ class Stage2Config:
 
     # --- Stage-4 range leases + reassignment (disabled by default) ---
     range_lease: RangeLeasePolicy = RangeLeasePolicy()
+
+    # --- Stage-5 adversarial-behaviour + incentive model (disabled by default; all
+    # reward/penalty rates zero).  Stage 5 MODELS bounded behaviours and MEASURES
+    # outcomes; it proves nothing and claims no incentive compatibility, fairness or
+    # Sybil resistance.  Changing these parameters NEVER changes the fixed target or
+    # difficulty (S5-26). ---
+    adversarial: AdversarialPolicy = field(default_factory=AdversarialPolicy)
+    incentive: IncentivePolicy = field(default_factory=IncentivePolicy)
 
     # --- scenario injection (tests only; empty in confirmatory runs) ---
     abort_round_seqs: frozenset = frozenset()   # round seqs that abort instead of accepting

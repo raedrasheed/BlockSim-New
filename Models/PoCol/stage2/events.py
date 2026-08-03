@@ -79,6 +79,10 @@ MICROPHASE_ORDINAL: Dict[str, int] = {
     "MINER_CANCELLED": 22,
     "RANGE_LEASE_EXPIRY": 23,
     "RANGE_PROGRESS_TIMEOUT": 24,
+    # Stage-5 adversarial model: a withheld valid solution's scheduled DELAYED_RELEASE.
+    # It lands AFTER the deadline microphases so all same-time protocol effects settle
+    # before a withheld solution is (re)surfaced (S5-6).
+    "WITHHELD_SOLUTION_RELEASE": 25,
 }
 
 # Stage-3 activation-event payload identity (S3-6): full round/template/assignment identity.
@@ -195,6 +199,10 @@ DESCRIPTORS: Dict[str, EventDescriptor] = {
         EventDescriptor("RangeProgressTimeoutEvent", "RANGE_PROGRESS_TIMEOUT",
                         ("RangeSliceID", "timeout_generation"),
                         _PROGRESS_TIMEOUT_PAYLOAD_KEYS, recv_env=True),
+        EventDescriptor("WithheldSolutionReleaseEvent", "WITHHELD_SOLUTION_RELEASE",
+                        ("WithheldSolutionID",),
+                        ("WithheldSolutionID", "RoundID_at_seat", "TemplateID_at_seat",
+                         "MinerID", "nonce"), recv_env=True),
     ]
 }
 

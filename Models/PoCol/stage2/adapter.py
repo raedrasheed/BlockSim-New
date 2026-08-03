@@ -21,9 +21,16 @@ from .simulator import run_simulation
 from .search import SUCCESS_MODEL
 from .security import SecurityFloorPolicy, FLOOR_UNATTAINABLE_POLICIES
 from .leases import RangeLeasePolicy, REASSIGNED_PRIMARY_WORK, REASSIGNED_RESERVE_WORK
+from .adversarial import (AdversarialPolicy, IncentivePolicy, ACTOR_CLASSES, BEHAVIOUR_FLAGS,
+                          SOLUTION_RELEASE_POLICIES, ACCOUNTING_MODES,
+                          ADVERSARIAL_COVERAGE_GAP_NO_BLOCK)
+from . import adversarial_runtime as _adv
 
 # Declared result schema keys (stable contract for BlockSim consumers).
-RESULT_SCHEMA_VERSION = "stage4.1"
+# stage5.1 ADDS the Stage-5 adversarial + incentive block.  Every Stage-4C key is retained
+# unchanged, and every Stage-5 field is inert (zero, or NA for q_adv) when the Stage-5 model
+# is disabled — which is the default.
+RESULT_SCHEMA_VERSION = "stage5.1"
 
 
 def _range_lease_from_blocksim(b: Dict[str, Any]) -> Optional[RangeLeasePolicy]:
@@ -92,6 +99,96 @@ def _security_floor_from_blocksim(b: Dict[str, Any]) -> Optional[SecurityFloorPo
     return SecurityFloorPolicy(**kwargs)                    # __post_init__ validates
 
 
+def _adversarial_from_blocksim(b: Dict[str, Any]) -> Optional[AdversarialPolicy]:
+    """S5-2: build a VALIDATED immutable AdversarialPolicy from a BlockSim config mapping.
+
+    Returns ``None`` when no adversarial key is present, so the DISABLED default stands and the
+    accepted Stage-4C behaviour is preserved exactly.  Unsupported actor classes, behaviour
+    flags, release policies and out-of-range rates/fractions are rejected by
+    ``AdversarialPolicy.__post_init__``.  No adversarial key may change the fixed SHA-256 target
+    or difficulty (S5-26) — ``difficulty`` is not settable from this mapping.
+    """
+    keys = ("adversarial_enabled", "adversarial_seed", "audit_detection_probability",
+            "solution_release_policy", "solution_withholding_delay",
+            "delayed_wake_extra_latency", "free_rider_work_fraction",
+            "reported_hash_rate_multiplier", "false_exhaustion_claim_offset",
+            "progress_withholding_fraction", "assignment_split_count",
+            "sybil_identity_count", "coordinator_uses_reported_hash_rate",
+            "maximum_actions_per_round", "q_adv_threshold", "out_of_range_nonce_offset",
+            "adversarial_entities", "miner_behaviours")
+    if not any(k in b and b[k] is not None for k in keys):
+        return None
+    kw: Dict[str, Any] = {"enabled": bool(b.get("adversarial_enabled", True))}
+    if b.get("adversarial_seed") is not None:
+        kw["deterministic_seed"] = int(b["adversarial_seed"])
+    for key, cast in (("audit_detection_probability", float),
+                      ("solution_withholding_delay", float),
+                      ("delayed_wake_extra_latency", float),
+                      ("free_rider_work_fraction", float),
+                      ("reported_hash_rate_multiplier", float),
+                      ("false_exhaustion_claim_offset", int),
+                      ("progress_withholding_fraction", float),
+                      ("assignment_split_count", int), ("sybil_identity_count", int),
+                      ("maximum_actions_per_round", int), ("q_adv_threshold", float),
+                      ("out_of_range_nonce_offset", int)):
+        if b.get(key) is not None:
+            kw[key] = cast(b[key])
+    if b.get("solution_release_policy") is not None:
+        srp = str(b["solution_release_policy"])
+        if srp not in SOLUTION_RELEASE_POLICIES:
+            raise ValueError(f"unsupported solution_release_policy: {srp!r}")
+        kw["solution_release_policy"] = srp
+    if b.get("coordinator_uses_reported_hash_rate") is not None:
+        kw["coordinator_uses_reported_hash_rate"] = bool(b["coordinator_uses_reported_hash_rate"])
+    if b.get("adversarial_entities") is not None:
+        ents = []
+        for ent in b["adversarial_entities"]:
+            eid, klass, mids, coal = ent
+            if str(klass) not in ACTOR_CLASSES:
+                raise ValueError(f"unsupported actor_class: {klass!r}")
+            ents.append((eid, str(klass), tuple(mids), coal))
+        kw["entities"] = tuple(ents)
+    if b.get("miner_behaviours") is not None:
+        behs = []
+        for beh in b["miner_behaviours"]:
+            rseq, mid, flags = beh
+            for f in flags:
+                if str(f) not in BEHAVIOUR_FLAGS:
+                    raise ValueError(f"unsupported behaviour flag: {f!r}")
+            behs.append((int(rseq), mid, tuple(str(f) for f in flags)))
+        kw["miner_behaviours"] = tuple(behs)
+    return AdversarialPolicy(**kw)
+
+
+def _incentive_from_blocksim(b: Dict[str, Any]) -> Optional[IncentivePolicy]:
+    """S5-2: build a VALIDATED immutable IncentivePolicy from a BlockSim config mapping.
+
+    Returns ``None`` when no incentive key is present, so the disabled, all-rates-zero default
+    stands.  Negative rates and unsupported accounting modes are rejected.  These are MODEL
+    PARAMETERS only: no value is claimed to be optimal, equilibrium-producing, fair or
+    Sybil-resistant, and no configuration proves incentive compatibility.
+    """
+    keys = ("incentive_enabled", "r_work", "r_avail", "r_win", "r_reserve", "r_reassign",
+            "q_abandon", "q_false", "q_invalid", "reward_deduplication_policy",
+            "entity_aggregation_enabled", "penalise_crash_faults")
+    if not any(k in b and b[k] is not None for k in keys):
+        return None
+    kw: Dict[str, Any] = {"enabled": bool(b.get("incentive_enabled", True))}
+    for key in ("r_work", "r_avail", "r_win", "r_reserve", "r_reassign",
+                "q_abandon", "q_false", "q_invalid"):
+        if b.get(key) is not None:
+            kw[key] = float(b[key])
+    if b.get("reward_deduplication_policy") is not None:
+        mode = str(b["reward_deduplication_policy"])
+        if mode not in ACCOUNTING_MODES:
+            raise ValueError(f"unsupported reward_deduplication_policy: {mode!r}")
+        kw["reward_deduplication_policy"] = mode
+    for key in ("entity_aggregation_enabled", "penalise_crash_faults"):
+        if b.get(key) is not None:
+            kw[key] = bool(b[key])
+    return IncentivePolicy(**kw)
+
+
 def stage2config_from_blocksim(blocksim_config: Optional[Dict[str, Any]] = None
                                ) -> Stage2Config:
     """Map a BlockSim-style config mapping to a Stage2Config (unknown keys ignored).
@@ -138,6 +235,14 @@ def stage2config_from_blocksim(blocksim_config: Optional[Dict[str, Any]] = None
     lease_pol = _range_lease_from_blocksim(b)
     if lease_pol is not None:
         kwargs["range_lease"] = lease_pol
+    # S5-2: the validated immutable Stage-5 adversarial + incentive policies (both DISABLED
+    # unless the mapping explicitly configures them).
+    adv_pol = _adversarial_from_blocksim(b)
+    if adv_pol is not None:
+        kwargs["adversarial"] = adv_pol
+    inc_pol = _incentive_from_blocksim(b)
+    if inc_pol is not None:
+        kwargs["incentive"] = inc_pol
     return Stage2Config(**kwargs)
 
 
@@ -177,7 +282,100 @@ def results_schema(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
     }
     out.update(_security_floor_results(run_ctx, cfg))
     out.update(_range_lease_results(run_ctx, cfg))
+    out.update(_adversarial_incentive_results(run_ctx, cfg))
     return out
+
+
+def _adversarial_incentive_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
+    """S5-11: the Stage-5 adversarial + incentive result block (all inert when disabled).
+
+    WHAT THESE FIELDS ARE: measurements of MODELED bounded behaviours under the accepted PoCol
+    core.  WHAT THEY ARE NOT: they do not establish incentive compatibility, fairness, Sybil
+    resistance, selfish-mining resistance, coalition resistance, common-prefix security,
+    chain-quality security, or Bitcoin/PoW-equivalent security.  Stage 5 measures outcomes; it
+    does not prove PoCol defeats any of these behaviours.
+
+    ``q_adv`` is reported as NA (``None``) for any interval in which the ACTUAL active hash rate
+    is zero — an NA interval is never compared against the threshold and never enters the
+    time-weighted mean.  The security floor remains the OPERATIONAL ACTIVE-CAPACITY floor only.
+    """
+    s = run_ctx.adversarial_stats
+    q = _adv.q_adv_summary(run_ctx)
+    ledger_net = sum(e.sign * e.amount for e in run_ctx.incentive_ledger)
+    ledger_reward = sum(e.amount for e in run_ctx.incentive_ledger if e.sign > 0)
+    ledger_penalty = sum(e.amount for e in run_ctx.incentive_ledger if e.sign < 0)
+    per_entity: Dict[Any, float] = {}
+    for e in run_ctx.incentive_ledger:
+        per_entity[e.EntityID] = per_entity.get(e.EntityID, 0.0) + e.sign * e.amount
+    adversarial_miners = sorted(mid for mid in run_ctx.miners
+                                if _adv.is_adversarial_miner(run_ctx, mid))
+    return {
+        "adversarial_model_enabled": bool(cfg.adversarial.enabled),
+        "incentive_model_enabled": bool(cfg.incentive.enabled),
+        "adversarial_entity_count": len(run_ctx.adversarial_entities),
+        "adversarial_miner_count": len(adversarial_miners),
+        "behaviour_profile_count": len(run_ctx.behaviour_profiles),
+        # --- behaviour execution counters (S5-4 .. S5-9) ---
+        "free_rider_count": s["free_rider_count"],
+        "hash_rate_misreport_count": s["hash_rate_misreport_count"],
+        "allocation_distortion_max_ratio": s["allocation_distortion_max_ratio"],
+        "assignment_split_count": s["assignment_split_count"],
+        "progress_withholding_count": s["progress_withholding_count"],
+        "adversarial_duplicate_evaluation_count": s["adversarial_duplicate_evaluation_count"],
+        "false_exhaustion_attempted": s["false_exhaustion_attempted"],
+        "false_exhaustion_detected": s["false_exhaustion_detected"],
+        "false_exhaustion_accepted": s["false_exhaustion_accepted"],
+        "coverage_gap_nonce_count": s["coverage_gap_nonce_count"],
+        "adversarial_coverage_gap_round_count": s["adversarial_coverage_gap_round_count"],
+        "adversarial_coverage_gap_label": ADVERSARIAL_COVERAGE_GAP_NO_BLOCK,
+        "solution_withholding_count": s["solution_withholding_count"],
+        "withheld_released_count": s["withheld_released_count"],
+        "withheld_never_released_count": s["withheld_never_released_count"],
+        "withheld_release_too_late_count": s["withheld_release_too_late_count"],
+        "withheld_total_hidden_duration": s["withheld_total_hidden_duration"],
+        "delayed_wake_count": s["delayed_wake_count"],
+        "out_of_range_attempt_count": s["out_of_range_attempt_count"],
+        "invalid_action_rejection_count": s["invalid_action_rejection_count"],
+        # --- three-value layer divergence (S5-3) ---
+        "progress_claim_count": len(run_ctx.progress_claims),
+        "actual_reported_divergence_count": s["actual_reported_divergence_count"],
+        "reported_accepted_divergence_count": s["reported_accepted_divergence_count"],
+        # --- q_adv(t) over ACTUAL active hash rates (S5-11); NA when H_active == 0 ---
+        "maximum_q_adv": q["maximum_q_adv"],
+        "time_weighted_q_adv": q["time_weighted_q_adv"],
+        "q_adv_threshold": cfg.adversarial.q_adv_threshold,
+        "duration_above_q_adv_threshold": q["duration_above_q_adv_threshold"],
+        "q_adv_active_duration": q["q_adv_active_duration"],
+        "q_adv_na_duration": q["q_adv_na_duration"],
+        # --- incentive ledger (S5-8 / S5-10) ---
+        "incentive_ledger_entries": len(run_ctx.incentive_ledger),
+        "incentive_reward_total": ledger_reward,
+        "incentive_penalty_total": ledger_penalty,
+        "incentive_net_total": ledger_net,
+        "incentive_reconciliation_residual": _adv.incentive_reconciliation_residual(run_ctx),
+        "work_reward_total": s["work_reward_total"],
+        "availability_reward_total": s["availability_reward_total"],
+        "winner_reward_total": s["winner_reward_total"],
+        "reserve_activation_reward_total": s["reserve_activation_reward_total"],
+        "reassignment_reward_total": s["reassignment_reward_total"],
+        "abandonment_penalty_total": s["abandonment_penalty_total"],
+        "false_claim_penalty_total": s["false_claim_penalty_total"],
+        "invalid_message_penalty_total": s["invalid_message_penalty_total"],
+        "naive_identity_reward_total": s["naive_identity_reward_total"],
+        "deduplicated_entity_reward_total": s["deduplicated_entity_reward_total"],
+        "reward_deduplication_policy": cfg.incentive.reward_deduplication_policy,
+        "per_entity_net_reward": per_entity,
+        # --- explicit scope statement carried in the results themselves ---
+        "stage5_claim_scope": (
+            "Stage 5 MODELS bounded adversarial behaviours and MEASURES outcomes under the "
+            "accepted PoCol core.  It does NOT establish incentive compatibility, fairness, "
+            "Sybil resistance, selfish-mining resistance, coalition resistance, common-prefix "
+            "security, chain-quality security, or Bitcoin/PoW-equivalent security.  The "
+            "energy-saving mechanism remains the idle policy within PoCol; nonce-domain "
+            "partitioning alone is NOT an energy-saving mechanism.  The security floor remains "
+            "an operational active-capacity floor only.  Dynamic difficulty remains excluded "
+            "and no Stage-5 parameter changes the fixed SHA-256 target or difficulty."),
+    }
 
 
 def _res_delta(start: Any, end: Any) -> float:
@@ -587,3 +785,73 @@ def run_pocol_stage2(blocksim_config: Optional[Dict[str, Any]] = None,
     if include_matched_experiment:
         out["matched_identity_experiment"] = matched_identity_experiment_schema()
     return out
+
+
+# ---------------------------------------------------------------- S5-13 matched attack pair
+_MATCHED_PAIR_DELTA_KEYS = (
+    "rounds_accepted", "rounds_no_block", "energy_kwh", "evaluation_ledger_entries",
+    "coverage_gap_nonce_count", "adversarial_coverage_gap_round_count",
+    "adversarial_duplicate_evaluation_count", "solution_withholding_count",
+    "withheld_never_released_count", "invalid_action_rejection_count",
+    "total_duration_below_floor", "reassignments_completed",
+    "incentive_net_total", "naive_identity_reward_total",
+    "deduplicated_entity_reward_total",
+)
+
+
+def run_matched_adversarial_pair(config: Optional[Dict[str, Any]] = None,
+                                 attack_profile: Optional[Dict[str, Any]] = None,
+                                 run_id: Any = "matched") -> Dict[str, Any]:
+    """S5-13: run ONE matched pair — identical honest baseline vs the same configuration with
+    ``attack_profile`` applied — and report the per-metric DELTA between them.
+
+    Both arms share every non-adversarial parameter, the same miner count, the same nonce
+    domain, the same template seed and the SAME fixed SHA-256 target and difficulty; the ONLY
+    difference is the declared adversarial/incentive configuration.  That makes the delta
+    attributable to the modeled behaviour rather than to a re-parameterised protocol.
+
+    The delta is a MEASUREMENT of one deterministic scenario pair.  It is not a statistical
+    result, not an equilibrium analysis and not evidence of incentive compatibility, fairness,
+    Sybil resistance, selfish-mining resistance, coalition resistance or any security property.
+    It does not execute, and must not be used as, the confirmatory experiment matrix.
+    """
+    base_cfg = dict(config or {})
+    attack = dict(attack_profile or {})
+    for forbidden in ("difficulty", "nonce_domain_size", "template_seed"):
+        if forbidden in attack:
+            raise ValueError(
+                f"attack_profile must not change {forbidden!r}: a matched pair differs ONLY in "
+                f"the adversarial/incentive configuration, never in the fixed work target, the "
+                f"nonce domain or the template seed (S5-13/S5-26)")
+    baseline_cfg = stage2config_from_blocksim(base_cfg)
+    attacked_cfg = stage2config_from_blocksim({**base_cfg, **attack})
+    if (baseline_cfg.difficulty != attacked_cfg.difficulty
+            or baseline_cfg.nonce_domain_size != attacked_cfg.nonce_domain_size
+            or baseline_cfg.template_seed != attacked_cfg.template_seed
+            or baseline_cfg.num_miners != attacked_cfg.num_miners):
+        raise ValueError("matched pair arms diverge outside the adversarial/incentive model")
+    baseline = results_schema(run_simulation(baseline_cfg, run_id=f"{run_id}-baseline"),
+                              baseline_cfg)
+    attacked = results_schema(run_simulation(attacked_cfg, run_id=f"{run_id}-attacked"),
+                              attacked_cfg)
+    delta = {}
+    for k in _MATCHED_PAIR_DELTA_KEYS:
+        a, b_ = baseline.get(k), attacked.get(k)
+        delta[k] = (b_ - a) if isinstance(a, (int, float)) and isinstance(b_, (int, float)) \
+            else None
+    return {
+        "schema_version": RESULT_SCHEMA_VERSION,
+        "matched_pair": True,
+        "identical_target_and_difficulty": True,
+        "difficulty": baseline_cfg.difficulty,
+        "nonce_domain_size": baseline_cfg.nonce_domain_size,
+        "baseline": baseline,
+        "attacked": attacked,
+        "delta": delta,
+        "interpretation_scope": (
+            "One deterministic matched-pair MEASUREMENT of a modeled attack profile.  Not a "
+            "statistical result, not an equilibrium analysis, and NOT evidence of incentive "
+            "compatibility, fairness, Sybil resistance, selfish-mining resistance, coalition "
+            "resistance, common-prefix security, chain-quality security or PoW-equivalent "
+            "security.  Not the confirmatory experiment matrix."),
+    }

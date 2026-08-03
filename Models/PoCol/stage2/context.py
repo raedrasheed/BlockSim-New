@@ -274,6 +274,34 @@ class RunContext:
             "reassignment_replay_count": 0, "lease_observation_replay_count": 0,
             "unknown_trigger_rejections": 0,
         }
+        # ------------------------------------------------ Stage-5 adversarial + incentive model
+        # ALL empty / inert when the Stage-5 model is disabled (the default), so the accepted
+        # Stage-4C baseline is behaviourally unchanged (S5-01).
+        from .adversarial import default_adversarial_stats, default_q_adv_state
+        self.adversarial_entities: Dict[Any, Any] = {}       # EntityID -> AdversarialEntity
+        self.entity_of_miner: Dict[Any, Any] = {}            # MinerID -> EntityID
+        self.behaviour_profiles: Dict[Any, Any] = {}         # (RoundID, MinerID) -> profile
+        self.progress_claims: List[Any] = []
+        self.progress_claim_by_id: Dict[Any, Any] = {}
+        self.withheld_solutions: Dict[Any, Any] = {}         # id -> WithheldSolutionRecord
+        self.invalid_actions: Dict[Any, Any] = {}            # id -> InvalidActionRecord
+        self.delayed_wake_actions: Dict[Any, Any] = {}       # id -> DelayedWakeAction
+        self.adversarial_actions: Dict[Any, Any] = {}        # AdversarialActionID -> record
+        self.incentive_ledger: List[Any] = []
+        self.incentive_ledger_by_key: Dict[Any, Any] = {}    # dedup key -> entry (idempotent)
+        self.incentive_entry_seq: int = 0
+        # S5-3 ground-truth layers kept SEPARATE from the accepted lease/progress layer.
+        self.adv_actual_frontier: Dict[str, int] = {}        # slice_id -> actual evaluated frontier
+        self.adv_reeval_boundary: Dict[str, int] = {}        # slice_id -> actual frontier at revoke
+        self.adv_credited_frontier: Dict[str, int] = {}      # slice_id -> work-reward credited end
+        self.adv_round_coverage_gap: Dict[Any, int] = {}     # RoundID -> accepted-false-claim gap
+        self.adv_gap_rounds_counted: set = set()             # RoundIDs already counted as gapped
+        self.availability_snapshot: Dict[Any, float] = {}    # (RoundID, mid) -> residency at start
+        self.adversarial_stats: Dict[str, Any] = default_adversarial_stats()
+        self.q_adv_state: Dict[str, Any] = default_q_adv_state()
+        self.acceptance_times: List[float] = []              # accepted-block times (diagnostics)
+        # optional capacity-observation hook (set ONLY when the Stage-5 model is enabled).
+        self.adversarial_share_hook = None
         # audit log
         self.log: List[Outcome] = []
 
@@ -371,6 +399,11 @@ class RunContext:
         # composition — bump the capacity-state version so the next observation gets a fresh
         # SecurityFloorObservationKey (replay of an unchanged capacity stays idempotent).
         self.capacity_state_version += 1
+        # S5-11: when the Stage-5 adversarial model is enabled, every capacity-changing
+        # miner-state transition triggers one adversarial-share observation (q_adv uses
+        # ACTUAL active hash rates, never reported rates).  None when disabled (default).
+        if self.adversarial_share_hook is not None:
+            self.adversarial_share_hook(at_time)
         return Outcome("miner_state_transition_applied", MinerID=MinerID,
                        old_state=old, new_state=new_state)
 

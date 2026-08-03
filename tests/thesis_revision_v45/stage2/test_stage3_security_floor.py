@@ -329,11 +329,11 @@ def test_s3_18_full_domain_no_block_includes_reserve_slices_once():
 
 # ---------------------------------------------------------------- S3 adapter schema
 def test_s3_adapter_schema_stage3_fields():
-    """The adapter schema is stage4.1 and carries the declared Stage-3 security fields,
+    """The adapter schema is stage5.1 and carries the declared Stage-3 security fields,
     with continuous_all_active_control_kwh kept as an accounting reference (S3 results)."""
     out = run_pocol_stage2({"num_miners": 6, "horizon_T": 150.0, "nonce_domain_size": 900,
                             "reserve_fraction": 0.34}, include_matched_experiment=False)
-    assert out["schema_version"] == "stage4.1"
+    assert out["schema_version"] == "stage5.1"
     for key in ("security_floor_enabled", "configured_minimum_active_hash_rate",
                 "minimum_active_miner_count", "security_floor_observation_count",
                 "breach_count", "reserve_activation_decision_count",

@@ -41,6 +41,13 @@ from .leases import (RangeLeasePolicy, RangeLease, RangeProgress,
                      REASSIGN_POLICY_RESULTS, LEASE_TRIGGERS, NO_ELIGIBLE_MINER_POLICIES,
                      REASSIGNMENT_SELECTION_POLICIES, RESERVE_ACTIVATION_SCOPES,
                      REASSIGNED_PRIMARY_WORK, REASSIGNED_RESERVE_WORK)
+from .adversarial import (AdversarialPolicy, IncentivePolicy, AdversarialEntity,
+                          MinerBehaviourProfile, ProgressClaim, WithheldSolutionRecord,
+                          DelayedWakeAction, InvalidActionRecord, IncentiveLedgerEntry,
+                          audit_draw, ACTOR_CLASSES, ADVERSARIAL_ACTOR_CLASSES,
+                          BEHAVIOUR_FLAGS, SOLUTION_RELEASE_POLICIES, CLAIM_TYPES,
+                          REWARD_COMPONENTS, PENALTY_COMPONENTS, ACCOUNTING_MODES,
+                          AVAILABILITY_STATES, ADVERSARIAL_COVERAGE_GAP_NO_BLOCK)
 from .simulator import (RunInitialise, RunEventLoopToHorizon, ProcessEventTime,
                         RoundAbort, FinalizeSimulationRun, FinalizeSimulationRunNoRound,
                         FinalizeSimulationRunPartial, run_simulation,
@@ -50,7 +57,8 @@ from .simulator import (RunInitialise, RunEventLoopToHorizon, ProcessEventTime,
 from .energy_experiment import (run_energy_experiment, EnergyExperimentResult,
                                 MinerEnergyRow)
 from .adapter import (run_pocol_stage2, stage2config_from_blocksim, results_schema,
-                      reassignment_energy_report, RESULT_SCHEMA_VERSION)
+                      reassignment_energy_report, run_matched_adversarial_pair,
+                      RESULT_SCHEMA_VERSION)
 
 __all__ = [
     "Stage2Config", "A1_BASELINE_KWH", "JOULES_PER_KWH", "a1_continuous_control_kwh",
@@ -90,4 +98,12 @@ __all__ = [
     "RESERVE_ACTIVATION_SCOPES", "REASSIGNED_PRIMARY_WORK", "REASSIGNED_RESERVE_WORK",
     "EvaluateRangeLease", "RevokeRangeLeaseTransaction", "SeatRangeReassignmentTransaction",
     "reassignment_energy_report",
+    # Stage 5: bounded adversarial behaviours + parameterised incentives (disabled by default).
+    "AdversarialPolicy", "IncentivePolicy", "AdversarialEntity", "MinerBehaviourProfile",
+    "ProgressClaim", "WithheldSolutionRecord", "DelayedWakeAction", "InvalidActionRecord",
+    "IncentiveLedgerEntry", "audit_draw",
+    "ACTOR_CLASSES", "ADVERSARIAL_ACTOR_CLASSES", "BEHAVIOUR_FLAGS",
+    "SOLUTION_RELEASE_POLICIES", "CLAIM_TYPES", "REWARD_COMPONENTS", "PENALTY_COMPONENTS",
+    "ACCOUNTING_MODES", "AVAILABILITY_STATES", "ADVERSARIAL_COVERAGE_GAP_NO_BLOCK",
+    "run_matched_adversarial_pair",
 ]

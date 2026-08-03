@@ -40,6 +40,13 @@ from .leases import (RangeLease, RangeProgress, RangeReassignmentDecision,
                      select_reassignment_candidate, TERMINAL_LEASE_STATUSES,
                      TERMINAL_REASSIGN_REQUEST_STATUSES, REASSIGNED_PRIMARY_WORK,
                      REASSIGNED_RESERVE_WORK, LEASE_TRIGGERS)
+# Stage 5: bounded adversarial-behaviour + parameterised incentive layer.  EVERY hook below is
+# a no-op unless the Stage-5 model is explicitly enabled, so the accepted Stage-4C behaviour is
+# preserved exactly (S5-01).  Stage 5 MODELS behaviours and MEASURES outcomes; it makes no
+# incentive-compatibility, fairness, Sybil-resistance, selfish-mining-resistance,
+# coalition-resistance, common-prefix, chain-quality or PoW-equivalent security claim.
+from . import adversarial_runtime as _adv
+from .adversarial import ADVERSARIAL_COVERAGE_GAP_NO_BLOCK
 
 _TERMINAL_ROUND = ("ROUND_ACCEPTED", "ROUND_ABORTED")
 
@@ -316,6 +323,9 @@ def _handle_prepare_participants(run_ctx: RunContext, payload: Dict[str, Any],
                         hash_rate=cfg.hash_rate_for(len(participants) + j),
                         reserve_status="AVAILABLE", activation_priority=j)
     rc.search_states = {}
+    # S5-10: snapshot each miner's sanctioned-availability residency at round start so the
+    # availability reward is a per-round DELTA, never the cumulative run total.
+    _adv.snapshot_availability(run_ctx, rc, t)
     for idx, mid in enumerate(sorted(participants)):
         start, end = ranges[mid]
         aid = f"A-{rc.RoundID}-{mid}"
@@ -335,6 +345,11 @@ def _handle_prepare_participants(run_ctx: RunContext, payload: Dict[str, Any],
             slice_id = f"PS-{rc.RoundID}-{mid}"
             _create_range_progress_and_lease(run_ctx, rc, mid, aid, version, slice_id,
                                              start, end, PRIMARY_ASSIGNMENT, t)
+        # S5-1: materialise this participant's ROUND-BOUND immutable behaviour profile BEFORE
+        # its wake is seated, so a free rider's reduced physical rate and a delayed waker's
+        # extra latency both apply from the very first batch.  The physical search core always
+        # runs on the ACTUAL (effective) rate; a reported rate never alters it (S5-4).
+        _adv.materialise_behaviours(run_ctx, rc, [mid])
         run_ctx.apply_miner_state_transition(mid, "WAKING", t)
         _start_wake(run_ctx, rc, mid, aid, version)
         # S2B-7 (SCI-3): an EXPECTED first-batch completion time, so a participant whose
@@ -396,6 +411,10 @@ def _start_wake(run_ctx: RunContext, rc: RoundContext, mid: Any, aid: Any,
     eq = run_ctx.event_queue
     cfg = run_ctx.config
     target = eq.current_event_time + cfg.wake_latency
+    # S5-7: a DELAYED_WAKE actor stays WAKING for an extra deterministic interval.  It is NOT
+    # a free energy saving — the miner is charged P_wake over the whole extended interval and
+    # contributes zero to H_effective for its entire duration.
+    target += _adv.wake_extra_latency(run_ctx, rc, mid, target, eq.current_event_time)
     return ScheduleEvent(eq, rc, "WakeCompleteEvent", target, "WAKE_COMPLETE",
                          {"MinerID": mid, "AssignmentID": aid,
                           "assignment_version": version}, ordinary_dispatch_origin(eq))
@@ -411,6 +430,7 @@ def _handle_wake_complete(run_ctx: RunContext, payload: Dict[str, Any],
     if st is None or run_ctx.miners[mid].state != "WAKING":
         return Outcome("wake_complete_stale_noop", MinerID=mid)
     t = run_ctx.event_queue.current_event_time
+    _adv.complete_delayed_wake(run_ctx, rc, mid, t)        # S5-7: close the delayed-wake action
     run_ctx.apply_miner_state_transition(mid, "ACTIVE_HASHING", t)
     st.active_start = t
     # S2B-2: EVERY active miner plans its first batch-completion event (not just one leader).
@@ -517,6 +537,10 @@ def _handle_hash_work(run_ctx: RunContext, payload: Dict[str, Any],
     if lguard.kind != "hash_lease_ok":
         run_ctx.lease_stats["stale_old_lease_events"] += 1
         return Outcome("hash_work_no_effect", reason=lguard, MinerID=mid)
+    # S5-9: an OUT_OF_RANGE actor attempts a nonce outside its own assigned range.  The attempt
+    # is REJECTED before any accounting — it creates no evaluation-ledger record, no committed
+    # frontier advance and no reward, only invalid-message penalty eligibility.
+    _adv.maybe_out_of_range_attempt(run_ctx, rc, st, now)
     cfg = run_ctx.config
     tpl = rc.template
     cursor_start = payload["cursor_start"]
@@ -577,6 +601,20 @@ def _handle_hash_work(run_ctx: RunContext, payload: Dict[str, Any],
         run_ctx.security_stats["activated_reserve_evaluation_count"] += committed
     run_ctx.final_searched[(rc.RoundID, mid)] = st.searched_count
     if winner_nonce is not None:                           # first valid solution in sim time
+        # S5-6: a SOLUTION_WITHHOLDER does NOT publish the valid block it just found.  The real
+        # solution is recorded as ground truth and NO acceptance is seated now; the round must
+        # then reach its own honest disposition.  Withholding never alters the fixed SHA-256
+        # target or difficulty, and the model makes no claim that it is detectable in a real
+        # deployment.
+        if _adv.maybe_withhold_solution(run_ctx, rc, st, winner_nonce,
+                                        sha256_int(tpl.header_bytes, winner_nonce), now):
+            st.completed = True
+            st.completion_kind = "SOLUTION_WITHHELD"
+            m = run_ctx.miners.get(mid)
+            if m is not None and m.state == "ACTIVE_HASHING":
+                run_ctx.apply_miner_state_transition(mid, "LOW_POWER_LISTEN", now)
+            return Outcome("hash_work_solution_withheld", MinerID=mid,
+                           searched=st.searched_count, committed=committed)
         st.completed = True
         st.completion_kind = "SOLUTION"
         if run_ctx.round_seq in cfg.abort_round_seqs:      # E2E-2 injection
@@ -588,6 +626,13 @@ def _handle_hash_work(run_ctx: RunContext, payload: Dict[str, Any],
         st.completion_kind = "EXHAUSTED"
         _seat_range_exhaust(run_ctx, rc, st, at_time=now)
         return Outcome("hash_work_range_exhausted", MinerID=mid, searched=st.searched_count)
+    # S5-5: a FALSE_EXHAUSTION_CLAIMER stops here and claims its range is finished.  When the
+    # modeled audit does NOT detect the claim the miner idles with an uncovered suffix, and
+    # that suffix is an explicit coverage gap which forbids a full-domain exhaustion label.
+    fe = _adv.maybe_false_exhaustion(run_ctx, rc, st, now)
+    if fe is not None:
+        term = _maybe_terminate_no_block(run_ctx, rc)
+        return term if term is not None else fe
     _seat_hash_work(run_ctx, rc, st, at_time=now)          # plan the next batch
     return Outcome("hash_work_committed", MinerID=mid, searched=st.searched_count,
                    committed=committed)
@@ -707,6 +752,9 @@ def _maybe_terminate_no_block(run_ctx: RunContext, rc: RoundContext) -> Optional
                                   envelope={})
             return RoundAbort(run_ctx, rc, reason="round_closed_with_unassigned_range",
                               envelope={})
+        if _adv.round_has_coverage_gap(run_ctx, rc):
+            return RoundAbort(run_ctx, rc, reason=ADVERSARIAL_COVERAGE_GAP_NO_BLOCK,
+                              envelope={})
         run_ctx.security_stats["full_domain_exhausted_count"] += 1
         return RoundAbort(run_ctx, rc, reason=FULL_DOMAIN_EXHAUSTED_NO_BLOCK, envelope={})
     slices = run_ctx.reserve_slices.get(rc.RoundID, [])
@@ -719,6 +767,11 @@ def _maybe_terminate_no_block(run_ctx: RunContext, rc: RoundContext) -> Optional
         run_ctx.security_stats["unused_reserve_domain_count"] += 1
         return RoundAbort(run_ctx, rc, reason=ROUND_CLOSED_WITH_UNUSED_RESERVE_DOMAIN,
                           envelope={})
+    # S5-5/S5-6: an accepted false-exhaustion coverage gap or a withheld valid solution means
+    # the domain was NOT honestly searched — such a round is never labelled a full-domain
+    # exhaustion, whether or not reserve slices exist.
+    if _adv.round_has_coverage_gap(run_ctx, rc):
+        return RoundAbort(run_ctx, rc, reason=ADVERSARIAL_COVERAGE_GAP_NO_BLOCK, envelope={})
     if slices:
         # every primary AND reserve slice was evaluated: a true full-domain exhaustion.
         run_ctx.security_stats["full_domain_exhausted_count"] += 1
@@ -1637,6 +1690,14 @@ def _bind_reassigned_lease(run_ctx: RunContext, rc: RoundContext, mid: Any, prog
                            kind: str, rate: float, t: float) -> None:
     cfg = run_ctx.config
     version = 1
+    # S5-5: the successor lease restarts from the ACCEPTED committed frontier.  A progress
+    # withholder's under-report (if the modeled audit misses it) lowers that accepted frontier
+    # below what it actually searched, so the successor must re-evaluate the difference — real
+    # duplicated physical work, recorded explicitly rather than hidden.
+    _adv.apply_progress_withholding(run_ctx, rc, prog, pred_lease_id, t)
+    _adv.note_reassignment_reeval(run_ctx, rc, prog.RangeSliceID, prog.committed_frontier,
+                                  run_ctx.adv_actual_frontier.get(prog.RangeSliceID,
+                                                                  prog.committed_frontier))
     st = MinerSearchState(MinerID=mid, AssignmentID=aid, assignment_version=version,
                           hash_rate=rate, range_start=prog.committed_frontier,
                           range_end=prog.range_end, active_power=cfg.P_hash,
@@ -2672,6 +2733,9 @@ def _handle_acceptance(run_ctx: RunContext, payload: Dict[str, Any],
     rc.block_accepted = True
     rc.transition("ROUND_ACCEPTED")                       # terminal BEFORE closure (AH2)
     rc.terminal_disposition = "ROUND_ACCEPTED"
+    # S5-6/S5-11: record every accepted-block time so a withheld-then-released block is
+    # distinguishable from one that was never accepted at all.
+    run_ctx.acceptance_times.append(run_ctx.event_queue.current_event_time)
     clo = _close_and_publish(run_ctx, rc, "ROUND_ACCEPTED", envelope,
                              at_time=run_ctx.event_queue.current_event_time)
     return Outcome("accepted_block", publication_result=clo.publication_result)
@@ -2744,6 +2808,10 @@ def _close_and_publish(run_ctx: RunContext, rc: RoundContext, disposition: str,
     # S4-12: terminalise every lease + reassignment request; report unfinished suffixes.
     if run_ctx.config.range_lease.enabled:
         _close_lease_state(run_ctx, rc, t)
+    # S5-12: terminalise every Stage-5 adversarial action bound to this round (cancel queued
+    # delayed-release events, close withheld solutions / claims / delayed wakes) and finalise
+    # the round's reward + penalty ledger.  Nothing adversarial survives into the next round.
+    _adv.close_adversarial_round(run_ctx, rc, t)
     pub = _publish_terminal_and_seat_next(run_ctx, rc, disposition, envelope, t)
     run_ctx.terminal_publication_result = pub
     if pub.kind == "terminal_round_published_seat_failed":
@@ -2792,6 +2860,48 @@ def _close_round_at_horizon(run_ctx: RunContext, rc: RoundContext) -> Outcome:
     return Outcome("round_closed_at_horizon", RoundID=rc.RoundID)
 
 
+# ============================================================ Stage-5 withheld release
+def _handle_withheld_release(run_ctx: RunContext, payload: Dict[str, Any],
+                             envelope: Dict[str, Any]) -> Outcome:
+    """S5-6: a DELAYED_RELEASE withholder finally publishes the block it has been sitting on.
+
+    The release is subject to the SAME acceptance path and the SAME immutable identity checks
+    as a prompt publication: it is accepted only if its round and template are still current and
+    no block has already been accepted.  A release into a closed round, a rotated template, or a
+    round that another miner has already won performs NO effect — the withholder simply loses
+    the block.  Releasing never changes the fixed SHA-256 target or difficulty."""
+    rc = run_ctx.current_round_context
+    ws_id = payload["WithheldSolutionID"]
+    rec = run_ctx.withheld_solutions.get(ws_id)
+    now = run_ctx.event_queue.current_event_time
+    if rec is None:
+        return Outcome("withheld_release_unknown_noop", WithheldSolutionID=ws_id)
+    if rec.status != "WITHHELD":                          # replay / already terminal (S5-12)
+        return Outcome("withheld_release_replay_noop", WithheldSolutionID=ws_id,
+                       status=rec.status)
+    if rc is None or payload["RoundID_at_seat"] != rc.RoundID \
+            or payload["TemplateID_at_seat"] != rc.TemplateID_committed \
+            or rc.round_state in ("ROUND_ACCEPTED", "ROUND_ABORTED"):
+        rec.status = "RELEASED_TOO_LATE"
+        rec.release_time = now
+        rec.disposition = Outcome("withheld_release_stale_noop")
+        run_ctx.adversarial_stats["withheld_release_too_late_count"] += 1
+        return Outcome("withheld_release_stale_noop", MinerID=rec.MinerID)
+    if rc.block_accepted or rc.acceptance_seq > 0:        # another miner already won
+        rec.status = "RELEASED_TOO_LATE"
+        rec.release_time = now
+        rec.disposition = Outcome("withheld_release_lost_race")
+        run_ctx.adversarial_stats["withheld_release_too_late_count"] += 1
+        return Outcome("withheld_release_lost_race", MinerID=rec.MinerID)
+    rec.status = "RELEASED_ACCEPTED"
+    rec.release_time = now
+    rec.disposition = Outcome("withheld_release_accepted")
+    run_ctx.adversarial_stats["withheld_released_count"] += 1
+    run_ctx.adversarial_stats["withheld_total_hidden_duration"] += (now - rec.found_time)
+    return _seat_acceptance(run_ctx, rc, at_time=now, winner=rec.MinerID,
+                            winning_nonce=rec.nonce)
+
+
 # ============================================================ dispatch table
 _HANDLERS = {
     "RoundInitialiseEvent": _handle_round_initialise,
@@ -2811,6 +2921,7 @@ _HANDLERS = {
     "RangeReassignmentRetryEvent": _handle_range_reassignment_retry,
     "RangeLeaseExpiryEvent": _handle_range_lease_expiry,
     "RangeProgressTimeoutEvent": _handle_range_progress_timeout,
+    "WithheldSolutionReleaseEvent": _handle_withheld_release,     # S5-6
 }
 
 
