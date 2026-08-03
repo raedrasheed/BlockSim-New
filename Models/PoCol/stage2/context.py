@@ -223,10 +223,22 @@ class RunContext:
         self.reassignments_per_slice: Dict[str, int] = {}  # RangeSliceID -> count
         self.lease_generation_of_slice: Dict[str, int] = {}  # RangeSliceID -> latest generation
         self.reassign_by_suffix_slice: Dict[str, Any] = {}   # suffix RangeSliceID -> (req_id, slice_id)
+        # S4A-8: natural reassignment-replay registry keyed on the (terminal) predecessor lease +
+        # frontier, so re-observing the SAME terminal lease returns the existing request with no
+        # manual generation rewind.
+        self.reassignment_by_predecessor: Dict[Any, Any] = {}
+        # S4A-6: reassignment wake-handle slices (Stage-3 REASSIGNMENT_WAKE_ONLY scope) — a
+        # continuation of an EXISTING slice, NEVER an independent nonce-domain partition member.
+        self.reassignment_wake_slice_by_id: Dict[str, Any] = {}
         self.lease_observation_by_key: Dict[Any, Any] = {}   # S4-5 idempotent replay registry
         self.lease_seq: int = 0
         self.reassignment_decision_seq: int = 0
         self.reassignment_retry_seq: Dict[str, int] = {}
+        # S4A-4: the ONE authoritative, auditable list of range-lease observations, plus its
+        # immutable-key replay registry and monotone sequence.
+        self.lease_observations: List[Any] = []
+        self.lease_observation_record_by_key: Dict[Any, Any] = {}
+        self.lease_observation_seq: int = 0
         self.lease_stats: Dict[str, Any] = {
             "leases_created": 0, "leases_completed": 0, "leases_expired": 0,
             "leases_revoked": 0, "leases_reassigned": 0, "reassignment_decisions": 0,
@@ -237,6 +249,14 @@ class RunContext:
             "total_reassignment_latency": 0.0, "maximum_reassignment_latency": 0.0,
             "reassignment_wake_energy_j": 0.0, "reassignment_active_energy_j": 0.0,
             "max_progress_frontier_residual": 0, "max_reassignment_latency_residual": 0.0,
+            # S4A-1/S4A-2/S4A-3 executable-disposition counters.
+            "leases_cancelled": 0, "progress_timeouts": 0, "miner_cancellations": 0,
+            # S4A-1/S4A-2/S4A-5 stale, no-effect executable dispositions.
+            "stale_expiry_events": 0, "stale_timeout_events": 0, "stale_exhaust_events": 0,
+            # S4A-7/S4A-6/S4A-8/S4A-9 transactional-integrity counters.
+            "pathb_rollback_count": 0, "overlapping_slice_count": 0, "orphan_count": 0,
+            "reassignment_replay_count": 0, "lease_observation_count": 0,
+            "max_reassignment_energy_residual": 0.0,
         }
         # audit log
         self.log: List[Outcome] = []

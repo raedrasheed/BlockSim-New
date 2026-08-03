@@ -71,6 +71,14 @@ MICROPHASE_ORDINAL: Dict[str, int] = {
     "RANGE_REASSIGNMENT_START": 19,
     "RANGE_REASSIGNMENT_COMPLETE": 20,
     "RANGE_REASSIGNMENT_RETRY": 21,
+    # Stage-4A lease expiry / progress-timeout / cancellation.  These land AFTER HASH_WORK
+    # (12) at a shared event_time (S4A-1 documented ordering): work completing exactly AT the
+    # deadline commits first, then the deadline fires and observes the advanced frontier;
+    # work strictly AFTER the deadline never commits (its event is at a later time and is
+    # cancelled by the fired deadline).
+    "MINER_CANCELLED": 22,
+    "RANGE_LEASE_EXPIRY": 23,
+    "RANGE_PROGRESS_TIMEOUT": 24,
 }
 
 # Stage-3 activation-event payload identity (S3-6): full round/template/assignment identity.
@@ -87,6 +95,18 @@ _REASSIGN_PAYLOAD_KEYS = (
     "predecessor_committed_frontier", "new_lease_generation", "expected_old_lease_status",
     "expected_new_request_status", "expected_progress_generation",
     "expected_round_state_version",
+)
+
+# Stage-4A lease-deadline payload identities.
+_LEASE_EXPIRY_PAYLOAD_KEYS = (
+    "LeaseID", "RoundID_at_seat", "TemplateID_at_seat", "RangeSliceID", "MinerID",
+    "lease_generation", "expected_lease_status", "expected_progress_generation",
+    "expected_committed_frontier", "expected_round_state_version",
+)
+_PROGRESS_TIMEOUT_PAYLOAD_KEYS = (
+    "LeaseID", "RoundID_at_seat", "TemplateID_at_seat", "RangeSliceID", "MinerID",
+    "lease_generation", "expected_committed_frontier", "expected_progress_generation",
+    "timeout_generation", "expected_round_state_version",
 )
 
 
@@ -164,6 +184,16 @@ DESCRIPTORS: Dict[str, EventDescriptor] = {
                         ("RangeSliceID", "retry_seq"),
                         ("RangeSliceID", "RoundID_at_seat", "TemplateID_at_seat",
                          "predecessor_lease_id", "retry_seq"), recv_env=True),
+        # Stage-4A lease-deadline / cancellation events (S4A-1/S4A-2/S4A-3).
+        EventDescriptor("MinerCancelledEvent", "MINER_CANCELLED", ("MinerID",),
+                        ("MinerID", "RoundID_at_seat", "TemplateID_at_seat",
+                         "cancellation_reason"), recv_env=True),
+        EventDescriptor("RangeLeaseExpiryEvent", "RANGE_LEASE_EXPIRY",
+                        ("RangeSliceID", "lease_generation"), _LEASE_EXPIRY_PAYLOAD_KEYS,
+                        recv_env=True),
+        EventDescriptor("RangeProgressTimeoutEvent", "RANGE_PROGRESS_TIMEOUT",
+                        ("RangeSliceID", "timeout_generation"),
+                        _PROGRESS_TIMEOUT_PAYLOAD_KEYS, recv_env=True),
     ]
 }
 

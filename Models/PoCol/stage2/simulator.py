@@ -34,13 +34,26 @@ from .security import (SecurityFloorObservation, ReserveActivationDecision,
                        TERMINAL_REQUEST_STATUSES, FULL_DOMAIN_EXHAUSTED_NO_BLOCK,
                        ROUND_CLOSED_WITH_UNUSED_RESERVE_DOMAIN)
 from .leases import (RangeLease, RangeProgress, RangeReassignmentDecision,
-                     RangeReassignmentRequest, ReassignmentCandidate,
+                     RangeReassignmentRequest, RangeLeaseObservation, ReassignmentCandidate,
                      lease_id as _mk_lease_id, reassignment_request_id as _mk_reassign_id,
                      select_reassignment_candidate, TERMINAL_LEASE_STATUSES,
                      TERMINAL_REASSIGN_REQUEST_STATUSES, REASSIGNED_PRIMARY_WORK,
-                     REASSIGNED_RESERVE_WORK)
+                     REASSIGNED_RESERVE_WORK, LEASE_TRIGGERS)
 
 _TERMINAL_ROUND = ("ROUND_ACCEPTED", "ROUND_ABORTED")
+
+# S4A-1/S4A-2/S4A-3: a lease trigger -> (terminal lease status, lease_stats counter, disposition
+# tag).  MINER_FAILED and MINER_CANCELLED are DISTINCT dispositions (a failure is an involuntary
+# fault -> OFFLINE/REVOKED; a cancellation is a voluntary withdrawal -> LOW_POWER_LISTEN/CANCELLED).
+# A time-expiry / progress-timeout terminalises to EXPIRED.  A round-close terminalises to
+# CANCELLED.  Whatever the disposition, the unfinished suffix is still handed to reassignment.
+_TRIGGER_TERMINALISATION = {
+    "LEASE_TIME_EXPIRED": ("EXPIRED", "leases_expired"),
+    "PROGRESS_TIMEOUT": ("EXPIRED", "leases_expired"),
+    "MINER_FAILED": ("REVOKED", "leases_revoked"),
+    "MINER_CANCELLED": ("CANCELLED", "leases_cancelled"),
+    "ROUND_CLOSING": ("CANCELLED", "leases_cancelled"),
+}
 
 # S2B-2: declared causal-accounting rounding tolerance (nonces) for the searched-count
 # vs elapsed-hash-time bound (floats are exact to <1 nonce, so 1 is a safe integer slack).
@@ -346,6 +359,15 @@ def _handle_prepare_participants(run_ctx: RunContext, payload: Dict[str, Any],
                               {"MinerID": f_mid, "RoundID_at_seat": rc.RoundID,
                                "TemplateID_at_seat": rc.TemplateID_committed,
                                "fault_reason": f_reason}, ordinary_dispatch_origin(_eq))
+        # S4A-3: injected VOLUNTARY cancellations (test-only; empty in confirmatory runs) — each
+        # seats a MinerCancelledEvent (distinct disposition from a failure) at its declared time.
+        for cxl in cfg.injected_lease_cancellations:
+            c_round_seq, c_mid, c_time, c_reason = cxl
+            if c_round_seq == run_ctx.round_seq and c_mid in rc.search_states:
+                ScheduleEvent(_eq, rc, "MinerCancelledEvent", c_time, "MINER_CANCELLED",
+                              {"MinerID": c_mid, "RoundID_at_seat": rc.RoundID,
+                               "TemplateID_at_seat": rc.TemplateID_committed,
+                               "cancellation_reason": c_reason}, ordinary_dispatch_origin(_eq))
     return Outcome("participant_set_prepared", participants=len(participants),
                    nonce_domain_size=cfg.nonce_domain_size,
                    reserve_slices=len(run_ctx.reserve_slices.get(rc.RoundID, [])))
@@ -509,6 +531,7 @@ def _handle_hash_work(run_ctx: RunContext, payload: Dict[str, Any],
         if prog is not None:
             assert commit_end >= prog.committed_frontier, "committed_frontier decreased"
             assert commit_end <= prog.range_end, "committed_frontier exceeds range_end"
+            advanced = commit_end > prog.committed_frontier
             prog.committed_frontier = commit_end
             lease_ref = run_ctx.range_leases.get(prog.current_lease_id)
             if lease_ref is not None:
@@ -516,6 +539,11 @@ def _handle_hash_work(run_ctx: RunContext, payload: Dict[str, Any],
                 lease_gen = lease_ref.lease_generation
                 pred_lease = lease_ref.predecessor_lease_id
             prog_gen = prog.progress_generation
+            # S4A-2: a CAUSAL frontier advance refreshes the progress-timeout deadline (a miner
+            # that keeps committing work never times out); planning a batch refreshes nothing.
+            if advanced and lease_ref is not None and lease_ref.lease_status == "ACTIVE":
+                prog.last_progress_time = now
+                _refresh_progress_timeout(run_ctx, rc, prog, lease_ref, now)
     run_ctx.evaluation_ledger.append(EvaluationRecord(
         RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed, MinerID=mid,
         AssignmentID=st.AssignmentID, assignment_version=st.assignment_version,
@@ -576,10 +604,20 @@ def _handle_range_exhaust(run_ctx: RunContext, payload: Dict[str, Any],
             or payload["RoundID_at_seat"] != rc.RoundID \
             or payload["TemplateID_at_seat"] != rc.TemplateID_committed:
         return Outcome("range_exhaust_no_effect", reason="identity_mismatch", MinerID=mid)
+    # S4A-5: a RangeExhaustEvent from a SUPERSEDED lease (the slice was revoked / reassigned to
+    # a fresh generation, or the lease is no longer ACTIVE / no longer the slice's current lease)
+    # performs NO effect — it must not idle the successor miner nor mis-complete the slice.
+    lguard = _verify_exhaust_lease(run_ctx, rc, mid, payload)
+    if lguard.kind != "exhaust_lease_ok":
+        run_ctx.lease_stats["stale_exhaust_events"] += 1
+        return Outcome("range_exhaust_no_effect", reason=lguard, MinerID=mid)
     m = run_ctx.miners.get(mid)
     t = run_ctx.event_queue.current_event_time
     if m is not None and m.state == "ACTIVE_HASHING":
         run_ctx.apply_miner_state_transition(mid, "LOW_POWER_LISTEN", t)   # idle policy
+    # S4A-9: a reassignee that exhausts its suffix ends its reassigned ACTIVE_HASHING interval.
+    if run_ctx.config.range_lease.enabled:
+        _stamp_reassignee_active_end(run_ctx, rc, mid, t)
     # S4-2: a range searched to the end COMPLETES its lease and closes its RangeProgress at
     # the frontier (== range_end) — no reassignment for a completed lease.
     if run_ctx.config.range_lease.enabled:
@@ -675,10 +713,12 @@ def _create_range_progress_and_lease(run_ctx: RunContext, rc: RoundContext, mid:
     run_ctx.slice_of_miner[(rc.RoundID, mid)] = slice_id
     run_ctx.lease_generation_of_slice[slice_id] = 1
     lid = _mk_lease_id(rc.RoundID, rc.TemplateID_committed, slice_id, 1)
-    run_ctx.range_progress[slice_id] = RangeProgress(
+    prog = RangeProgress(
         RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed, RangeSliceID=slice_id,
         range_start=start, range_end=end, committed_frontier=start, current_lease_id=lid,
-        progress_generation=0, terminal_status="OPEN", assignment_kind=kind)
+        progress_generation=0, terminal_status="OPEN", assignment_kind=kind,
+        last_progress_time=t)
+    run_ctx.range_progress[slice_id] = prog
     lease = RangeLease(
         LeaseID=lid, RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed,
         RangeSliceID=slice_id, lease_generation=1, AssignmentID=aid,
@@ -688,7 +728,76 @@ def _create_range_progress_and_lease(run_ctx: RunContext, rc: RoundContext, mid:
         lease_status="ACTIVE")
     run_ctx.range_leases[lid] = lease
     run_ctx.lease_stats["leases_created"] += 1
+    # S4A-1/S4A-2: arm the lease-time-expiry + progress-timeout deadlines for this ACTIVE lease.
+    _seat_lease_expiry(run_ctx, rc, lease, prog, t)
+    _refresh_progress_timeout(run_ctx, rc, prog, lease, t)
     return lease
+
+
+def _seat_lease_expiry(run_ctx: RunContext, rc: RoundContext, lease: Any, prog: Any,
+                       t: float) -> None:
+    """S4A-1: seat ONE RangeLeaseExpiryEvent at ``lease_expiry_time`` for an ACTIVE lease.
+
+    With the default effectively-unbounded ``lease_duration`` the deadline is post-horizon and
+    ``ScheduleEvent`` rejects it (no event is armed), so the confirmatory runs seat none; only a
+    finite configured ``lease_duration`` arms a real deadline.
+    """
+    eq = run_ctx.event_queue
+    payload = {"LeaseID": lease.LeaseID, "RoundID_at_seat": rc.RoundID,
+               "TemplateID_at_seat": rc.TemplateID_committed, "RangeSliceID": lease.RangeSliceID,
+               "MinerID": lease.MinerID, "lease_generation": lease.lease_generation,
+               "expected_lease_status": "ACTIVE",
+               "expected_progress_generation": prog.progress_generation,
+               "expected_committed_frontier": prog.committed_frontier,
+               "expected_round_state_version": rc.state_version}
+    r = ScheduleEvent(eq, rc, "RangeLeaseExpiryEvent", lease.lease_expiry_time,
+                      "RANGE_LEASE_EXPIRY", payload, ordinary_dispatch_origin(eq))
+    lease.expiry_event_ref = r.event_ref if r.kind == "scheduled" else None
+
+
+def _refresh_progress_timeout(run_ctx: RunContext, rc: RoundContext, prog: Any, lease: Any,
+                              t: float) -> None:
+    """S4A-2: (re)arm the progress-timeout deadline at ``last_progress_time + progress_timeout``.
+
+    Called at lease creation and on EVERY causal frontier advance (NOT on planning): the prior
+    timeout event is cancelled, ``timeout_generation`` is bumped so any already-queued timeout
+    event becomes stale, and a fresh RangeProgressTimeoutEvent is armed.  A default unbounded
+    ``progress_timeout`` is post-horizon and arms nothing.
+    """
+    eq = run_ctx.event_queue
+    if prog.timeout_event_ref is not None:
+        rec = eq.queued_event_registry.get(prog.timeout_event_ref)
+        if rec is not None and rec.queue_status == "QUEUED":
+            CancelQueuedEvent(eq, run_ctx, prog.timeout_event_ref,
+                              cancellation_reason="progress_advanced")
+        prog.timeout_event_ref = None
+    prog.timeout_generation += 1
+    deadline = prog.last_progress_time + run_ctx.config.range_lease.progress_timeout
+    payload = {"LeaseID": lease.LeaseID, "RoundID_at_seat": rc.RoundID,
+               "TemplateID_at_seat": rc.TemplateID_committed, "RangeSliceID": prog.RangeSliceID,
+               "MinerID": lease.MinerID, "lease_generation": lease.lease_generation,
+               "expected_committed_frontier": prog.committed_frontier,
+               "expected_progress_generation": prog.progress_generation,
+               "timeout_generation": prog.timeout_generation,
+               "expected_round_state_version": rc.state_version}
+    r = ScheduleEvent(eq, rc, "RangeProgressTimeoutEvent", deadline, "RANGE_PROGRESS_TIMEOUT",
+                      payload, ordinary_dispatch_origin(eq))
+    prog.timeout_event_ref = r.event_ref if r.kind == "scheduled" else None
+
+
+def _cancel_lease_deadlines(run_ctx: RunContext, lease: Any, prog: Any) -> None:
+    """S4A-1/S4A-2: cancel any queued expiry / progress-timeout deadline of a terminalising lease."""
+    eq = run_ctx.event_queue
+    for ref in (getattr(lease, "expiry_event_ref", None),
+                getattr(prog, "timeout_event_ref", None) if prog is not None else None):
+        if ref is None:
+            continue
+        rec = eq.queued_event_registry.get(ref)
+        if rec is not None and rec.queue_status == "QUEUED":
+            CancelQueuedEvent(eq, run_ctx, ref, cancellation_reason="lease_terminalised")
+    lease.expiry_event_ref = None
+    if prog is not None:
+        prog.timeout_event_ref = None
 
 
 def _current_lease_for_miner(run_ctx: RunContext, rc: RoundContext, mid: Any) -> Any:
@@ -740,6 +849,54 @@ def _verify_hash_lease(run_ctx: RunContext, rc: RoundContext, st: Any, mid: Any,
     return Outcome("hash_lease_ok")
 
 
+def _verify_exhaust_lease(run_ctx: RunContext, rc: RoundContext, mid: Any,
+                          payload: Dict[str, Any]) -> Outcome:
+    """S4A-5: a RangeExhaustEvent is honoured ONLY for the slice's CURRENT ACTIVE lease.
+
+    A superseded lease (revoked / reassigned / no longer the slice's current lease, or a stale
+    generation) makes the exhaust event a no-op so it never idles the successor miner nor marks
+    the slice completed on stale provenance.
+    """
+    if not run_ctx.config.range_lease.enabled:
+        return Outcome("exhaust_lease_ok")
+    lid = payload.get("LeaseID")
+    if lid is None:
+        return Outcome("exhaust_lease_ok")
+    lease = run_ctx.range_leases.get(lid)
+    if lease is None:
+        return Outcome("exhaust_lease_unknown")
+    if lease.lease_status != "ACTIVE":
+        return Outcome("exhaust_lease_not_active", actual=lease.lease_status)
+    if lease.MinerID != mid:
+        return Outcome("exhaust_lease_owner_mismatch")
+    if lease.lease_generation != payload.get("lease_generation"):
+        return Outcome("exhaust_lease_generation_mismatch")
+    prog = run_ctx.range_progress.get(lease.RangeSliceID)
+    if prog is None or prog.current_lease_id != lid:
+        return Outcome("exhaust_lease_superseded")
+    return Outcome("exhaust_lease_ok")
+
+
+def _stamp_reassignee_active_end(run_ctx: RunContext, rc: RoundContext, mid: Any,
+                                 t: float) -> None:
+    """S4A-9: close a reassignee's reassigned ACTIVE_HASHING interval at ``t`` (energy attribution).
+
+    Only the reassignment lifecycle interval — not the reassignee's full residency (which may
+    include its own earlier primary work) — is attributed to the reassignment.
+    """
+    m = run_ctx.miners.get(mid)
+    for req in run_ctx.reassignment_requests.values():
+        if req.RoundID == rc.RoundID and req.new_MinerID == mid \
+                and req.status == "COMPLETED" \
+                and req.reassigned_search_start_time is not None \
+                and req.reassigned_search_end_time is None:
+            req.reassigned_search_end_time = t
+            # S4A-9: the reassignee just left ACTIVE_HASHING — the ledger's cumulative
+            # ACTIVE_HASHING is now finalised for this interval (exact energy reconciliation).
+            req.active_residency_at_search_end = m.duration.get("ACTIVE_HASHING", 0.0) \
+                if m is not None else None
+
+
 def _complete_lease_at_exhaustion(run_ctx: RunContext, rc: RoundContext, mid: Any,
                                   t: float) -> None:
     slice_id = run_ctx.slice_of_miner.get((rc.RoundID, mid))
@@ -761,7 +918,7 @@ def _reassignment_in_flight(run_ctx: RunContext, rc: RoundContext) -> bool:
             return True
     for (rid, _m), rr in run_ctx.reserve_records.items():   # Path-B reserve wake in flight
         if rid == rc.RoundID and rr.reserve_status in ("ACTIVATION_PENDING", "WAKING") \
-                and str(rr.assigned_reserve_slice_id or "").startswith("RRS-"):
+                and str(rr.assigned_reserve_slice_id or "") in run_ctx.reassign_by_suffix_slice:
             return True
     return False
 
@@ -831,16 +988,70 @@ def _eligible_reassignment_candidates(run_ctx: RunContext, rc: RoundContext, sli
     return cands
 
 
+def _trigger_condition_satisfied(run_ctx: RunContext, rc: RoundContext, lease: Any, prog: Any,
+                                 trigger: str, now: float) -> bool:
+    """S4A-4: whether the observed trigger's condition ACTUALLY holds right now.
+
+    A failure / cancellation is an EXPLICIT fact (the miner already transitioned); a time-expiry
+    / progress-timeout is validated against the recorded deadline so a lease is never revoked
+    merely because ``EvaluateRangeLease`` was called with a stale or premature deadline.
+    """
+    pol = run_ctx.config.range_lease
+    m = run_ctx.miners.get(lease.MinerID)
+    if trigger == "MINER_FAILED":
+        return m is not None and m.state == "OFFLINE"
+    if trigger == "MINER_CANCELLED":
+        return m is not None and m.state != "ACTIVE_HASHING"
+    if trigger == "LEASE_TIME_EXPIRED":
+        return now + pol.lease_tolerance >= lease.lease_expiry_time
+    if trigger == "PROGRESS_TIMEOUT":
+        deadline = prog.last_progress_time + pol.progress_timeout
+        return (now + pol.lease_tolerance >= deadline) \
+            and prog.committed_frontier < prog.range_end
+    if trigger == "ROUND_CLOSING":
+        return True
+    return True
+
+
+def _append_lease_observation(run_ctx: RunContext, rc: RoundContext, lease: Any, prog: Any,
+                              obs_time: float, reason: Any, cond: bool, decision_result: str,
+                              status_before: str, frontier: int, pg: int,
+                              observation_key: Any, reassignment_decision_id: Any) -> Any:
+    """S4A-4: append the ONE authoritative, auditable RangeLeaseObservation for this observation."""
+    run_ctx.lease_observation_seq += 1
+    obs = RangeLeaseObservation(
+        ObservationID=(run_ctx.RunID, "LOBS", run_ctx.lease_observation_seq),
+        observation_key=observation_key, LeaseID=lease.LeaseID, RoundID=rc.RoundID,
+        TemplateID=rc.TemplateID_committed, observation_time=obs_time,
+        observation_reason=str(reason), lease_status_before=status_before,
+        committed_frontier=frontier, progress_generation=pg, condition_satisfied=cond,
+        decision_result=decision_result, reassignment_decision_id=reassignment_decision_id)
+    run_ctx.lease_observations.append(obs)
+    run_ctx.lease_observation_record_by_key[observation_key] = obs
+    run_ctx.lease_stats["lease_observation_count"] += 1
+    return obs
+
+
 def EvaluateRangeLease(run_ctx: RunContext, rc: RoundContext, lease_id_val: Any,
-                       observation_time: float, observation_reason: str,
-                       triggering_event_ref: Any = None) -> Optional[Outcome]:
-    """S4-5: the ONE authoritative lease observation + reassignment decision (idempotent)."""
+                       observation_time: float, trigger: str,
+                       triggering_event_ref: Any = None,
+                       observation_reason: Any = None) -> Optional[Outcome]:
+    """S4-5/S4A-4: the ONE authoritative lease observation + reassignment decision.
+
+    It is AUTHORITATIVE: it validates the trigger condition, records exactly one
+    RangeLeaseObservation for every (non-replay) observation, and revokes / reassigns the
+    unfinished suffix ONLY when the condition actually holds — never merely because it was
+    called.  Terminal disposition follows the trigger (EXPIRED / REVOKED / CANCELLED), which is
+    DISTINCT per cause (a failure vs a voluntary cancellation vs a deadline).
+    """
     pol = run_ctx.config.range_lease
     if not pol.enabled:
         return None
     lease = run_ctx.range_leases.get(lease_id_val)
     if lease is None:
         return None
+    if observation_reason is None:
+        observation_reason = trigger
     trig = triggering_event_ref if triggering_event_ref is not None \
         else getattr(run_ctx.event_queue, "current_event_ref", None)
     key = _lease_observation_key(run_ctx, rc, lease, trig)
@@ -848,63 +1059,97 @@ def EvaluateRangeLease(run_ctx: RunContext, rc: RoundContext, lease_id_val: Any,
         run_ctx.lease_stats["lease_observation_replay_count"] += 1
         return None
     run_ctx.lease_observation_by_key[key] = observation_reason
+    prog = run_ctx.range_progress.get(lease.RangeSliceID)
+    status_before = lease.lease_status
+    frontier = prog.committed_frontier if prog is not None else lease.committed_cursor
+    pg_before = prog.progress_generation if prog is not None else -1
+    n_dec_before = len(run_ctx.reassignment_decisions)
+
+    def _finish(cond: bool, decision_result: str, outcome: Optional[Outcome] = None):
+        rdid = (run_ctx.reassignment_decisions[-1].DecisionID
+                if len(run_ctx.reassignment_decisions) > n_dec_before else None)
+        _append_lease_observation(run_ctx, rc, lease, prog, observation_time, observation_reason,
+                                  cond, decision_result, status_before, frontier, pg_before,
+                                  key, rdid)
+        return outcome
+
     if rc.round_state in _TERMINAL_ROUND:
         _record_reassignment_decision(run_ctx, rc, lease, None, "ROUND_ALREADY_TERMINAL")
-        return None
-    prog = run_ctx.range_progress.get(lease.RangeSliceID)
+        return _finish(False, "ROUND_ALREADY_TERMINAL")
     if prog is None or lease.lease_status in TERMINAL_LEASE_STATUSES:
-        return None
-    frontier = prog.committed_frontier
+        return _finish(False, "LEASE_ALREADY_TERMINAL")
     if frontier >= prog.range_end:
         lease.lease_status = "COMPLETED"
         prog.terminal_status = "COMPLETED"
         run_ctx.lease_stats["leases_completed"] += 1
+        _cancel_lease_deadlines(run_ctx, lease, prog)
         _record_reassignment_decision(run_ctx, rc, lease, None, "SLICE_ALREADY_COMPLETED")
-        return None
-    # a reassignment-triggering observation: revoke the lease + try to reassign the suffix.
-    RevokeRangeLeaseTransaction(run_ctx, rc, lease, observation_reason)
+        return _finish(True, "LEASE_COMPLETED")
+    # S4A-4: VALIDATE the trigger condition BEFORE terminalising; an unsatisfied condition leaves
+    # the lease ACTIVE (this is what makes EvaluateRangeLease authoritative rather than a rubber
+    # stamp for whoever called it).
+    if not _trigger_condition_satisfied(run_ctx, rc, lease, prog, trigger, observation_time):
+        return _finish(False, "LEASE_REMAINS_ACTIVE")
+    # condition satisfied -> terminalise (trigger-specific disposition) + reassign the suffix.
+    RevokeRangeLeaseTransaction(run_ctx, rc, lease, trigger)
     if not pol.reassignment_enabled:
         _record_reassignment_decision(run_ctx, rc, lease, None, "REASSIGNMENT_NOT_ALLOWED")
-        return _apply_no_eligible_policy(run_ctx, rc, prog)
+        return _finish(True, "REASSIGNMENT_NOT_ALLOWED", _apply_no_eligible_policy(run_ctx, rc, prog))
     if run_ctx.reassignments_per_slice.get(lease.RangeSliceID, 0) \
             >= pol.maximum_reassignments_per_slice:
         _record_reassignment_decision(run_ctx, rc, lease, None, "REASSIGNMENT_LIMIT_REACHED")
-        return _apply_no_eligible_policy(run_ctx, rc, prog)
+        return _finish(True, "REASSIGNMENT_LIMIT_REACHED", _apply_no_eligible_policy(run_ctx, rc, prog))
     cands = _eligible_reassignment_candidates(run_ctx, rc, lease.RangeSliceID, lease.MinerID,
                                               frontier, observation_time)
     chosen = select_reassignment_candidate(cands)
     if chosen is None:
         _record_reassignment_decision(run_ctx, rc, lease, None, "NO_ELIGIBLE_MINER")
-        return _apply_no_eligible_policy(run_ctx, rc, prog)
-    return SeatRangeReassignmentTransaction(run_ctx, rc, prog, lease, chosen,
-                                            observation_time, observation_reason)
+        return _finish(True, "NO_ELIGIBLE_MINER", _apply_no_eligible_policy(run_ctx, rc, prog))
+    out = SeatRangeReassignmentTransaction(run_ctx, rc, prog, lease, chosen,
+                                           observation_time, trigger)
+    return _finish(True, "REASSIGNMENT_REQUIRED", out)
 
 
 def _lease_observation_key(run_ctx: RunContext, rc: RoundContext, lease: Any,
                            trigger: Any) -> Any:
-    prog = run_ctx.range_progress.get(lease.RangeSliceID)
-    pg = prog.progress_generation if prog else -1
-    return (rc.RoundID, rc.TemplateID_committed, lease.LeaseID, trigger,
-            lease.lease_generation, pg, rc.state_version)
+    # S4A-4: the immutable identity of ONE observation event — the LeaseID already encodes
+    # (round, template, slice, generation), and the triggering EventRef makes it unique per
+    # observation.  It deliberately excludes mutable progress/state versions so that re-invoking
+    # EvaluateRangeLease for the SAME triggering event is idempotent even after that observation
+    # has mutated the slice progress.
+    return (rc.RoundID, rc.TemplateID_committed, lease.LeaseID, trigger)
 
 
 def RevokeRangeLeaseTransaction(run_ctx: RunContext, rc: RoundContext, lease: Any,
-                                reason: str) -> Outcome:
-    """S4-9: terminalise a lease + cancel its queued hash events + bump progress (all-or-none)."""
+                                trigger: str) -> Outcome:
+    """S4-9/S4A-1/S4A-3: terminalise a lease with the trigger-specific disposition.
+
+    ``trigger`` is one of ``LEASE_TRIGGERS``.  A failure -> REVOKED, a voluntary cancellation
+    -> CANCELLED, a time-expiry / progress-timeout -> EXPIRED, a round close -> CANCELLED; the
+    counters distinguish each cause.  The queued hash / range-exhaust events AND the lease's
+    expiry / progress-timeout deadlines are cancelled, the search state is completed, and the
+    slice progress advances a generation — all-or-none.
+    """
     prog = run_ctx.range_progress.get(lease.RangeSliceID)
-    lease.lease_status = "REVOKED"
-    lease.reassignment_reason = reason
-    lease.disposition = Outcome("lease_revoked", reason=reason)
-    run_ctx.lease_stats["leases_revoked"] += 1
+    status, counter = _TRIGGER_TERMINALISATION.get(trigger, ("REVOKED", "leases_revoked"))
+    lease.lease_status = status
+    lease.reassignment_reason = trigger
+    lease.disposition = Outcome("lease_terminalised", trigger=trigger, status=status)
+    run_ctx.lease_stats[counter] += 1
+    if trigger == "MINER_CANCELLED":
+        run_ctx.lease_stats["miner_cancellations"] += 1
+    elif trigger == "PROGRESS_TIMEOUT":
+        run_ctx.lease_stats["progress_timeouts"] += 1
     _cancel_queued_hash_events(run_ctx, lease.MinerID)
+    _cancel_lease_deadlines(run_ctx, lease, prog)
     st = rc.search_states.get(lease.MinerID)
     if st is not None and not st.completed:
         st.completed = True
-        st.completion_kind = "REVOKED"
+        st.completion_kind = status
     if prog is not None:
         prog.current_lease_id = None
         prog.progress_generation += 1
-    return Outcome("lease_revoked", LeaseID=lease.LeaseID)
+    return Outcome("lease_revoked", LeaseID=lease.LeaseID, trigger=trigger, status=status)
 
 
 def _reassign_payload(run_ctx: RunContext, rc: RoundContext, req: Any, predecessor_lease: Any,
@@ -925,19 +1170,35 @@ def _reassign_payload(run_ctx: RunContext, rc: RoundContext, req: Any, predecess
 def SeatRangeReassignmentTransaction(run_ctx: RunContext, rc: RoundContext, prog: Any,
                                      predecessor_lease: Any, chosen: Any,
                                      observation_time: float, reason: str) -> Optional[Outcome]:
-    """S4-9: seat a reassignment ALL-OR-NONE (request + event + counters), rollback on failure."""
+    """S4-9/S4A-7/S4A-8: seat a reassignment ALL-OR-NONE (request + event + counters).
+
+    S4A-8: replay is NATURAL — a second observation of the SAME terminal predecessor lease
+    returns ``range_reassignment_already_exists`` with no second request, no manual generation
+    rewind.  S4A-7: a failed seat rolls back completely (no orphan slice / observation / decision
+    / link) and registers a FAILED request for audit.
+    """
     cfg = run_ctx.config
     eq = run_ctx.event_queue
     now = eq.current_event_time
     slice_id = prog.RangeSliceID
     frontier = prog.committed_frontier
+    # S4A-8: NATURAL replay — the predecessor lease is terminalised exactly once, so a second
+    # observation of it re-derives the same reassignment (no generation-counter dependence).
+    existing = run_ctx.reassignment_by_predecessor.get(predecessor_lease.LeaseID)
+    if existing is not None:
+        run_ctx.lease_stats["reassignment_replay_count"] += 1
+        return Outcome("range_reassignment_already_exists",
+                       RangeReassignmentRequestID=existing,
+                       predecessor_lease_id=predecessor_lease.LeaseID)
     new_gen = run_ctx.lease_generation_of_slice.get(slice_id,
                                                     predecessor_lease.lease_generation) + 1
     new_lease_id = _mk_lease_id(rc.RoundID, rc.TemplateID_committed, slice_id, new_gen)
     req_id = _mk_reassign_id(rc.RoundID, rc.TemplateID_committed, slice_id,
                              predecessor_lease.LeaseID, frontier, chosen.MinerID, new_gen)
-    if req_id in run_ctx.reassignment_requests:              # S4-10 exact replay: no 2nd effect
-        return None
+    if req_id in run_ctx.reassignment_requests:              # defensive exact-id replay guard
+        return Outcome("range_reassignment_already_exists",
+                       RangeReassignmentRequestID=req_id,
+                       predecessor_lease_id=predecessor_lease.LeaseID)
     result = "REASSIGNMENT_PENDING_WAKE" if chosen.needs_stage3_wake else "REASSIGNMENT_SEATED"
     projected_start = now + (cfg.security_floor.activation_wake_latency
                              if chosen.needs_stage3_wake else cfg.range_lease.reassignment_wake_latency)
@@ -981,6 +1242,7 @@ def SeatRangeReassignmentTransaction(run_ctx: RunContext, rc: RoundContext, prog
     predecessor_lease.lease_status = "REASSIGNED"
     run_ctx.lease_stats["leases_reassigned"] += 1
     run_ctx.reassignment_requests[req_id] = req
+    run_ctx.reassignment_by_predecessor[predecessor_lease.LeaseID] = req_id   # S4A-8 natural replay
     run_ctx.reassignments_per_slice[slice_id] = \
         run_ctx.reassignments_per_slice.get(slice_id, 0) + 1
     run_ctx.lease_generation_of_slice[slice_id] = new_gen
@@ -990,23 +1252,44 @@ def SeatRangeReassignmentTransaction(run_ctx: RunContext, rc: RoundContext, prog
 
 def _seat_reserve_reassignment_wake(run_ctx: RunContext, rc: RoundContext, prog: Any,
                                     req: Any, chosen: Any) -> bool:
-    """S4-10 Path B: wake a reserve reassignee via the ACCEPTED Stage-3 activation lifecycle.
+    """S4A-6/S4A-7 Path B: wake a reserve reassignee via the ACCEPTED Stage-3 activation lifecycle.
 
-    Creates a reassignment-suffix RangeSlice + a (synthetic-provenance) floor observation /
-    decision so the accepted ``SeatReserveActivationTransaction`` (and its Start/Complete
-    events) can wake the reserve — NO second reserve-wake implementation.  The reassignment
-    request references the resulting activation request.
+    S4A-6: it does NOT create an overlapping nonce-domain slice.  The wake uses a CONTINUATION
+    wake-handle that is the exact unfinished suffix ``[committed_frontier, range_end)`` of the
+    ORIGINAL slice; it is registered ONLY as a wake handle (never as a domain-partition member),
+    the activation is scoped ``REASSIGNMENT_WAKE_ONLY``, and the successor lease binds to the
+    ORIGINAL RangeProgress.  S4A-7: the whole wake is transactional — a failed activation seat
+    rolls back the wake-handle slice, the synthetic observation / decision and any link, leaving
+    NO orphan.
     """
     slice_id = prog.RangeSliceID
     frontier = prog.committed_frontier
-    suffix_slice_id = f"RRS-{slice_id}-{req.new_lease_generation}"
-    suffix = RangeSlice(RangeSliceID=suffix_slice_id, kind=REASSIGNED_RESERVE_WORK,
-                        range_start=frontier, range_end=prog.range_end, status="UNCLAIMED")
-    run_ctx.reserve_slice_by_id[suffix_slice_id] = suffix
-    run_ctx.reserve_slices.setdefault(rc.RoundID, []).append(suffix)
     rr = run_ctx.reserve_records.get((rc.RoundID, chosen.MinerID))
     if rr is None:
         return False
+    # S4A-6 disjointness: the wake handle is exactly the ORIGINAL slice's unfinished suffix — a
+    # continuation, never an independent overlapping domain slice.
+    assert prog.range_start <= frontier < prog.range_end, "reassignment suffix out of range"
+    wake_slice_id = f"WH-{slice_id}-{req.new_lease_generation}"
+    wake_handle = RangeSlice(RangeSliceID=wake_slice_id, kind=REASSIGNED_RESERVE_WORK,
+                             range_start=frontier, range_end=prog.range_end, status="UNCLAIMED")
+    # snapshot the pre-state so a failed activation seat rolls back to EXACTLY it (no orphans).
+    obs_len = len(run_ctx.security_observations)
+    dec_len = len(run_ctx.activation_decisions)
+
+    def _rollback_wake() -> bool:
+        del run_ctx.security_observations[obs_len:]
+        del run_ctx.activation_decisions[dec_len:]
+        run_ctx.reserve_slice_by_id.pop(wake_slice_id, None)
+        run_ctx.reassignment_wake_slice_by_id.pop(wake_slice_id, None)
+        run_ctx.reassign_by_suffix_slice.pop(wake_slice_id, None)
+        run_ctx.lease_stats["pathb_rollback_count"] += 1
+        return False
+
+    # register the wake handle ONLY as a wake handle (NOT in reserve_slices[round] — it is not a
+    # nonce-domain partition member), so the Stage-3 verify can find it by id.
+    run_ctx.reserve_slice_by_id[wake_slice_id] = wake_handle
+    run_ctx.reassignment_wake_slice_by_id[wake_slice_id] = wake_handle
     run_ctx.observation_seq += 1
     obs = SecurityFloorObservation(
         ObservationID=(run_ctx.RunID, "ROBS", run_ctx.observation_seq), RoundID=rc.RoundID,
@@ -1019,15 +1302,18 @@ def _seat_reserve_reassignment_wake(run_ctx: RunContext, rc: RoundContext, prog:
     s3dec = ReserveActivationDecision(
         DecisionID=(run_ctx.RunID, "RDEC3", run_ctx.observation_seq),
         ObservationID=obs.ObservationID, selected_miners=[chosen.MinerID],
-        selected_slices=[suffix_slice_id], projected_hash_rate_after_wake=chosen.hash_rate,
+        selected_slices=[wake_slice_id], projected_hash_rate_after_wake=chosen.hash_rate,
         residual_deficit=0.0, policy_result="ACTIVATION_SEATED")
     run_ctx.activation_decisions.append(s3dec)
     obs.activation_decision_id = s3dec.DecisionID
-    act_req = SeatReserveActivationTransaction(run_ctx, rc, rr, suffix, obs, s3dec.DecisionID)
+    run_ctx.reassign_by_suffix_slice[wake_slice_id] = (req.RangeReassignmentRequestID, slice_id)
+    act_req = SeatReserveActivationTransaction(
+        run_ctx, rc, rr, wake_handle, obs, s3dec.DecisionID,
+        activation_scope="REASSIGNMENT_WAKE_ONLY",
+        range_reassignment_request_id=req.RangeReassignmentRequestID)
     if not isinstance(act_req, ReserveActivationRequest):
-        return False
+        return _rollback_wake()
     req.reserve_activation_request_id = act_req.ReserveActivationRequestID
-    run_ctx.reassign_by_suffix_slice[suffix_slice_id] = (req.RangeReassignmentRequestID, slice_id)
     return True
 
 
@@ -1083,6 +1369,10 @@ def _handle_range_reassignment_start(run_ctx: RunContext, payload: Dict[str, Any
     mid = payload["new_MinerID"]
     eq = run_ctx.event_queue
     t = eq.current_event_time
+    # S4A-9: snapshot the pre-wake cumulative WAKING residency so the reassignment wake interval
+    # is attributed EXACTLY (never the reassignee's earlier WAKING).
+    m = run_ctx.miners.get(mid)
+    req.wake_residency_at_start = m.duration.get("WAKING", 0.0) if m is not None else 0.0
     run_ctx.apply_miner_state_transition(mid, "WAKING", t)
     req.status = "STARTED"
     req.started_at = t
@@ -1133,6 +1423,14 @@ def _handle_range_reassignment_complete(run_ctx: RunContext, payload: Dict[str, 
                            req.predecessor_lease_id, kind, rate, t)
     req.status = "COMPLETED"
     req.completed_at = t
+    # S4A-9: the reassignee's reassigned ACTIVE_HASHING interval begins now (energy attribution);
+    # snapshot its pre-reassignment cumulative ACTIVE_HASHING (and finalised WAKING) so the
+    # wake/active intervals are attributed EXACTLY.
+    req.reassigned_search_start_time = t
+    _m = run_ctx.miners.get(mid)
+    req.wake_residency_at_end = _m.duration.get("WAKING", 0.0) if _m is not None else None
+    req.active_residency_at_search_start = _m.duration.get("ACTIVE_HASHING", 0.0) \
+        if _m is not None else 0.0
     req.disposition = Outcome("reassignment_completed")
     run_ctx.lease_stats["reassignment_requests_completed"] += 1
     lat = t - req.seated_at
@@ -1171,7 +1469,11 @@ def _bind_reassigned_lease(run_ctx: RunContext, rc: RoundContext, mid: Any, prog
     prog.current_lease_id = new_lid
     prog.progress_generation += 1
     prog.terminal_status = "OPEN"
+    prog.last_progress_time = t
     run_ctx.lease_stats["leases_created"] += 1
+    # S4A-1/S4A-2: arm the successor lease's expiry + progress-timeout deadlines.
+    _seat_lease_expiry(run_ctx, rc, lease, prog, t)
+    _refresh_progress_timeout(run_ctx, rc, prog, lease, t)
     r = _seat_hash_work(run_ctx, rc, st, at_time=t)
     if r.kind == "scheduled":
         run_ctx.round_first_completion[(rc.RoundID, mid)] = r.event_ref.event_time
@@ -1203,11 +1505,23 @@ def _bind_reserve_reassignment_if_any(run_ctx: RunContext, rc: RoundContext, mid
     prog.current_lease_id = new_lid
     prog.progress_generation += 1
     prog.terminal_status = "OPEN"
+    prog.last_progress_time = t
     run_ctx.slice_of_miner[(rc.RoundID, mid)] = orig_slice_id
     run_ctx.search_assignment_kind[(rc.RoundID, mid)] = REASSIGNED_RESERVE_WORK
     run_ctx.lease_stats["leases_created"] += 1
+    # S4A-1/S4A-2: arm the reassigned lease's expiry + progress-timeout deadlines.
+    _seat_lease_expiry(run_ctx, rc, lease, prog, t)
+    _refresh_progress_timeout(run_ctx, rc, prog, lease, t)
     req.status = "COMPLETED"
     req.completed_at = t
+    # S4A-9: the reassignee's reassigned ACTIVE_HASHING interval begins now (energy attribution);
+    # snapshot its pre-reassignment cumulative ACTIVE_HASHING (and finalised WAKING) so the
+    # wake/active intervals are attributed EXACTLY.
+    req.reassigned_search_start_time = t
+    _m = run_ctx.miners.get(mid)
+    req.wake_residency_at_end = _m.duration.get("WAKING", 0.0) if _m is not None else None
+    req.active_residency_at_search_start = _m.duration.get("ACTIVE_HASHING", 0.0) \
+        if _m is not None else 0.0
     req.complete_event_ref = getattr(run_ctx.event_queue, "current_event_ref", None)
     req.disposition = Outcome("reassignment_completed_via_reserve_wake")
     run_ctx.lease_stats["reassignment_requests_completed"] += 1
@@ -1275,7 +1589,11 @@ def _apply_no_eligible_policy(run_ctx: RunContext, rc: RoundContext, prog: Any,
 
 def _handle_miner_failure(run_ctx: RunContext, payload: Dict[str, Any],
                           envelope: Dict[str, Any]) -> Outcome:
-    """S4-4: an injected miner failure revokes the current lease and triggers reassignment."""
+    """S4-4: an injected miner FAILURE (involuntary) revokes the current lease and reassigns.
+
+    A failure is an involuntary fault: the miner goes OFFLINE and its lease terminalises REVOKED
+    — DISTINCT from a voluntary MINER_CANCELLED (LOW_POWER_LISTEN / CANCELLED).
+    """
     rc = run_ctx.current_round_context
     mid = payload["MinerID"]
     if rc is None or rc.round_state in _TERMINAL_ROUND:
@@ -1289,15 +1607,105 @@ def _handle_miner_failure(run_ctx: RunContext, payload: Dict[str, Any],
     t = run_ctx.event_queue.current_event_time
     if run_ctx.miners.get(mid) is not None:                 # MINER_FAILED -> OFFLINE
         run_ctx.apply_miner_state_transition(mid, "OFFLINE", t)
-    dec = EvaluateRangeLease(run_ctx, rc, lease.LeaseID, t, payload["fault_reason"],
-                             triggering_event_ref=run_ctx.event_queue.current_event_ref)
+    dec = EvaluateRangeLease(run_ctx, rc, lease.LeaseID, t, "MINER_FAILED",
+                             triggering_event_ref=run_ctx.event_queue.current_event_ref,
+                             observation_reason=payload["fault_reason"])
     if isinstance(dec, Outcome):
         return dec
     return Outcome("miner_failed_lease_revoked", MinerID=mid, LeaseID=lease.LeaseID)
 
 
+def _handle_miner_cancelled(run_ctx: RunContext, payload: Dict[str, Any],
+                            envelope: Dict[str, Any]) -> Outcome:
+    """S4A-3: a miner VOLUNTARILY cancels its lease — a disposition DISTINCT from a failure.
+
+    The miner withdraws to LOW_POWER_LISTEN (it is NOT OFFLINE) and its lease terminalises
+    CANCELLED (not REVOKED); the unfinished suffix is still handed to reassignment.
+    """
+    rc = run_ctx.current_round_context
+    mid = payload["MinerID"]
+    if rc is None or rc.round_state in _TERMINAL_ROUND:
+        return Outcome("miner_cancelled_no_effect", reason="round_terminal", MinerID=mid)
+    if payload["RoundID_at_seat"] != rc.RoundID \
+            or payload["TemplateID_at_seat"] != rc.TemplateID_committed:
+        return Outcome("miner_cancelled_no_effect", reason="stale", MinerID=mid)
+    lease = _current_lease_for_miner(run_ctx, rc, mid)
+    if lease is None:
+        return Outcome("miner_cancelled_no_effect", reason="no_active_lease", MinerID=mid)
+    t = run_ctx.event_queue.current_event_time
+    m = run_ctx.miners.get(mid)
+    if m is not None and m.state in ("ACTIVE_HASHING", "WAKING", "EXHAUSTED_PENDING"):
+        run_ctx.apply_miner_state_transition(mid, "LOW_POWER_LISTEN", t)   # voluntary withdrawal
+    dec = EvaluateRangeLease(run_ctx, rc, lease.LeaseID, t, "MINER_CANCELLED",
+                             triggering_event_ref=run_ctx.event_queue.current_event_ref,
+                             observation_reason=payload["cancellation_reason"])
+    if isinstance(dec, Outcome):
+        return dec
+    return Outcome("miner_cancelled_lease_terminalised", MinerID=mid, LeaseID=lease.LeaseID)
+
+
+def _handle_range_lease_expiry(run_ctx: RunContext, payload: Dict[str, Any],
+                               envelope: Dict[str, Any]) -> Outcome:
+    """S4A-1: an ACTIVE lease's expiry deadline fires — terminalise EXPIRED + reassign the suffix.
+
+    Stale-safe: a superseded lease (already terminal, a fresh generation, or no longer the
+    slice's current lease) performs NO effect.  Work committing exactly AT the deadline commits
+    first (HASH_WORK microphase precedes RANGE_LEASE_EXPIRY), so a range finished at the deadline
+    is COMPLETED, not spuriously expired.
+    """
+    rc = run_ctx.current_round_context
+    if rc is None or rc.round_state in _TERMINAL_ROUND:
+        return Outcome("range_lease_expiry_no_effect", reason="round_terminal")
+    lid = payload["LeaseID"]
+    lease = run_ctx.range_leases.get(lid)
+    prog = run_ctx.range_progress.get(payload["RangeSliceID"]) if lease is not None else None
+    if lease is None or lease.lease_status != "ACTIVE" \
+            or lease.lease_generation != payload["lease_generation"] \
+            or payload["RoundID_at_seat"] != rc.RoundID \
+            or payload["TemplateID_at_seat"] != rc.TemplateID_committed \
+            or prog is None or prog.current_lease_id != lid:
+        run_ctx.lease_stats["stale_expiry_events"] += 1
+        return Outcome("range_lease_expiry_no_effect", reason="stale_or_superseded")
+    t = run_ctx.event_queue.current_event_time
+    dec = EvaluateRangeLease(run_ctx, rc, lid, t, "LEASE_TIME_EXPIRED",
+                             triggering_event_ref=run_ctx.event_queue.current_event_ref)
+    if isinstance(dec, Outcome):
+        return dec
+    return Outcome("range_lease_expired", LeaseID=lid)
+
+
+def _handle_range_progress_timeout(run_ctx: RunContext, payload: Dict[str, Any],
+                                   envelope: Dict[str, Any]) -> Outcome:
+    """S4A-2: a slice's progress-timeout deadline fires — terminalise EXPIRED + reassign the suffix.
+
+    Stale-safe: a deadline superseded by a later causal frontier advance (a bumped
+    ``timeout_generation``) or by a superseded lease performs NO effect.
+    """
+    rc = run_ctx.current_round_context
+    if rc is None or rc.round_state in _TERMINAL_ROUND:
+        return Outcome("range_progress_timeout_no_effect", reason="round_terminal")
+    lid = payload["LeaseID"]
+    lease = run_ctx.range_leases.get(lid)
+    prog = run_ctx.range_progress.get(payload["RangeSliceID"])
+    if lease is None or prog is None or lease.lease_status != "ACTIVE" \
+            or prog.current_lease_id != lid \
+            or prog.timeout_generation != payload["timeout_generation"] \
+            or lease.lease_generation != payload["lease_generation"] \
+            or payload["RoundID_at_seat"] != rc.RoundID \
+            or payload["TemplateID_at_seat"] != rc.TemplateID_committed:
+        run_ctx.lease_stats["stale_timeout_events"] += 1
+        return Outcome("range_progress_timeout_no_effect", reason="stale_or_superseded")
+    t = run_ctx.event_queue.current_event_time
+    dec = EvaluateRangeLease(run_ctx, rc, lid, t, "PROGRESS_TIMEOUT",
+                             triggering_event_ref=run_ctx.event_queue.current_event_ref)
+    if isinstance(dec, Outcome):
+        return dec
+    return Outcome("range_progress_timed_out", LeaseID=lid)
+
+
 def _close_lease_state(run_ctx: RunContext, rc: RoundContext, t: float) -> None:
-    """S4-12: terminalise every lease + reassignment request; report unfinished suffixes."""
+    """S4-12/S4A-9: terminalise every lease + reassignment request; report unfinished suffixes;
+    close any still-open reassignment ACTIVE_HASHING interval; and audit slice disjointness."""
     for lease in run_ctx.range_leases.values():
         if lease.RoundID != rc.RoundID:
             continue
@@ -1308,9 +1716,22 @@ def _close_lease_state(run_ctx: RunContext, rc: RoundContext, t: float) -> None:
                 run_ctx.lease_stats["leases_completed"] += 1
             else:
                 lease.lease_status = "CANCELLED"
+                run_ctx.lease_stats["leases_cancelled"] += 1
             lease.disposition = Outcome("lease_terminalised_at_round_close")
+            _cancel_lease_deadlines(run_ctx, lease, run_ctx.range_progress.get(lease.RangeSliceID))
     for req in run_ctx.reassignment_requests.values():
-        if req.RoundID == rc.RoundID and req.status not in TERMINAL_REASSIGN_REQUEST_STATUSES:
+        if req.RoundID != rc.RoundID:
+            continue
+        # S4A-9: close any reassignment whose reassignee was still ACTIVE at round close (its
+        # ACTIVE_HASHING interval was just closed by the round-closure idle transition, so the
+        # ledger cumulative is finalised here for exact energy reconciliation).
+        if req.status == "COMPLETED" and req.reassigned_search_start_time is not None \
+                and req.reassigned_search_end_time is None:
+            req.reassigned_search_end_time = t
+            m = run_ctx.miners.get(req.new_MinerID)
+            req.active_residency_at_search_end = m.duration.get("ACTIVE_HASHING", 0.0) \
+                if m is not None else None
+        if req.status not in TERMINAL_REASSIGN_REQUEST_STATUSES:
             req.status = "CANCELLED"
             req.disposition = Outcome("reassignment_cancelled_at_round_close")
     for prog in run_ctx.range_progress.values():
@@ -1326,6 +1747,36 @@ def _close_lease_state(run_ctx: RunContext, rc: RoundContext, t: float) -> None:
             prog.terminal_status = "UNASSIGNED_AT_ROUND_CLOSE"
             run_ctx.lease_stats["uncovered_range_count"] += 1
             run_ctx.lease_stats["uncovered_nonce_count"] += prog.uncovered()
+    _audit_slice_disjointness(run_ctx, rc)
+
+
+def _audit_slice_disjointness(run_ctx: RunContext, rc: RoundContext) -> None:
+    """S4A-6: prove the nonce-domain partition slices are pairwise disjoint AND every
+    reassignment wake-handle is a strict continuation (subset) of its parent slice — never an
+    independent overlapping domain slice.  Any overlap increments ``overlapping_slice_count``."""
+    # domain-partition intervals: primary ranges + reserve-DOMAIN slices (NOT wake handles).
+    intervals: List[Any] = []
+    for mid, rng in run_ctx.round_ranges.get(rc.RoundID, {}).items():
+        intervals.append((rng[0], rng[1]))
+    for sl in run_ctx.reserve_slices.get(rc.RoundID, []):
+        intervals.append((sl.range_start, sl.range_end))
+    intervals.sort()
+    overlaps = 0
+    for i in range(1, len(intervals)):
+        if intervals[i][0] < intervals[i - 1][1]:          # strict overlap of domain slices
+            overlaps += 1
+    # every reassignment wake handle of THIS round must be a strict continuation (subset) of its
+    # parent slice's domain interval — never an independent overlapping domain slice.
+    for wh_id, (_req_id, orig_slice_id) in run_ctx.reassign_by_suffix_slice.items():
+        prog = run_ctx.range_progress.get(orig_slice_id)
+        if prog is None or prog.RoundID != rc.RoundID:
+            continue
+        wh = run_ctx.reassignment_wake_slice_by_id.get(wh_id)
+        if wh is None:
+            continue
+        if not (prog.range_start <= wh.range_start and wh.range_end <= prog.range_end):
+            overlaps += 1
+    run_ctx.lease_stats["overlapping_slice_count"] += overlaps
 
 
 # ============================================================ Stage-3 security floor
@@ -1540,7 +1991,9 @@ def _apply_floor_unattainable(run_ctx: RunContext, rc: RoundContext,
 
 
 def SeatReserveActivationTransaction(run_ctx: RunContext, rc: RoundContext, rr: Any, sl: Any,
-                                     obs: Any, decision_id: Any) -> Any:
+                                     obs: Any, decision_id: Any,
+                                     activation_scope: str = "RESERVE_DOMAIN_CLAIM",
+                                     range_reassignment_request_id: Any = None) -> Any:
     """S3A-4: seat a reserve activation ALL-OR-NONE on its immutable request identity.
 
     Idempotent replay of an exact request returns the existing request with no second
@@ -1601,7 +2054,9 @@ def SeatReserveActivationTransaction(run_ctx: RunContext, rc: RoundContext, rr: 
         ReserveActivationRequestID=req_id, RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed,
         SecurityFloorBreachID=obs.ObservationID, DecisionID=decision_id, MinerID=rr.MinerID,
         ReserveSliceID=sl.RangeSliceID, activation_generation=rr.activation_generation,
-        status="SEATED", start_event_ref=ev, disposition=Outcome("reserve_activation_seated"))
+        status="SEATED", start_event_ref=ev, activation_scope=activation_scope,
+        range_reassignment_request_id=range_reassignment_request_id,
+        disposition=Outcome("reserve_activation_seated"))
     run_ctx.activation_requests[req_id] = req
     run_ctx.activations_per_round[rc.RoundID] = run_ctx.activations_per_round.get(rc.RoundID, 0) + 1
     run_ctx.security_stats["activations_seated"] += 1
@@ -1694,6 +2149,15 @@ def _handle_reserve_activation_start(run_ctx: RunContext, payload: Dict[str, Any
     run_ctx.apply_miner_state_transition(mid, "WAKING", t)
     req.status = "STARTED"
     req.started_at = t
+    # S4A-9 Path B: the reassignment's wake interval begins now (energy attribution) — the linked
+    # reassignment request's WAKING window is [activation-start, activation-complete].
+    if req.activation_scope == "REASSIGNMENT_WAKE_ONLY" \
+            and req.range_reassignment_request_id is not None:
+        rreq = run_ctx.reassignment_requests.get(req.range_reassignment_request_id)
+        if rreq is not None and rreq.started_at is None:
+            rreq.started_at = t
+            rm = run_ctx.miners.get(mid)
+            rreq.wake_residency_at_start = rm.duration.get("WAKING", 0.0) if rm is not None else 0.0
     complete_time = t + run_ctx.config.security_floor.activation_wake_latency
     cpayload = dict(payload)
     cpayload["expected_reserve_status"] = "WAKING"
@@ -1993,9 +2457,12 @@ _HANDLERS = {
     "ReserveActivationStartEvent": _handle_reserve_activation_start,
     "ReserveActivationCompleteEvent": _handle_reserve_activation_complete,
     "MinerFailureEvent": _handle_miner_failure,
+    "MinerCancelledEvent": _handle_miner_cancelled,
     "RangeReassignmentStartEvent": _handle_range_reassignment_start,
     "RangeReassignmentCompleteEvent": _handle_range_reassignment_complete,
     "RangeReassignmentRetryEvent": _handle_range_reassignment_retry,
+    "RangeLeaseExpiryEvent": _handle_range_lease_expiry,
+    "RangeProgressTimeoutEvent": _handle_range_progress_timeout,
 }
 
 

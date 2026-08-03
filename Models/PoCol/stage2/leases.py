@@ -67,6 +67,9 @@ NO_ELIGIBLE_MINER_POLICIES = ("CONTINUE_WITH_UNASSIGNED_RANGE", "ABORT_ROUND",
 # Reassignment selection policies (S4-6).
 REASSIGNMENT_SELECTION_POLICIES = ("COMPLETION_TIME_THEN_PRIORITY",)
 
+# Reserve-activation scope (S4A-6): a domain claim vs a wake-only reassignment activation.
+RESERVE_ACTIVATION_SCOPES = ("RESERVE_DOMAIN_CLAIM", "REASSIGNMENT_WAKE_ONLY")
+
 
 @dataclass(frozen=True)
 class RangeLeasePolicy:
@@ -131,6 +134,9 @@ class RangeLease:
     predecessor_lease_id: Any = None
     reassignment_reason: Any = None
     reserve_activation_request_id: Any = None   # S4-10 link when a reserve wake is required
+    # S4A-1: the seated RangeLeaseExpiryEvent ref for this ACTIVE lease (cancelled when the
+    # lease terminalises early so no stale deadline fires).
+    expiry_event_ref: Any = None
     disposition: Any = None
 
 
@@ -152,6 +158,10 @@ class RangeProgress:
     progress_generation: int = 0
     terminal_status: str = "OPEN"
     assignment_kind: str = PRIMARY_ASSIGNMENT
+    # S4A-2: progress-timeout bookkeeping.
+    last_progress_time: float = 0.0
+    timeout_event_ref: Any = None
+    timeout_generation: int = 0
     disposition: Any = None
 
     def suffix(self) -> Tuple[int, int]:
@@ -202,7 +212,36 @@ class RangeReassignmentRequest:
     seated_at: Optional[float] = None
     started_at: Optional[float] = None
     completed_at: Optional[float] = None
+    # S4A-9: exact reassignment-lifecycle interval timestamps + residency snapshots for energy
+    # attribution.  The wake/active energy is charged over the LIFECYCLE INTERVAL only (never the
+    # reassignee's full residency, which may include its own earlier primary work); the snapshots
+    # let the adapter reconcile the interval attribution against the residency ledger EXACTLY.
+    reassigned_search_start_time: Optional[float] = None
+    reassigned_search_end_time: Optional[float] = None
+    wake_residency_at_start: Optional[float] = None
+    wake_residency_at_end: Optional[float] = None
+    active_residency_at_search_start: Optional[float] = None
+    active_residency_at_search_end: Optional[float] = None
     disposition: Any = None
+
+
+@dataclass
+class RangeLeaseObservation:
+    """One authoritative, auditable range-lease observation (S4A-4)."""
+
+    ObservationID: Any
+    observation_key: Any
+    LeaseID: Any
+    RoundID: Any
+    TemplateID: Any
+    observation_time: float
+    observation_reason: str
+    lease_status_before: str
+    committed_frontier: int
+    progress_generation: int
+    condition_satisfied: bool
+    decision_result: str
+    reassignment_decision_id: Any = None
 
 
 @dataclass

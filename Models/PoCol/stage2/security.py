@@ -192,6 +192,10 @@ class ReserveActivationRequest:
     complete_event_ref: Any = None
     started_at: Optional[float] = None
     completed_at: Optional[float] = None
+    # S4A-6: RESERVE_DOMAIN_CLAIM (default, Stage-3) vs REASSIGNMENT_WAKE_ONLY (Stage-4 Path B,
+    # binds to the ORIGINAL RangeProgress and creates no new reserve-domain slice).
+    activation_scope: str = "RESERVE_DOMAIN_CLAIM"
+    range_reassignment_request_id: Any = None
     disposition: Any = None
 
 

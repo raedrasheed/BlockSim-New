@@ -77,6 +77,10 @@ class Stage2Config:
     # S4-4: injected lease faults — each entry is (round_seq, MinerID, fail_time, reason).
     # Empty in confirmatory runs; a fault seats a MinerFailureEvent that revokes the lease.
     injected_lease_faults: tuple = ()
+    # S4A-3: injected VOLUNTARY cancellations — each entry is (round_seq, MinerID, cancel_time,
+    # reason).  Empty in confirmatory runs; a cancellation seats a MinerCancelledEvent (a
+    # disposition DISTINCT from a failure).
+    injected_lease_cancellations: tuple = ()
 
     # --- bounds ---
     maximum_setup_retries: int = 3
