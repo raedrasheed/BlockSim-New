@@ -412,7 +412,7 @@ def test_s4_adapter_schema_and_execution_from_config():
         "reassignment_selection_policy": "COMPLETION_TIME_THEN_PRIORITY",
         "no_eligible_miner_policy": "CONTINUE_WITH_UNASSIGNED_RANGE",
     }, include_matched_experiment=False)
-    assert out["schema_version"] == "stage5.1"
+    assert out["schema_version"] == "stage5a.1"
     for key in ("range_lease_enabled", "leases_created", "leases_completed", "leases_revoked",
                 "leases_reassigned", "reassignment_decisions", "reassignment_requests_seated",
                 "reassignment_requests_completed", "reassignment_requests_failed",

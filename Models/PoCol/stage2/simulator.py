@@ -310,6 +310,14 @@ def _handle_prepare_participants(run_ctx: RunContext, payload: Dict[str, Any],
                 hash_rate=cfg.hash_rate_for(len(participants) + j),
                 reserve_status="AVAILABLE", activation_priority=j)
             run_ctx.reserve_records[(rc.RoundID, mid)] = rr
+    elif _adv.reported_rate_allocation_enabled(run_ctx):
+        # S5A-3: size the ranges from the REPORTED rates.  Profiles must exist BEFORE sizing, so
+        # they are pre-materialised here.  The total domain, disjointness and full coverage are
+        # unchanged — only the SIZING uses reported rates, never the physical hash capacity.
+        _adv.prematerialise_behaviours(run_ctx, rc, sorted(participants),
+                                       lambda i, m: cfg.hash_rate_for(i))
+        ranges = _adv.allocate_by_reported_rate(run_ctx, rc, cfg.nonce_domain_size,
+                                                sorted(participants))
     else:
         ranges = partition_domain(cfg.nonce_domain_size, participants)
         # S4-10: when the range-lease layer is engaged (floor off), the whole domain still
@@ -350,6 +358,7 @@ def _handle_prepare_participants(run_ctx: RunContext, payload: Dict[str, Any],
         # extra latency both apply from the very first batch.  The physical search core always
         # runs on the ACTUAL (effective) rate; a reported rate never alters it (S5-4).
         _adv.materialise_behaviours(run_ctx, rc, [mid])
+        _adv.record_allocation_projection(run_ctx, rc, mid, st)   # S5A-3
         run_ctx.apply_miner_state_transition(mid, "WAKING", t)
         _start_wake(run_ctx, rc, mid, aid, version)
         # S2B-7 (SCI-3): an EXPECTED first-batch completion time, so a participant whose
@@ -570,10 +579,18 @@ def _handle_hash_work(run_ctx: RunContext, payload: Dict[str, Any],
         slice_id = run_ctx.slice_of_miner.get((rc.RoundID, mid))
         prog = run_ctx.range_progress.get(slice_id) if slice_id else None
         if prog is not None:
-            assert commit_end >= prog.committed_frontier, "committed_frontier decreased"
             assert commit_end <= prog.range_end, "committed_frontier exceeds range_end"
+            # S5A-1: record the PHYSICAL interval and advance any open re-evaluation window.
+            _adv.note_physical_commit(run_ctx, rc, slice_id, cursor_start, commit_end, mid)
+            _in_reeval = run_ctx.adv_reeval_window.get(slice_id) is not None or \
+                commit_end < prog.committed_frontier
+            if not _in_reeval:
+                assert commit_end >= prog.committed_frontier, "committed_frontier decreased"
             advanced = commit_end > prog.committed_frontier
-            prog.committed_frontier = commit_end
+            # MONOTONIC: adversarially-induced re-evaluation below the frontier is real physical
+            # work, but it is not new coverage and must NEVER rewind the accepted Stage-4C
+            # authoritative frontier.
+            prog.committed_frontier = max(prog.committed_frontier, commit_end)
             lease_ref = run_ctx.range_leases.get(prog.current_lease_id)
             if lease_ref is not None:
                 lease_ref.committed_cursor = commit_end
@@ -629,6 +646,14 @@ def _handle_hash_work(run_ctx: RunContext, payload: Dict[str, Any],
     # S5-5: a FALSE_EXHAUSTION_CLAIMER stops here and claims its range is finished.  When the
     # modeled audit does NOT detect the claim the miner idles with an uncovered suffix, and
     # that suffix is an explicit coverage gap which forbids a full-domain exhaustion label.
+    # S5A-5: an IDLE_POLICY_DEFECTOR EXECUTES its declared abandonment here, leaving a real
+    # uncovered suffix.  Only an executed action can ever attract an abandonment penalty.
+    ab = _adv.maybe_abandon(run_ctx, rc, st, now)
+    if ab is not None:
+        term = _maybe_terminate_no_block(run_ctx, rc)
+        return term if term is not None else Outcome(
+            "hash_work_intentionally_abandoned", MinerID=mid,
+            abandoned_nonce_count=ab.abandoned_nonce_count())
     fe = _adv.maybe_false_exhaustion(run_ctx, rc, st, now)
     if fe is not None:
         term = _maybe_terminate_no_block(run_ctx, rc)
@@ -958,8 +983,12 @@ def _verify_hash_lease(run_ctx: RunContext, rc: RoundContext, st: Any, mid: Any,
         return Outcome("hash_lease_no_progress")
     if prog.current_lease_id != lid:                       # S4-09 superseded lease
         return Outcome("hash_lease_superseded")
-    if payload["cursor_start"] != prog.committed_frontier:
-        return Outcome("hash_lease_frontier_mismatch", expected=prog.committed_frontier,
+    # S5A-1: normally the authoritative physical frontier.  While an adversarial re-evaluation
+    # window is open the successor legitimately works BELOW that frontier (which is never
+    # rewound), so the window's cursor is what the event must carry.
+    _expected = _adv.expected_cursor_for_lease(run_ctx, prog)
+    if payload["cursor_start"] != _expected:
+        return Outcome("hash_lease_frontier_mismatch", expected=_expected,
                        got=payload["cursor_start"])
     now = run_ctx.event_queue.current_event_time
     if now is not None and now > lease.lease_expiry_time + run_ctx.config.range_lease.lease_tolerance:
@@ -1694,18 +1723,22 @@ def _bind_reassigned_lease(run_ctx: RunContext, rc: RoundContext, mid: Any, prog
     # withholder's under-report (if the modeled audit misses it) lowers that accepted frontier
     # below what it actually searched, so the successor must re-evaluate the difference — real
     # duplicated physical work, recorded explicitly rather than hidden.
-    _adv.apply_progress_withholding(run_ctx, rc, prog, pred_lease_id, t)
-    _adv.note_reassignment_reeval(run_ctx, rc, prog.RangeSliceID, prog.committed_frontier,
+    accepted_start = _adv.apply_progress_withholding(run_ctx, rc, prog, pred_lease_id, t)
+    # S5A-1: the successor resumes from the ACCEPTED frontier, which for an undetected
+    # under-report is BELOW the physical committed frontier.  The physical frontier itself is
+    # untouched — the difference is explicitly counted re-evaluation, not rewound coverage.
+    start_nonce = accepted_start if accepted_start is not None else prog.committed_frontier
+    _adv.note_reassignment_reeval(run_ctx, rc, prog.RangeSliceID, start_nonce,
                                   run_ctx.adv_actual_frontier.get(prog.RangeSliceID,
                                                                   prog.committed_frontier))
     st = MinerSearchState(MinerID=mid, AssignmentID=aid, assignment_version=version,
-                          hash_rate=rate, range_start=prog.committed_frontier,
+                          hash_rate=rate, range_start=start_nonce,
                           range_end=prog.range_end, active_power=cfg.P_hash,
                           idle_power=cfg.P_listen)
     st.active_start = t
     rc.search_states[mid] = st
     rc.assignments[aid] = {"MinerID": mid, "AssignmentID": aid, "assignment_version": version,
-                           "range": (prog.committed_frontier, prog.range_end),
+                           "range": (start_nonce, prog.range_end),
                            "RoundID": rc.RoundID, "TemplateID": rc.TemplateID_committed,
                            "coverage_state": "OPEN"}
     run_ctx.search_assignment_kind[(rc.RoundID, mid)] = kind
@@ -1714,8 +1747,8 @@ def _bind_reassigned_lease(run_ctx: RunContext, rc: RoundContext, mid: Any, prog
         LeaseID=new_lid, RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed,
         RangeSliceID=prog.RangeSliceID, lease_generation=new_gen, AssignmentID=aid,
         assignment_version=version, MinerID=mid, assignment_kind=kind,
-        lease_start_nonce=prog.committed_frontier, lease_end_nonce=prog.range_end,
-        committed_cursor=prog.committed_frontier, lease_start_time=t,
+        lease_start_nonce=start_nonce, lease_end_nonce=prog.range_end,
+        committed_cursor=start_nonce, lease_start_time=t,
         lease_expiry_time=t + cfg.range_lease.lease_duration, lease_status="ACTIVE",
         predecessor_lease_id=pred_lease_id)
     run_ctx.range_leases[new_lid] = lease
@@ -2215,6 +2248,7 @@ def EvaluateSecurityFloor(run_ctx: RunContext, rc: RoundContext, observation_tim
     else:
         if rc.below_floor_since is not None:
             dur = observation_time - rc.below_floor_since
+            _adv.record_floor_breach_interval(run_ctx, rc.below_floor_since, observation_time)
             run_ctx.security_stats["total_duration_below_floor"] += dur
             if rc.below_floor_open_reason == "participants_prepared":
                 run_ctx.security_stats["early_wake_below_floor_duration"] += dur
@@ -2668,6 +2702,7 @@ def _close_security_state(run_ctx: RunContext, rc: RoundContext, t: float) -> No
                           trigger=("CLOSURE", rc.RoundID, rc.state_version))
     if rc.below_floor_since is not None:                    # close the open breach interval
         dur = t - rc.below_floor_since
+        _adv.record_floor_breach_interval(run_ctx, rc.below_floor_since, t)
         run_ctx.security_stats["total_duration_below_floor"] += dur
         if rc.below_floor_open_reason == "participants_prepared":
             run_ctx.security_stats["early_wake_below_floor_duration"] += dur

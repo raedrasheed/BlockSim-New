@@ -83,7 +83,16 @@ class AdversarialPolicy:
     free_rider_work_fraction: float = 1.0
     reported_hash_rate_multiplier: float = 1.0
     # false exhaustion / progress withholding (S5-5).
+    # S5A-7: the reported exhaustion claim is derived DETERMINISTICALLY as
+    #   reported = min(range_end, cursor + false_exhaustion_claim_offset)
+    # so the offset has an executable effect.  The declared meaning of 0 is "claim exactly the
+    # current cursor" — a zero-offset claim reports the truth and is therefore NOT a false
+    # claim, and does not create a coverage gap.  Set a positive offset (or
+    # ``false_exhaustion_claims_range_end``) to model a miner that overstates its coverage.
     false_exhaustion_claim_offset: int = 0
+    # when true the claimer asserts the FULL range_end regardless of the offset (the strongest
+    # modeled overstatement); kept explicit so the offset never silently means "range_end".
+    false_exhaustion_claims_range_end: bool = True
     progress_withholding_fraction: float = 0.0
     # assignment splitting / identity multiplication (S5-8; exploratory sensitivity only —
     # NOT a Sybil defence and never described as one).
@@ -265,8 +274,11 @@ class DelayedWakeAction:
     adversarial_scheduled_wake_time: float
     extra_delay: float
     actual_wake_time: Optional[float] = None
+    # S5A-6: measured from REAL security-floor observations at round close, never a constant.
     below_floor_overlap: float = 0.0
     another_reserve_activated: bool = False
+    incremental_wake_energy_j: float = 0.0
+    impact_finalised: bool = False
     penalty_eligible: bool = True
     status: str = "PENDING"      # PENDING -> COMPLETED / CANCELLED_AT_CLOSE
     disposition: Any = None
@@ -287,6 +299,110 @@ class InvalidActionRecord:
     rejected: bool
     penalty_eligible: bool
     disposition: Any = None
+
+
+@dataclass
+class AcceptedFrontierRecord:
+    """S5A-1: the THREE-VALUE frontier decision for one adversarial claim, kept strictly SEPARATE
+    from the accepted Stage-4C authoritative physical ``RangeProgress.committed_frontier``.
+
+    ``actual_frontier`` is simulator ground truth and is monotonic.  ``reported_frontier`` is the
+    miner's claim.  ``accepted_frontier`` is the modeled protocol decision after the modeled
+    audit and MAY be below ``actual_frontier`` — but recording that decision NEVER rewinds the
+    physical frontier, which continues to describe what was really committed.
+
+    Bound to round / template / slice / lease / assignment version, so replaying the same claim
+    returns the same decision and performs no second effect.
+    """
+
+    RecordID: Any
+    RoundID: Any
+    TemplateID: Any
+    RangeSliceID: Any
+    LeaseID: Any
+    assignment_version: int
+    MinerID: Any
+    EntityID: Any
+    actual_frontier: int
+    reported_frontier: int
+    accepted_frontier: int
+    physical_committed_frontier_at_decision: int
+    reassignment_start: Optional[int] = None
+    reevaluation_interval: Optional[Tuple[int, int]] = None
+    detected: bool = False
+    disposition: Any = None
+
+
+@dataclass
+class SubAssignmentRecord:
+    """S5A-4: one EXECUTABLE subassignment created by an ASSIGNMENT_SPLITTER.
+
+    Subranges are disjoint and their union equals the entity's original allocated range.  Every
+    subassignment carries an explicit share of the ENTITY's single physical capacity budget: the
+    shares sum to the entity's actual hash rate, so splitting an assignment can never manufacture
+    physical throughput.  This is an accounting / sensitivity model, NOT a Sybil defence.
+    """
+
+    SubAssignmentID: Any
+    ParentAssignmentID: Any
+    RoundID: Any
+    TemplateID: Any
+    EntityID: Any
+    MinerID: Any
+    index: int
+    range_start: int
+    range_end: int                      # exclusive
+    capacity_share: float               # nonces/second budgeted to this subassignment
+    entity_capacity_budget: float       # the entity's TOTAL actual physical capacity
+    lineage_id: Any = None
+    disposition: Any = None
+
+
+@dataclass
+class VirtualIdentityRecord:
+    """S5A-4: one declared virtual identity bound to a single EntityID.
+
+    A virtual identity is an ACCOUNTING artefact only: it creates no additional physical
+    capacity, holds no additional assignment or lease, and is counted separately from the
+    entity's real miner count.  Declaring identities is never described as a capability the
+    protocol is shown to resist.
+    """
+
+    VirtualIdentityID: Any
+    EntityID: Any
+    RoundID: Any
+    index: int
+    backing_miner_id: Any
+    grants_physical_capacity: bool = False
+    disposition: Any = None
+
+
+@dataclass
+class AbandonmentActionRecord:
+    """S5A-5: one EXECUTED intentional abandonment.
+
+    An ABANDONMENT_PENALTY may be emitted ONLY when such a record exists.  Declaring the
+    IDLE_POLICY_DEFECTOR flag in a profile is not itself an abandonment: if the round closes
+    before the action executes there is no action and therefore no penalty.  Crash and failure
+    paths are NOT intentional abandonment unless explicitly configured.
+    """
+
+    ActionID: Any
+    RoundID: Any
+    TemplateID: Any
+    EntityID: Any
+    MinerID: Any
+    LeaseID: Any
+    actual_frontier: int
+    abandoned_suffix_start: int
+    abandoned_suffix_end: int           # exclusive
+    action_time: float
+    status: str = "EXECUTED"
+    penalty_eligible: bool = True
+    disposition: Any = None
+
+    def abandoned_nonce_count(self) -> int:
+        return max(0, self.abandoned_suffix_end - self.abandoned_suffix_start)
 
 
 @dataclass(frozen=True)
@@ -330,9 +446,33 @@ def default_adversarial_stats() -> Dict[str, Any]:
         "solution_withholding_count": 0, "withheld_released_count": 0,
         "withheld_never_released_count": 0, "withheld_release_too_late_count": 0,
         "withheld_total_hidden_duration": 0.0,
+        "withheld_alternative_solution_won_count": 0,       # S5A-7
         "adversarial_coverage_gap_round_count": 0,
         "delayed_wake_count": 0, "out_of_range_attempt_count": 0,
         "invalid_action_rejection_count": 0,
+        # --- S5A-1 three-value frontier separation ---
+        "accepted_frontier_record_count": 0,
+        "accepted_below_actual_count": 0,
+        "physical_frontier_rewind_count": 0,               # MUST remain 0
+        # --- S5A-2 unique-nonce work-reward union ---
+        "unique_rewarded_nonce_count": 0,
+        "physical_evaluation_count": 0,
+        "adversarial_reevaluation_count": 0,
+        "duplicate_work_reward_prevented_count": 0,
+        "work_reward_union_residual": 0.0,
+        # --- S5A-3 reported-rate allocation ---
+        "reported_rate_allocation_rounds": 0,
+        "allocation_range_size_distortion_max_ratio": 1.0,
+        # --- S5A-4 executable splitting / identities ---
+        "subassignment_count": 0,
+        "virtual_identity_count": 0,
+        "subassignment_capacity_residual": 0.0,            # MUST remain 0.0
+        # --- S5A-5 executed abandonment ---
+        "abandonment_action_count": 0,
+        "abandonment_penalty_without_action_count": 0,     # MUST remain 0
+        "abandoned_nonce_count": 0,
+        # --- S5A-7 declared-limit enforcement ---
+        "actions_rejected_over_limit": 0,
         "attack_induced_floor_breach_duration": 0.0,
         "allocation_distortion_max_ratio": 1.0,
         "actual_reported_divergence_count": 0,

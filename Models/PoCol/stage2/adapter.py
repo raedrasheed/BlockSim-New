@@ -27,10 +27,10 @@ from .adversarial import (AdversarialPolicy, IncentivePolicy, ACTOR_CLASSES, BEH
 from . import adversarial_runtime as _adv
 
 # Declared result schema keys (stable contract for BlockSim consumers).
-# stage5.1 ADDS the Stage-5 adversarial + incentive block.  Every Stage-4C key is retained
-# unchanged, and every Stage-5 field is inert (zero, or NA for q_adv) when the Stage-5 model
-# is disabled — which is the default.
-RESULT_SCHEMA_VERSION = "stage5.1"
+# stage5a.1 ADDS the Stage-5A executable-correction block on top of stage5.1.  Every Stage-4C
+# and Stage-5 key is retained unchanged, and every Stage-5/5A field is inert (zero, or NA for
+# q_adv) when the Stage-5 model is disabled — which is the default.
+RESULT_SCHEMA_VERSION = "stage5a.1"
 
 
 def _range_lease_from_blocksim(b: Dict[str, Any]) -> Optional[RangeLeasePolicy]:
@@ -365,6 +365,44 @@ def _adversarial_incentive_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str,
         "deduplicated_entity_reward_total": s["deduplicated_entity_reward_total"],
         "reward_deduplication_policy": cfg.incentive.reward_deduplication_policy,
         "per_entity_net_reward": per_entity,
+        # --- S5A-1 three-value frontier separation (the PHYSICAL frontier never rewinds) ---
+        "accepted_frontier_record_count": s["accepted_frontier_record_count"],
+        "accepted_below_actual_count": s["accepted_below_actual_count"],
+        "physical_frontier_rewind_count": s["physical_frontier_rewind_count"],
+        "frontier_reconciliation": _adv.frontier_reconciliation(run_ctx),
+        # --- S5A-2 unique-nonce work-reward union ---
+        "unique_rewarded_nonce_count": s["unique_rewarded_nonce_count"],
+        "physical_evaluation_count": s["physical_evaluation_count"],
+        "adversarial_reevaluation_count": s["adversarial_reevaluation_count"],
+        "duplicate_work_reward_prevented_count": s["duplicate_work_reward_prevented_count"],
+        "work_reward_union_residual": s["work_reward_union_residual"],
+        # --- S5A-3 reported-rate allocation (sizing only; never physical capacity) ---
+        "reported_rate_allocation_enabled": bool(
+            cfg.adversarial.coordinator_uses_reported_hash_rate),
+        "reported_rate_allocation_rounds": s["reported_rate_allocation_rounds"],
+        "allocation_range_size_distortion_max_ratio":
+            s["allocation_range_size_distortion_max_ratio"],
+        # --- S5A-4 executable splitting / declared identities ---
+        "subassignment_count": s["subassignment_count"],
+        "virtual_identity_count": s["virtual_identity_count"],
+        "subassignment_capacity_residual": s["subassignment_capacity_residual"],
+        # --- S5A-5 EXECUTED abandonment (a penalty requires an action) ---
+        "abandonment_action_count": s["abandonment_action_count"],
+        "abandoned_nonce_count": s["abandoned_nonce_count"],
+        "abandonment_penalty_without_action_count":
+            s["abandonment_penalty_without_action_count"],
+        # --- S5A-6 delayed-wake impact measured from REAL floor observations ---
+        "delayed_wake_below_floor_overlap_total": sum(
+            r.below_floor_overlap for r in run_ctx.delayed_wake_actions.values()),
+        "delayed_wake_another_reserve_activated_count": sum(
+            1 for r in run_ctx.delayed_wake_actions.values() if r.another_reserve_activated),
+        "delayed_wake_incremental_energy_j": sum(
+            r.incremental_wake_energy_j for r in run_ctx.delayed_wake_actions.values()),
+        "attack_induced_floor_breach_duration": s["attack_induced_floor_breach_duration"],
+        # --- S5A-7 declared-field enforcement ---
+        "actions_rejected_over_limit": s["actions_rejected_over_limit"],
+        "withheld_alternative_solution_won_count":
+            s["withheld_alternative_solution_won_count"],
         # --- explicit scope statement carried in the results themselves ---
         "stage5_claim_scope": (
             "Stage 5 MODELS bounded adversarial behaviours and MEASURES outcomes under the "

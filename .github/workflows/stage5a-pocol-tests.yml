@@ -1,0 +1,131 @@
+name: Stage 5A PoCol tests
+
+# S5 evidence: runs the COMPLETE Stage-2B + Stage-3 + Stage-3A + Stage-4 + Stage-4A + Stage-4B +
+# Stage-4C + Stage-5 PoCol test suite (TV325-TV338, E2E-1..5, SCI-1..10, target/adapter,
+# S3-01..S3-18, S3A-01..S3A-12, S4-01..S4-20, S4A-01..S4A-14, S4B-01..S4B-12, S4C-01..S4C-09,
+# S5-01..S5-26 and S5A-01..S5A-12 — 162 tests: the 150 accepted Stage-4C+5 tests retained plus 12 new) on the Stage-5
+# branch, regenerates the Stage-5 metrics from real executions, and uploads the evidence.
+#
+# Stage 5 MODELS bounded adversarial behaviours and MEASURES outcomes.  It establishes no
+# incentive-compatibility, fairness, Sybil-resistance, selfish-mining-resistance,
+# coalition-resistance, common-prefix, chain-quality or PoW-equivalent security property.  The
+# energy-saving mechanism remains the idle policy within PoCol.
+
+on:
+  push:
+    branches:
+      - "thesis-v45-pocol-stage5a-accepted-frontier-unique-reward-executable-behaviour-lock"
+  pull_request:
+    paths:
+      - "Models/PoCol/stage2/**"
+      - "tests/thesis_revision_v45/stage2/**"
+      - ".github/workflows/stage5a-pocol-tests.yml"
+  workflow_dispatch: {}
+
+# a new push supersedes an in-flight run for the same ref, so a superseded run never keeps a
+# runner busy after its commit has been replaced.
+concurrency:
+  group: stage5a-pocol-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stage5a-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pytest
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Run complete Stage-2B .. Stage-5A test suite
+        run: |
+          python -m pytest tests/thesis_revision_v45/stage2/ -v --durations=0 \
+            -p no:cacheprovider \
+            --junitxml=stage5a_ci.junit.xml | tee stage5a_ci.log
+
+      - name: Verify the accepted Stage-2B search core is unmodified
+        run: |
+          python - <<'PY'
+          import hashlib, pathlib, sys
+          # The Stage-2B search core is FROZEN at the accepted Stage-4C baseline
+          # (4402bd084fc404cac1d8d85a44fb5d642544c448).  Any change to it invalidates every
+          # accepted stage, so this fails the build rather than warning.
+          EXPECTED = "17367b4c15eaabd664a496412bc3d1685bfcd9cf8749f71aea01aef70b094140"
+          digest = hashlib.sha256(
+              pathlib.Path("Models/PoCol/stage2/search.py").read_bytes()).hexdigest()
+          print("search.py sha256:", digest)
+          if digest != EXPECTED:
+              sys.exit(f"search.py changed: expected {EXPECTED}, got {digest}")
+          print("OK: the accepted Stage-2B search core is byte-identical to the frozen baseline")
+          PY
+
+      - name: Verify Stage-5 is disabled by default (baseline preservation)
+        run: |
+          python - <<'PY'
+          from Models.PoCol.stage2 import Stage2Config, run_simulation
+          # the DEFAULT policy values are asserted directly — the confirmatory default config is
+          # 141 miners over a 10,000 s horizon, far too large to execute as a CI gate.  The
+          # executed no-effect check below uses a small bounded scenario; test S5-01 covers the
+          # same property inside the suite.
+          c = Stage2Config()
+          assert c.adversarial.enabled is False, "adversarial model must default to disabled"
+          assert c.incentive.enabled is False, "incentive model must default to disabled"
+          assert c.adversarial.entities == () and c.adversarial.miner_behaviours == ()
+          assert c.adversarial.free_rider_work_fraction == 1.0
+          assert c.adversarial.solution_release_policy == "PROMPT_RELEASE"
+          for r in ("r_work", "r_avail", "r_win", "r_reserve", "r_reassign",
+                    "q_abandon", "q_false", "q_invalid"):
+              assert getattr(c.incentive, r) == 0.0, f"{r} must default to zero"
+          bounded = Stage2Config(num_miners=4, reserve_fraction=0.0, nonce_domain_size=400,
+                                 difficulty=1 << 300, batch_size=25, horizon_T=60.0)
+          run = run_simulation(bounded, run_id="ci-default")
+          assert not run.behaviour_profiles and not run.incentive_ledger
+          assert not run.withheld_solutions and not run.invalid_actions
+          assert not run.progress_claims and not run.adversarial_entities
+          print("OK: Stage-5 disabled by default; no Stage-5 effect in a disabled run")
+          PY
+
+      - name: Regenerate Stage-5 metrics from real executions
+        run: python docs/thesis_revision_v45/stage_05a/generate_stage5a_metrics.py
+
+      - name: Check Stage-5 measured invariants
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          d = json.loads(pathlib.Path(
+              "docs/thesis_revision_v45/stage_05a/"
+              "STAGE_05A_METRICS.json").read_text())
+          inv = d["invariants"]
+          assert inv["incentive_reconciliation_residual_max"] == 0.0, inv
+          # ---- Stage-5A acceptance invariants ----
+          assert inv["physical_frontier_never_rewinds"], inv
+          assert inv["work_reward_union_residual_max"] == 0.0, inv
+          assert inv["subassignment_capacity_residual_max"] == 0.0, inv
+          assert inv["no_abandonment_penalty_without_action"], inv
+          assert inv["duplicate_work_rewards_prevented_total"] > 0, inv
+          assert inv["residency_reconciles_in_every_scenario"], inv
+          assert inv["no_full_domain_exhaustion_label_in_any_gapped_scenario"], inv
+          assert inv["q_adv_never_fabricated_when_inactive"], inv
+          assert inv["disabled_baseline_has_zero_stage5_effect"], inv
+          print("OK: all Stage-5 measured invariants hold")
+          PY
+
+      - name: Run standalone demo (smoke)
+        run: python -m Models.PoCol.stage2.demo
+
+      - name: Upload pytest evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage5a-pytest-evidence
+          path: |
+            stage5a_ci.log
+            stage5a_ci.junit.xml
+            docs/thesis_revision_v45/stage_05a/STAGE_05A_METRICS.json

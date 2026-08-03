@@ -439,10 +439,18 @@ def test_s5_18_progress_withholding_lowers_the_accepted_frontier_and_costs_re_ev
         lease_status="REVOKED")
     prog = type("P", (), {"RangeSliceID": "S1", "committed_frontier": 80, "range_end": 100})()
 
-    adv.apply_progress_withholding(run, rc, prog, "L1", 5.0)
-    assert prog.committed_frontier == 40                      # accepted frontier lowered ...
-    assert run.adv_actual_frontier["S1"] == 80                # ... actual ground truth kept
-    adv.note_reassignment_reeval(run, rc, "S1", prog.committed_frontier, 80)
+    start = adv.apply_progress_withholding(run, rc, prog, "L1", 5.0)
+    # S5A-1 (CORRECTED): the ACCEPTED frontier the successor resumes from is 40 ...
+    assert start == 40
+    # ... but the accepted Stage-4C authoritative PHYSICAL frontier is NEVER rewound.
+    assert prog.committed_frontier == 80
+    assert run.adversarial_stats["physical_frontier_rewind_count"] == 0
+    assert run.adv_actual_frontier["S1"] == 80                # actual ground truth kept
+    rec = run.accepted_frontier_records[0]
+    assert (rec.actual_frontier, rec.reported_frontier, rec.accepted_frontier) == (80, 40, 40)
+    assert rec.reassignment_start == 40 and rec.reevaluation_interval == (40, 80)
+    assert rec.physical_committed_frontier_at_decision == 80
+    adv.note_reassignment_reeval(run, rc, "S1", start, 80)
     assert run.adversarial_stats["adversarial_duplicate_evaluation_count"] == 40
     assert run.adversarial_stats["progress_withholding_count"] == 1
     claim = run.progress_claims[0]
@@ -457,12 +465,21 @@ def test_s5_19_work_reward_is_paid_per_unique_accepted_committed_evaluation():
     run = run_simulation(cfg(incentive=inc, horizon=30.0), run_id="s5-19")
     work = [e for e in run.incentive_ledger if e.component == "WORK_REWARD"]
     assert work
-    unique = {(r.RangeSliceID if r.RangeSliceID is not None else r.AssignmentID,
-               r.interval_start, r.interval_end) for r in run.evaluation_ledger}
-    assert len(work) == len(unique)                           # one entry per unique interval
-    total_nonces = sum(hi - lo for (_lin, lo, hi) in unique)
-    assert run.adversarial_stats["work_reward_total"] == pytest.approx(2.0 * total_nonces)
-    assert all(e.eligibility_reason == "unique_accepted_committed_evaluations" for e in work)
+    # S5A-2 (CORRECTED): reward is computed from the canonical non-overlapping UNION of physical
+    # nonce positions per lineage, so contiguous batches collapse into one rewarded interval and
+    # one nonce position can never be rewarded twice.
+    by_lineage = {}
+    for r in run.evaluation_ledger:
+        lin = r.RangeSliceID if r.RangeSliceID is not None else r.AssignmentID
+        by_lineage.setdefault(lin, []).append((r.interval_start, r.interval_end))
+    unions = {lin: adv.interval_union(iv) for lin, iv in by_lineage.items()}
+    expected_entries = sum(len(u) for u in unions.values())
+    assert len(work) == expected_entries                      # one entry per UNION interval
+    union_positions = sum(hi - lo for u in unions.values() for lo, hi in u)
+    assert run.adversarial_stats["work_reward_total"] == pytest.approx(2.0 * union_positions)
+    assert run.adversarial_stats["unique_rewarded_nonce_count"] == union_positions
+    assert run.adversarial_stats["work_reward_union_residual"] == pytest.approx(0.0)
+    assert all(e.eligibility_reason == "unique_physical_nonce_union" for e in work)
 
 
 def test_s5_20_the_ledger_is_replay_idempotent_and_reconciles_exactly():
@@ -663,9 +680,9 @@ def test_s5_26_no_stage5_parameter_changes_the_fixed_target_and_the_schema_is_pr
     assert pair["attacked"]["solution_withholding_count"] > 0
     assert "NOT evidence of incentive" in pair["interpretation_scope"]
 
-    # the declared schema is stage5.1 and every Stage-4C key survives.
+    # the declared schema is stage5a.1 and every Stage-4C key survives.
     res = pair["baseline"]
-    assert res["schema_version"] == RESULT_SCHEMA_VERSION == "stage5.1"
+    assert res["schema_version"] == RESULT_SCHEMA_VERSION == "stage5a.1"
     for retained in ("algorithm", "mechanism", "success_model", "energy_kwh",
                      "continuous_all_active_control_kwh", "residency_reconciles",
                      "evaluation_ledger_entries", "security_floor_enabled",

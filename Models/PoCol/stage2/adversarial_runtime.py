@@ -10,14 +10,15 @@ SHA-256 target and difficulty are NEVER changed by any Stage-5 parameter (S5-26)
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .events import EventQueue, ScheduleEvent, CancelQueuedEvent, ordinary_dispatch_origin
 from .events import Outcome
 from .adversarial import (AdversarialEntity, MinerBehaviourProfile, ProgressClaim,
                           WithheldSolutionRecord, DelayedWakeAction, InvalidActionRecord,
-                          IncentiveLedgerEntry, audit_draw, ADVERSARIAL_ACTOR_CLASSES,
-                          AVAILABILITY_STATES)
+                          IncentiveLedgerEntry, AcceptedFrontierRecord, SubAssignmentRecord,
+                          VirtualIdentityRecord, AbandonmentActionRecord,
+                          audit_draw, ADVERSARIAL_ACTOR_CLASSES, AVAILABILITY_STATES)
 
 
 # --------------------------------------------------------------------- helpers
@@ -52,6 +53,38 @@ def availability_residency(run_ctx: Any, mid: Any, t: float) -> float:
     return total
 
 
+def interval_union(intervals) -> List[Tuple[int, int]]:
+    """S5A-2: the canonical, sorted, NON-OVERLAPPING union of half-open intervals.
+
+    ``[(0,80), (40,80)]`` unions to ``[(0,80)]`` — 80 unique positions, not 120.  Adjacent
+    intervals are merged so the representation is canonical and its cardinality is exactly the
+    number of distinct nonce positions covered.
+    """
+    out: List[List[int]] = []
+    for lo, hi in sorted(intervals):
+        if hi <= lo:
+            continue
+        if out and lo <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], hi)
+        else:
+            out.append([lo, hi])
+    return [(lo, hi) for lo, hi in out]
+
+
+def charge_action_budget(run_ctx: Any, rc: Any, kind: str) -> bool:
+    """S5A-7: enforce the declared ``maximum_actions_per_round`` BEFORE a new adversarial action
+    is created.  Returns False (and counts the rejection) once the round's budget is spent."""
+    if not adversarial_enabled(run_ctx):
+        return False
+    limit = run_ctx.config.adversarial.maximum_actions_per_round
+    used = run_ctx.adv_actions_this_round.get(rc.RoundID, 0)
+    if used >= limit:
+        run_ctx.adversarial_stats["actions_rejected_over_limit"] += 1
+        return False
+    run_ctx.adv_actions_this_round[rc.RoundID] = used + 1
+    return True
+
+
 def is_adversarial_miner(run_ctx: Any, mid: Any) -> bool:
     eid = run_ctx.entity_of_miner.get(mid)
     ent = run_ctx.adversarial_entities.get(eid) if eid is not None else None
@@ -83,71 +116,293 @@ def build_entities(run_ctx: Any) -> None:
             run_ctx.entity_of_miner[mid] = eid
 
 
-def materialise_behaviours(run_ctx: Any, rc: Any, participants: List[Any]) -> None:
-    """S5-1: materialise one ROUND-BOUND, IMMUTABLE MinerBehaviourProfile per participant and
-    apply the physical effects (free-rider work fraction, hash-rate misreport bookkeeping).
+def _declared_flags(run_ctx: Any, mid: Any) -> tuple:
+    """The behaviour flags declared for ``mid`` this round (round_seq 0 => every round)."""
+    for (rseq, m, flags) in run_ctx.config.adversarial.miner_behaviours:
+        if m == mid and rseq in (0, run_ctx.round_seq):
+            return tuple(flags)
+    return ()
 
-    The physical search core ALWAYS runs on the actual (effective) hash rate; a reported hash
-    rate never silently alters the physical rate (S5-4).  Re-materialisation for the same round
-    is a no-op (replay-safe, S5-02)."""
+
+def ensure_profile(run_ctx: Any, rc: Any, mid: Any, actual_rate: float) -> Any:
+    """S5-1/S5A-3: build the ROUND-BOUND IMMUTABLE profile for ``mid`` if it does not yet exist.
+
+    Split out from the physical-effect application so a profile can be materialised BEFORE range
+    sizing (which reported-rate allocation mode requires) as well as at the normal point.
+    Idempotent: an existing profile is returned unchanged.
+    """
+    key = (rc.RoundID, mid)
+    existing = run_ctx.behaviour_profiles.get(key)
+    if existing is not None:
+        return existing
+    pol = run_ctx.config.adversarial
+    flags = _declared_flags(run_ctx, mid)
+    work_fraction = pol.free_rider_work_fraction if "FREE_RIDER" in flags else 1.0
+    reported_rate = (actual_rate * pol.reported_hash_rate_multiplier
+                     if "HASH_RATE_MISREPORTER" in flags else actual_rate)
+    prof = MinerBehaviourProfile(
+        MinerID=mid, EntityID=_entity_for(run_ctx, mid), RoundID=rc.RoundID,
+        behaviour_set=flags, actual_hash_rate=actual_rate, reported_hash_rate=reported_rate,
+        work_fraction=work_fraction, wake_delay_multiplier=1.0,
+        solution_release_policy=(pol.solution_release_policy if "SOLUTION_WITHHOLDER" in flags
+                                 else "PROMPT_RELEASE"),
+        progress_reporting_policy="WITHHOLD" if "PROGRESS_WITHHOLDER" in flags else "HONEST",
+        exhaustion_claim_policy="FALSE" if "FALSE_EXHAUSTION_CLAIMER" in flags else "HONEST",
+        assignment_split_count=(pol.assignment_split_count if "ASSIGNMENT_SPLITTER" in flags
+                                else 1),
+        identity_group_id=_entity_for(run_ctx, mid), behaviour_generation=run_ctx.round_seq)
+    run_ctx.behaviour_profiles[key] = prof
+    return prof
+
+
+def prematerialise_behaviours(run_ctx: Any, rc: Any, participants: List[Any],
+                              rate_of) -> None:
+    """S5A-3: build profiles BEFORE range sizing, using a rate callable rather than a search
+    state.  Required by reported-rate allocation mode, where the reported rate must be known
+    before ranges are computed.  No physical effect is applied here."""
     if not adversarial_enabled(run_ctx):
         return
     build_entities(run_ctx)
-    pol = run_ctx.config.adversarial
-    # per-miner declared behaviour sets (round_seq 0 => every round).
-    declared: Dict[Any, tuple] = {}
-    for (rseq, mid, flags) in pol.miner_behaviours:
-        if rseq in (0, run_ctx.round_seq):
-            declared[mid] = tuple(flags)
+    for idx, mid in enumerate(participants):
+        ensure_profile(run_ctx, rc, mid, rate_of(idx, mid))
+
+
+def materialise_behaviours(run_ctx: Any, rc: Any, participants: List[Any]) -> None:
+    """S5-1: ensure the ROUND-BOUND IMMUTABLE profile exists for each participant and apply its
+    PHYSICAL effects exactly once (free-rider work fraction, misreport bookkeeping).
+
+    The physical search core ALWAYS runs on the actual (effective) hash rate; a reported hash
+    rate never alters the physical rate (S5-4/S5A-3).  Replay-safe: physical effects are applied
+    at most once per (round, miner)."""
+    if not adversarial_enabled(run_ctx):
+        return
+    build_entities(run_ctx)
     for mid in participants:
-        key = (rc.RoundID, mid)
-        if key in run_ctx.behaviour_profiles:            # replay-safe
-            continue
         st = rc.search_states.get(mid)
         if st is None:
             continue
-        flags = declared.get(mid, ())
-        actual_rate = st.hash_rate
-        work_fraction = pol.free_rider_work_fraction if "FREE_RIDER" in flags else 1.0
-        reported_rate = (actual_rate * pol.reported_hash_rate_multiplier
-                         if "HASH_RATE_MISREPORTER" in flags else actual_rate)
-        wake_mult = 1.0
-        sol_policy = pol.solution_release_policy if "SOLUTION_WITHHOLDER" in flags \
-            else "PROMPT_RELEASE"
-        prog_policy = "WITHHOLD" if "PROGRESS_WITHHOLDER" in flags else "HONEST"
-        exh_policy = "FALSE" if "FALSE_EXHAUSTION_CLAIMER" in flags else "HONEST"
-        split_count = pol.assignment_split_count if "ASSIGNMENT_SPLITTER" in flags else 1
-        prof = MinerBehaviourProfile(
-            MinerID=mid, EntityID=_entity_for(run_ctx, mid), RoundID=rc.RoundID,
-            behaviour_set=flags, actual_hash_rate=actual_rate, reported_hash_rate=reported_rate,
-            work_fraction=work_fraction, wake_delay_multiplier=wake_mult,
-            solution_release_policy=sol_policy, progress_reporting_policy=prog_policy,
-            exhaustion_claim_policy=exh_policy, assignment_split_count=split_count,
-            identity_group_id=_entity_for(run_ctx, mid),
-            behaviour_generation=run_ctx.round_seq)
-        run_ctx.behaviour_profiles[key] = prof
-        # PHYSICAL effect of free riding: the effective actual rate reduces the physical
-        # search capacity (availability remains a SEPARATE metric).  Ground truth actual rate
-        # is preserved on the profile.
-        if work_fraction < 1.0:
-            st.hash_rate = actual_rate * work_fraction
+        # when the profile was pre-materialised for allocation its actual_hash_rate is
+        # authoritative; otherwise the search state's rate is the actual rate.
+        prof = ensure_profile(run_ctx, rc, mid, st.hash_rate)
+        key = (rc.RoundID, mid)
+        if key in run_ctx.adv_physical_applied:          # replay-safe: effects applied once
+            continue
+        run_ctx.adv_physical_applied.add(key)
+        flags = prof.behaviour_set
+        actual_rate = prof.actual_hash_rate
+        # PHYSICAL effect of free riding: the effective actual rate reduces physical search
+        # capacity.  The ground-truth actual rate is preserved on the immutable profile.
+        if prof.work_fraction < 1.0:
+            st.hash_rate = actual_rate * prof.work_fraction
             run_ctx.adversarial_stats["free_rider_count"] += 1
-        if "HASH_RATE_MISREPORTER" in flags and reported_rate != actual_rate:
+        else:
+            st.hash_rate = actual_rate
+        if "HASH_RATE_MISREPORTER" in flags and prof.reported_hash_rate != actual_rate:
             run_ctx.adversarial_stats["hash_rate_misreport_count"] += 1
             run_ctx.adversarial_stats["actual_reported_divergence_count"] += 1
-            ratio = reported_rate / actual_rate if actual_rate > 0 else 1.0
+            ratio = prof.reported_hash_rate / actual_rate if actual_rate > 0 else 1.0
             run_ctx.adversarial_stats["allocation_distortion_max_ratio"] = max(
                 run_ctx.adversarial_stats["allocation_distortion_max_ratio"], ratio)
-        if split_count > 1:
+        if prof.assignment_split_count > 1:
             run_ctx.adversarial_stats["assignment_split_count"] += 1
+        create_subassignments(run_ctx, rc, mid, st, prof)   # S5A-4
+    create_virtual_identities(run_ctx, rc)                  # S5A-4
     # arm the q_adv observation hook + take the first observation for this round.
     run_ctx.adversarial_share_hook = lambda t: observe_adversarial_share(run_ctx, t)
     observe_adversarial_share(run_ctx, run_ctx.event_queue.current_event_time)
 
 
+# --------------------------------------------------------------------- S5A-3 reported allocation
+def reported_rate_allocation_enabled(run_ctx: Any) -> bool:
+    """S5A-3: is deterministic range sizing driven by REPORTED rates for this run?"""
+    return bool(adversarial_enabled(run_ctx)
+                and run_ctx.config.adversarial.coordinator_uses_reported_hash_rate)
+
+
+def allocate_by_reported_rate(run_ctx: Any, rc: Any, domain_size: int,
+                              participants: List[Any]) -> Dict[Any, Tuple[int, int]]:
+    """S5A-3: size the participants' ranges by their REPORTED hash rates.
+
+    The total nonce domain is unchanged, ranges stay pairwise disjoint and contiguous, and every
+    nonce in ``[0, domain_size)`` is covered exactly once.  Only the SIZING uses reported rates —
+    the physical search rate remains each miner's actual effective rate, so over-reporting buys a
+    larger range but no extra hashing capacity.
+    """
+    ordered = sorted(participants)
+    weights = []
+    for mid in ordered:
+        prof = run_ctx.behaviour_profiles.get((rc.RoundID, mid))
+        w = prof.reported_hash_rate if prof is not None and prof.reported_hash_rate > 0 else 1.0
+        weights.append(float(w))
+    total_w = sum(weights) or float(len(ordered))
+    ranges: Dict[Any, Tuple[int, int]] = {}
+    cursor = 0
+    for i, mid in enumerate(ordered):
+        if i == len(ordered) - 1:
+            end = domain_size                            # last participant absorbs the remainder
+        else:
+            end = cursor + int(domain_size * weights[i] / total_w)
+            end = max(cursor, min(end, domain_size))
+        ranges[mid] = (cursor, end)
+        cursor = end
+    run_ctx.adversarial_stats["reported_rate_allocation_rounds"] += 1
+    # record the honest-vs-reported sizing distortion (equal split is the honest reference).
+    honest_size = domain_size / max(1, len(ordered))
+    for mid in ordered:
+        lo, hi = ranges[mid]
+        run_ctx.adv_allocated_range_size[(rc.RoundID, mid)] = hi - lo
+        if honest_size > 0:
+            run_ctx.adversarial_stats["allocation_range_size_distortion_max_ratio"] = max(
+                run_ctx.adversarial_stats["allocation_range_size_distortion_max_ratio"],
+                (hi - lo) / honest_size)
+    return ranges
+
+
+def record_allocation_projection(run_ctx: Any, rc: Any, mid: Any, st: Any) -> None:
+    """S5A-3: the completion time the coordinator would PROJECT from the reported rate, against
+    the completion time the miner's ACTUAL rate will really produce."""
+    if not adversarial_enabled(run_ctx):
+        return
+    prof = run_ctx.behaviour_profiles.get((rc.RoundID, mid))
+    if prof is None:
+        return
+    span = st.range_end - st.range_start
+    projected = span / prof.reported_hash_rate if prof.reported_hash_rate > 0 else None
+    actual = span / st.hash_rate if st.hash_rate > 0 else None
+    run_ctx.adv_allocation_projection[(rc.RoundID, mid)] = {
+        "allocated_range_size": span,
+        "reported_hash_rate": prof.reported_hash_rate,
+        "actual_hash_rate": st.hash_rate,
+        "projected_completion_seconds": projected,
+        "actual_completion_seconds": actual,
+    }
+
+
+# --------------------------------------------------------------------- S5A-4 splitting/identities
+def create_subassignments(run_ctx: Any, rc: Any, mid: Any, st: Any, prof: Any) -> None:
+    """S5A-4: create REAL subassignment records for an ASSIGNMENT_SPLITTER.
+
+    Subranges partition the miner's allocated range exactly (disjoint, union == original), and
+    the per-subassignment capacity shares sum to the entity's single actual physical capacity.
+    Splitting therefore reorganises how work is accounted; it never multiplies physical
+    throughput.  This is an accounting / sensitivity model, NOT a Sybil defence.
+    """
+    n = prof.assignment_split_count
+    if n <= 1:
+        return
+    eid = _entity_for(run_ctx, mid)
+    lo, hi = st.range_start, st.range_end
+    span = hi - lo
+    if span <= 0:
+        return
+    n = min(n, span)                                     # never more parts than nonces
+    budget = prof.actual_hash_rate                       # the ENTITY's real physical capacity
+    share = budget / n
+    cursor = lo
+    for i in range(n):
+        end = hi if i == n - 1 else cursor + span // n
+        sub_id = (rc.RoundID, rc.TemplateID_committed, st.AssignmentID, i)
+        if sub_id in run_ctx.subassignment_by_id:        # replay-safe
+            cursor = end
+            continue
+        rec = SubAssignmentRecord(
+            SubAssignmentID=sub_id, ParentAssignmentID=st.AssignmentID, RoundID=rc.RoundID,
+            TemplateID=rc.TemplateID_committed, EntityID=eid, MinerID=mid, index=i,
+            range_start=cursor, range_end=end, capacity_share=share,
+            entity_capacity_budget=budget,
+            lineage_id=run_ctx.slice_of_miner.get((rc.RoundID, mid), st.AssignmentID),
+            disposition=Outcome("subassignment_created"))
+        run_ctx.subassignments.append(rec)
+        run_ctx.subassignment_by_id[sub_id] = rec
+        run_ctx.adversarial_stats["subassignment_count"] += 1
+        cursor = end
+    # capacity conservation: the shares must sum EXACTLY to the entity's physical budget.
+    subs = [s for s in run_ctx.subassignments
+            if s.RoundID == rc.RoundID and s.ParentAssignmentID == st.AssignmentID]
+    if subs:
+        resid = abs(sum(s.capacity_share for s in subs) - budget)
+        run_ctx.adversarial_stats["subassignment_capacity_residual"] = max(
+            run_ctx.adversarial_stats["subassignment_capacity_residual"], resid)
+
+
+def create_virtual_identities(run_ctx: Any, rc: Any) -> None:
+    """S5A-4: materialise explicit virtual identity records bound to one EntityID.
+
+    A virtual identity holds no assignment and no lease and grants NO physical capacity; it
+    exists so identity count can be reported separately from real miner/entity count."""
+    n = run_ctx.config.adversarial.sybil_identity_count
+    if n <= 1:
+        return
+    for eid, ent in sorted(run_ctx.adversarial_entities.items(), key=lambda kv: str(kv[0])):
+        backing = ent.controlled_miner_ids[0] if ent.controlled_miner_ids else None
+        for i in range(n):
+            vid = (rc.RoundID, eid, i)
+            if vid in run_ctx.virtual_identity_by_id:    # replay-safe
+                continue
+            rec = VirtualIdentityRecord(
+                VirtualIdentityID=vid, EntityID=eid, RoundID=rc.RoundID, index=i,
+                backing_miner_id=backing, grants_physical_capacity=False,
+                disposition=Outcome("virtual_identity_declared"))
+            run_ctx.virtual_identities.append(rec)
+            run_ctx.virtual_identity_by_id[vid] = rec
+            run_ctx.adversarial_stats["virtual_identity_count"] += 1
+
+
+def entity_physical_capacity(run_ctx: Any, rc: Any, eid: Any) -> float:
+    """The entity's TOTAL actual physical capacity this round — the quantity that neither
+    assignment splitting nor identity multiplication may increase (S5A-4)."""
+    total = 0.0
+    for (rid, mid), prof in run_ctx.behaviour_profiles.items():
+        if rid == rc.RoundID and _entity_for(run_ctx, mid) == eid:
+            st = rc.search_states.get(mid)
+            total += st.hash_rate if st is not None else prof.actual_hash_rate
+    return total
+
+
+# --------------------------------------------------------------------- S5A-5 abandonment
+def maybe_abandon(run_ctx: Any, rc: Any, st: Any, now: float) -> Optional[Any]:
+    """S5A-5: an IDLE_POLICY_DEFECTOR EXECUTES one declared abandonment.
+
+    The miner stops with an uncovered suffix and an ``AbandonmentActionRecord`` is written.  A
+    penalty may be charged ONLY against such a record — a profile flag alone is never enough, so
+    a round that closes before this executes yields no action and no penalty.
+    """
+    if not adversarial_enabled(run_ctx):
+        return None
+    prof = _profile(run_ctx, rc, st.MinerID)
+    if prof is None or "IDLE_POLICY_DEFECTOR" not in prof.behaviour_set or st.completed:
+        return None
+    if st.cursor <= st.range_start or st.cursor >= st.range_end:
+        return None                                      # nothing done yet, or genuinely finished
+    key = (rc.RoundID, rc.TemplateID_committed, st.MinerID, st.AssignmentID)
+    if key in run_ctx.abandonment_by_id:                 # replay-safe: one action per assignment
+        return run_ctx.abandonment_by_id[key]
+    if not charge_action_budget(run_ctx, rc, "ABANDONMENT"):
+        return None
+    slice_id = run_ctx.slice_of_miner.get((rc.RoundID, st.MinerID))
+    prog = run_ctx.range_progress.get(slice_id) if slice_id else None
+    lease_id = prog.current_lease_id if prog is not None else None
+    rec = AbandonmentActionRecord(
+        ActionID=key, RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed,
+        EntityID=_entity_for(run_ctx, st.MinerID), MinerID=st.MinerID, LeaseID=lease_id,
+        actual_frontier=st.cursor, abandoned_suffix_start=st.cursor,
+        abandoned_suffix_end=st.range_end, action_time=now,
+        disposition=Outcome("abandonment_executed"))
+    run_ctx.abandonment_actions.append(rec)
+    run_ctx.abandonment_by_id[key] = rec
+    run_ctx.adversarial_stats["abandonment_action_count"] += 1
+    run_ctx.adversarial_stats["abandoned_nonce_count"] += rec.abandoned_nonce_count()
+    st.completed = True
+    st.completion_kind = "INTENTIONALLY_ABANDONED"
+    m = run_ctx.miners.get(st.MinerID)
+    if m is not None and m.state == "ACTIVE_HASHING":
+        run_ctx.apply_miner_state_transition(st.MinerID, "LOW_POWER_LISTEN", now)
+    return rec
+
+
 # --------------------------------------------------------------------- S5-7 delayed wake
 def wake_extra_latency(run_ctx: Any, rc: Any, mid: Any, honest_target: float,
-                       now: float) -> float:
+                       now: float, request_id: Any = None) -> float:
     """S5-7: extra deterministic wake latency for a DELAYED_WAKE miner (0 otherwise).  Records a
     round-bound, replay-safe DelayedWakeAction; the miner stays WAKING and contributes zero to
     H_effective over the whole actual interval (residency accounts wake energy over it)."""
@@ -159,8 +414,17 @@ def wake_extra_latency(run_ctx: Any, rc: Any, mid: Any, honest_target: float,
     extra = run_ctx.config.adversarial.delayed_wake_extra_latency
     if extra <= 0:
         return 0.0
+    if not charge_action_budget(run_ctx, rc, "DELAYED_WAKE"):
+        return 0.0                                       # S5A-7: declared per-round action limit
+    # S5A-6: every wake EPISODE gets a distinct identity.  A miner legitimately woken more than
+    # once in one round (ordinary wake, then a reassignment or activation wake) must produce
+    # DISTINCT action records, so the identity carries a per-(round, miner) wake generation and
+    # the request identity that caused this wake.
+    ep_key = (rc.RoundID, mid)
+    gen = run_ctx.adv_wake_generation.get(ep_key, 0) + 1
+    run_ctx.adv_wake_generation[ep_key] = gen
     action_id = (rc.RoundID, rc.TemplateID_committed, _entity_for(run_ctx, mid), mid,
-                 "DELAYED_WAKE", "wake_start")
+                 "DELAYED_WAKE", gen, request_id)
 
     def _mk():
         run_ctx.adversarial_stats["delayed_wake_count"] += 1
@@ -174,7 +438,7 @@ def wake_extra_latency(run_ctx: Any, rc: Any, mid: Any, honest_target: float,
 
 
 def complete_delayed_wake(run_ctx: Any, rc: Any, mid: Any, now: float) -> None:
-    """Record the actual wake time for a delayed-wake action when the wake finally completes."""
+    """Record the actual wake time for the OLDEST pending delayed-wake action of this miner."""
     if not adversarial_enabled(run_ctx):
         return
     for rec in run_ctx.delayed_wake_actions.values():
@@ -182,6 +446,65 @@ def complete_delayed_wake(run_ctx: Any, rc: Any, mid: Any, now: float) -> None:
             rec.actual_wake_time = now
             rec.status = "COMPLETED"
             rec.disposition = Outcome("delayed_wake_completed")
+            return                                       # one episode per completion
+
+
+def record_floor_breach_interval(run_ctx: Any, start: float, end: float) -> None:
+    """S5A-6: record one CLOSED security-floor breach interval so delayed-wake impact can be
+    measured against REAL observations rather than a constant."""
+    if not adversarial_enabled(run_ctx) or start is None or end is None or end <= start:
+        return
+    run_ctx.adv_floor_breach_intervals.append((start, end))
+
+
+def finalise_delayed_wake_impact(run_ctx: Any, rc: Any, t: float) -> None:
+    """S5A-6: compute each delayed-wake action's REAL impact once the round's floor-breach
+    intervals are known.
+
+    ``below_floor_overlap`` is the measured overlap of the ADDED waking interval
+    ``[honest_expected_wake, actual_wake]`` with the union of observed breach intervals;
+    ``another_reserve_activated`` records whether a reserve activation was actually seated inside
+    that interval; ``attack_induced_floor_breach_duration`` aggregates the overlaps.  None of
+    these is a constant.
+    """
+    if not adversarial_enabled(run_ctx):
+        return
+    breaches = interval_union_float(run_ctx.adv_floor_breach_intervals)
+    seated = [req for req in run_ctx.activation_requests.values()
+              if getattr(req, "RoundID", None) == rc.RoundID]
+    for rec in run_ctx.delayed_wake_actions.values():
+        if rec.RoundID != rc.RoundID or rec.impact_finalised:
+            continue
+        rec.impact_finalised = True
+        end = rec.actual_wake_time if rec.actual_wake_time is not None else t
+        lo, hi = rec.honest_expected_wake_time, end
+        if hi <= lo:
+            continue
+        overlap = 0.0
+        for b_lo, b_hi in breaches:
+            overlap += max(0.0, min(hi, b_hi) - max(lo, b_lo))
+        rec.below_floor_overlap = overlap
+        run_ctx.adversarial_stats["attack_induced_floor_breach_duration"] += overlap
+        for req in seated:
+            seat_t = getattr(req, "seated_time", None)
+            if seat_t is not None and lo <= seat_t <= hi and req.MinerID != rec.MinerID:
+                rec.another_reserve_activated = True
+                break
+        P_wake = run_ctx.config.per_miner_power("WAKING")
+        rec.incremental_wake_energy_j = P_wake * rec.extra_delay
+
+
+def interval_union_float(intervals) -> List[Tuple[float, float]]:
+    """Canonical non-overlapping union over REAL-valued (time) intervals."""
+    out: List[List[float]] = []
+    for lo, hi in sorted(intervals):
+        if hi <= lo:
+            continue
+        if out and lo <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], hi)
+        else:
+            out.append([lo, hi])
+    return [(lo, hi) for lo, hi in out]
 
 
 # --------------------------------------------------------------------- S5-6 solution withholding
@@ -282,8 +605,22 @@ def maybe_false_exhaustion(run_ctx: Any, rc: Any, st: Any, now: float) -> Option
         prog = run_ctx.range_progress.get(slice_id)
         lease = run_ctx.range_leases.get(prog.current_lease_id) if prog is not None else None
     lease_id = lease.LeaseID if lease is not None else None
+    # S5A-7: derive the reported claim DETERMINISTICALLY from the declared offset, capped to the
+    # range end.  ``false_exhaustion_claims_range_end`` (the default) models the strongest
+    # overstatement; otherwise the miner overstates by exactly ``false_exhaustion_claim_offset``
+    # nonces.  A zero offset with range-end claiming disabled reports the TRUTH, which is not a
+    # false claim and creates no coverage gap.
+    pol = run_ctx.config.adversarial
+    if pol.false_exhaustion_claims_range_end:
+        reported = st.range_end
+    else:
+        reported = min(st.range_end, st.cursor + pol.false_exhaustion_claim_offset)
+    if reported <= st.cursor:                            # a truthful claim is not a false claim
+        return None
+    if not charge_action_budget(run_ctx, rc, "FALSE_EXHAUSTION"):
+        return None                                      # S5A-7: declared per-round action limit
     run_ctx.adversarial_stats["false_exhaustion_attempted"] += 1
-    claim = audit_claim(run_ctx, rc, lease_id, st.MinerID, st.cursor, st.range_end,
+    claim = audit_claim(run_ctx, rc, lease_id, st.MinerID, st.cursor, reported,
                         "EXHAUSTION_CLAIM")
     if claim.detected:
         run_ctx.adversarial_stats["false_exhaustion_detected"] += 1
@@ -291,7 +628,7 @@ def maybe_false_exhaustion(run_ctx: Any, rc: Any, st: Any, now: float) -> Option
         return None
     # accepted false exhaustion: preserve actual ground truth, record the coverage gap.
     run_ctx.adversarial_stats["false_exhaustion_accepted"] += 1
-    gap = st.range_end - st.cursor
+    gap = reported - st.cursor
     run_ctx.adversarial_stats["coverage_gap_nonce_count"] += gap
     run_ctx.adv_round_coverage_gap[rc.RoundID] = \
         run_ctx.adv_round_coverage_gap.get(rc.RoundID, 0) + gap
@@ -320,38 +657,130 @@ def round_has_coverage_gap(run_ctx: Any, rc: Any) -> bool:
 
 
 def apply_progress_withholding(run_ctx: Any, rc: Any, prog: Any, pred_lease_id: Any,
-                               t: float) -> None:
-    """S5-5: a PROGRESS_WITHHOLDER under-reports how far it actually searched.
+                               t: float) -> Optional[int]:
+    """S5A-1: a PROGRESS_WITHHOLDER under-reports how far it actually searched.
 
     Applied at the reassignment boundary, where the reported frontier is the value the protocol
-    actually acts on.  The under-report goes through the SAME modeled audit as any other claim:
-    a detected claim is rejected and the real frontier is retained; an undetected claim lowers
-    the ACCEPTED frontier while the ACTUAL frontier is preserved separately as ground truth
-    (S5-3).  The successor then re-evaluates the difference — a real, explicitly counted cost."""
+    acts on.  The under-report goes through the SAME modeled audit as any other claim.
+
+    CRITICAL (S5A-1): recording an accepted frontier BELOW the actual frontier NEVER rewinds the
+    accepted Stage-4C authoritative physical ``RangeProgress.committed_frontier``.  That frontier
+    is monotonic ground truth and is left untouched; the protocol's ACCEPTED view lives in a
+    separate ``AcceptedFrontierRecord``.  Returns the reassignment start (the accepted frontier)
+    when an under-report was accepted, else ``None``.
+    """
     if not adversarial_enabled(run_ctx):
-        return
+        return None
     lease = run_ctx.range_leases.get(pred_lease_id)
     if lease is None:
-        return
+        return None
     prof = _profile(run_ctx, rc, lease.MinerID)
     if prof is None or prof.progress_reporting_policy != "WITHHOLD":
-        return
-    actual = prog.committed_frontier
+        return None
+    rec_id = (rc.RoundID, rc.TemplateID_committed, prog.RangeSliceID, pred_lease_id,
+              lease.assignment_version)
+    existing = run_ctx.accepted_frontier_by_id.get(rec_id)
+    if existing is not None:                             # replay: same decision, no new effect
+        return existing.reassignment_start
+    actual = prog.committed_frontier                     # the PHYSICAL committed truth
     done = actual - lease.lease_start_nonce
     if done <= 0:
-        return
+        return None
     withheld = int(run_ctx.config.adversarial.progress_withholding_fraction * done)
     reported = actual - withheld
     if reported >= actual:
-        return
+        return None
+    if not charge_action_budget(run_ctx, rc, "PROGRESS_WITHHOLD"):
+        return None                                      # S5A-7: declared per-round action limit
     claim = audit_claim(run_ctx, rc, pred_lease_id, lease.MinerID, actual, reported,
                         "PROGRESS_REPORT")
-    if claim.detected:                                   # rejected: the real frontier stands
-        return
+    accepted = actual if claim.detected else reported    # detected => the real frontier stands
+    rec = AcceptedFrontierRecord(
+        RecordID=rec_id, RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed,
+        RangeSliceID=prog.RangeSliceID, LeaseID=pred_lease_id,
+        assignment_version=lease.assignment_version, MinerID=lease.MinerID,
+        EntityID=_entity_for(run_ctx, lease.MinerID), actual_frontier=actual,
+        reported_frontier=reported, accepted_frontier=accepted,
+        physical_committed_frontier_at_decision=prog.committed_frontier,
+        detected=claim.detected,
+        disposition=Outcome("accepted_frontier_rejected" if claim.detected
+                            else "accepted_frontier_below_actual"))
+    run_ctx.accepted_frontier_records.append(rec)
+    run_ctx.accepted_frontier_by_id[rec_id] = rec
     run_ctx.adv_actual_frontier[prog.RangeSliceID] = actual
-    run_ctx.adv_reeval_boundary[prog.RangeSliceID] = reported
-    prog.committed_frontier = reported
-    lease.committed_cursor = reported
+    run_ctx.adversarial_stats["accepted_frontier_record_count"] += 1
+    if claim.detected:
+        return None
+    run_ctx.adversarial_stats["accepted_below_actual_count"] += 1
+    run_ctx.adv_reeval_boundary[prog.RangeSliceID] = accepted
+    rec.reassignment_start = accepted
+    rec.reevaluation_interval = (accepted, actual)
+    # The successor re-searches [accepted, actual).  Open an EXPLICIT re-evaluation window so the
+    # successor can legitimately execute below the physical frontier WITHOUT that frontier ever
+    # being rewound (S5A-1).
+    run_ctx.adv_reeval_window[prog.RangeSliceID] = {
+        "accepted": accepted, "actual": actual, "cursor": accepted,
+        "RoundID": rc.RoundID, "TemplateID": rc.TemplateID_committed, "RecordID": rec_id}
+    return accepted
+
+
+def expected_cursor_for_lease(run_ctx: Any, prog: Any) -> int:
+    """S5A-1: the cursor a HashWorkEvent must carry for this slice.
+
+    Normally the accepted Stage-4C authoritative physical frontier — identical to the accepted
+    behaviour.  While an adversarial re-evaluation window is open the successor is legitimately
+    working BELOW that frontier, so the window's own cursor is authoritative for the guard.
+    """
+    if not adversarial_enabled(run_ctx):
+        return prog.committed_frontier
+    w = run_ctx.adv_reeval_window.get(prog.RangeSliceID)
+    if w is not None and w["cursor"] < w["actual"]:
+        return w["cursor"]
+    return prog.committed_frontier
+
+
+def note_physical_commit(run_ctx: Any, rc: Any, slice_id: Any, lo: int, hi: int,
+                         mid: Any) -> None:
+    """S5A-1/S5A-2: record one PHYSICAL evaluation interval and advance any open re-evaluation
+    window.  Work inside the window is adversarially-induced RE-evaluation: it is real physical
+    work (visible in the execution and energy ledgers) but it is not new coverage."""
+    if not adversarial_enabled(run_ctx):
+        return
+    run_ctx.adversarial_stats["physical_evaluation_count"] += max(0, hi - lo)
+    w = run_ctx.adv_reeval_window.get(slice_id)
+    if w is None:
+        return
+    overlap = max(0, min(hi, w["actual"]) - max(lo, w["accepted"]))
+    if overlap > 0:
+        run_ctx.adversarial_stats["adversarial_reevaluation_count"] += overlap
+    if hi > w["cursor"]:
+        w["cursor"] = hi
+    if w["cursor"] >= w["actual"]:                       # window consumed; back to normal flow
+        run_ctx.adv_reeval_window.pop(slice_id, None)
+
+
+def frontier_reconciliation(run_ctx: Any) -> List[Dict[str, Any]]:
+    """S5A-1: one auditable row per adversarial claim showing the actual, reported and accepted
+    frontiers, the reassignment start and the physical evaluation ledger coverage."""
+    rows = []
+    for rec in run_ctx.accepted_frontier_records:
+        physical = sorted((r.interval_start, r.interval_end) for r in run_ctx.evaluation_ledger
+                          if r.RoundID == rec.RoundID and r.RangeSliceID == rec.RangeSliceID)
+        rows.append({
+            "RecordID": list(rec.RecordID) if isinstance(rec.RecordID, tuple) else rec.RecordID,
+            "MinerID": rec.MinerID, "EntityID": rec.EntityID,
+            "actual_frontier": rec.actual_frontier,
+            "reported_frontier": rec.reported_frontier,
+            "accepted_frontier": rec.accepted_frontier,
+            "reassignment_start": rec.reassignment_start,
+            "physical_committed_frontier_at_decision":
+                rec.physical_committed_frontier_at_decision,
+            "reevaluation_interval": list(rec.reevaluation_interval)
+                if rec.reevaluation_interval else None,
+            "detected": rec.detected,
+            "physical_evaluation_intervals": [list(i) for i in physical],
+        })
+    return rows
 
 
 def note_reassignment_reeval(run_ctx: Any, rc: Any, slice_id: Any, accepted_frontier: int,
@@ -490,38 +919,57 @@ def finalise_incentives(run_ctx: Any, rc: Any, t: float) -> None:
     ip = run_ctx.config.incentive
     st_stats = run_ctx.adversarial_stats
 
-    # ---- WORK_REWARD over unique accepted committed evaluations (dedup by range lineage) ----
-    dedup_work: Dict[Any, int] = {}
+    # ---- WORK_REWARD over the UNION of unique physical nonce positions (S5A-2) ----
+    # An exact-interval key is NOT sufficient: partially overlapping intervals such as [0,80)
+    # and [40,80) are DIFFERENT keys and would be rewarded twice (120 positions instead of 80).
+    # Reward is therefore computed from the canonical non-overlapping interval UNION per
+    # (RoundID, TemplateID, range lineage), so one nonce position earns at most one work reward
+    # per template and adversarially-induced re-evaluation earns nothing extra.  The physical
+    # re-evaluation itself remains fully visible in the execution and energy ledgers.
+    raw_by_lineage: Dict[Any, List[Tuple[int, int]]] = {}
     miner_of_lineage: Dict[Any, Any] = {}
+    physical_positions = 0
     for rec in run_ctx.evaluation_ledger:
         if rec.RoundID != rc.RoundID:
             continue
         lineage = rec.RangeSliceID if rec.RangeSliceID is not None else rec.AssignmentID
-        key = (lineage, rec.interval_start, rec.interval_end)
-        if key in dedup_work:
-            continue
-        dedup_work[key] = rec.interval_end - rec.interval_start
-        miner_of_lineage[key] = rec.MinerID
-    for key, committed in dedup_work.items():
-        mid = miner_of_lineage[key]
+        raw_by_lineage.setdefault(lineage, []).append((rec.interval_start, rec.interval_end))
+        miner_of_lineage.setdefault(lineage, rec.MinerID)
+        physical_positions += max(0, rec.interval_end - rec.interval_start)
+    union_by_lineage = {lin: interval_union(iv) for lin, iv in raw_by_lineage.items()}
+    unique_positions = sum(hi - lo for u in union_by_lineage.values() for lo, hi in u)
+    rewarded_positions = 0
+    for lineage, union in sorted(union_by_lineage.items(), key=lambda kv: str(kv[0])):
+        mid = miner_of_lineage[lineage]
         eid = _entity_for(run_ctx, mid)
-        entry = _emit(run_ctx, rc, eid, mid, "WORK_REWARD", +1, ip.r_work * committed,
-                      source_event_id=key, range_lineage_id=key[0],
-                      eligibility_reason="unique_accepted_committed_evaluations",
-                      dedup_key=("WORK", rc.RoundID) + key)
-        if entry is not None:
-            st_stats["work_reward_total"] += entry.amount
+        for lo, hi in union:
+            entry = _emit(run_ctx, rc, eid, mid, "WORK_REWARD", +1, ip.r_work * (hi - lo),
+                          source_event_id=(lineage, lo, hi), range_lineage_id=lineage,
+                          eligibility_reason="unique_physical_nonce_union",
+                          dedup_key=("WORK", rc.RoundID, rc.TemplateID_committed,
+                                     lineage, lo, hi))
+            if entry is not None:
+                st_stats["work_reward_total"] += entry.amount
+                rewarded_positions += (hi - lo)
+    st_stats["unique_rewarded_nonce_count"] += rewarded_positions
+    st_stats["duplicate_work_reward_prevented_count"] += max(0, physical_positions
+                                                             - unique_positions)
+    # exact reconciliation: the ledger's rewarded position count must equal the union cardinality.
+    st_stats["work_reward_union_residual"] = max(
+        st_stats["work_reward_union_residual"],
+        abs(float(rewarded_positions) - float(unique_positions)))
 
     # ---- naive vs deduplicated entity accounting (S5-8) ----
-    # naive: multiply the entity's work credit by its per-round assignment-split x identity
-    # count (the modeled amplification EXPOSURE); deduplicated: one credit per range lineage.
+    # BOTH views use the SAME physical work definition (the unique-nonce union); they differ only
+    # in whether an entity's identities / assignment splits are collapsed.
     naive_total = 0.0
     dedup_entity_total = 0.0
     entity_work: Dict[Any, float] = {}
-    for key, committed in dedup_work.items():
-        mid = miner_of_lineage[key]
+    for lineage, union in union_by_lineage.items():
+        mid = miner_of_lineage[lineage]
         eid = _entity_for(run_ctx, mid)
-        entity_work[eid] = entity_work.get(eid, 0.0) + ip.r_work * committed
+        credit = ip.r_work * sum(hi - lo for lo, hi in union)
+        entity_work[eid] = entity_work.get(eid, 0.0) + credit
     for eid, amt in entity_work.items():
         dedup_entity_total += amt
         ent = run_ctx.adversarial_entities.get(eid)
@@ -625,21 +1073,32 @@ def finalise_incentives(run_ctx: Any, rc: Any, t: float) -> None:
             if entry is not None:
                 st_stats["invalid_message_penalty_total"] += entry.amount
 
-    # ---- ABANDONMENT_PENALTY only for INTENTIONAL abandonment (crash faults excluded
-    # unless explicitly configured, S5-10) ----
+    # ---- ABANDONMENT_PENALTY only against an EXECUTED abandonment action (S5A-5) ----
+    # A behaviour flag in a profile is NOT an abandonment.  The penalty is charged strictly
+    # per AbandonmentActionRecord, so a round that closes before the action executes yields no
+    # penalty at all.  Crash and failure paths never create such a record unless explicitly
+    # configured to be penalised.
     if ip.q_abandon > 0:
-        for mid, prof in run_ctx.behaviour_profiles.items():
-            if mid[0] != rc.RoundID:
+        for rec in run_ctx.abandonment_actions:
+            if rec.RoundID != rc.RoundID or not rec.penalty_eligible:
                 continue
-            _rid, m_id = mid
-            if "IDLE_POLICY_DEFECTOR" in prof.behaviour_set:
-                eid = _entity_for(run_ctx, m_id)
-                entry = _emit(run_ctx, rc, eid, m_id, "ABANDONMENT_PENALTY", -1, ip.q_abandon,
-                              source_event_id=("ABANDON", m_id), range_lineage_id=None,
-                              eligibility_reason="intentional_abandonment",
-                              dedup_key=("ABANDON", rc.RoundID, m_id))
-                if entry is not None:
-                    st_stats["abandonment_penalty_total"] += entry.amount
+            entry = _emit(run_ctx, rc, rec.EntityID, rec.MinerID, "ABANDONMENT_PENALTY", -1,
+                          ip.q_abandon, source_event_id=rec.ActionID,
+                          range_lineage_id=rec.LeaseID,
+                          eligibility_reason="executed_intentional_abandonment",
+                          dedup_key=("ABANDON", rec.ActionID))
+            if entry is not None:
+                st_stats["abandonment_penalty_total"] += entry.amount
+        # audit: a declared defector that never executed an action must never be charged.
+        for (rid, m_id), prof in run_ctx.behaviour_profiles.items():
+            if rid != rc.RoundID or "IDLE_POLICY_DEFECTOR" not in prof.behaviour_set:
+                continue
+            executed = any(r.RoundID == rc.RoundID and r.MinerID == m_id
+                           for r in run_ctx.abandonment_actions)
+            charged = any(e.component == "ABANDONMENT_PENALTY" and e.MinerID == m_id
+                          and e.RoundID == rc.RoundID for e in run_ctx.incentive_ledger)
+            if charged and not executed:
+                st_stats["abandonment_penalty_without_action_count"] += 1
 
 
 # --------------------------------------------------------------------- S5-12 round closure
@@ -665,6 +1124,11 @@ def close_adversarial_round(run_ctx: Any, rc: Any, t: float) -> None:
             ws.status = "HIDDEN_AT_CLOSE" if ws.release_policy == "NEVER_RELEASE" \
                 else "CANCELLED_AT_CLOSE"
             ws.disposition = Outcome("withheld_solution_terminal_at_close")
+            # S5A-7: an accepted block closed the round before this solution was ever released,
+            # so the withholder demonstrably lost the race to an alternative solution.
+            if rc.block_accepted and rc.winner_miner_id != ws.MinerID:
+                ws.alternative_solution_won = True
+                run_ctx.adversarial_stats["withheld_alternative_solution_won_count"] += 1
             if ws.release_policy == "NEVER_RELEASE":
                 run_ctx.adversarial_stats["withheld_never_released_count"] += 1
     for rec in run_ctx.delayed_wake_actions.values():
@@ -674,6 +1138,14 @@ def close_adversarial_round(run_ctx: Any, rc: Any, t: float) -> None:
     for claim in run_ctx.progress_claims:
         if claim.RoundID == rc.RoundID and claim.disposition is None:
             claim.disposition = Outcome("claim_terminal_at_close")
+    for rec in run_ctx.abandonment_actions:              # S5A-5: terminalise executed actions
+        if rec.RoundID == rc.RoundID and rec.status == "EXECUTED":
+            rec.status = "TERMINAL_AT_CLOSE"
+    # S5A-6: measure each delayed wake's REAL floor impact now that this round's breach
+    # intervals are complete, then close any still-open re-evaluation window.
+    finalise_delayed_wake_impact(run_ctx, rc, t)
+    for sid in [s for s, w in run_ctx.adv_reeval_window.items() if w["RoundID"] == rc.RoundID]:
+        run_ctx.adv_reeval_window.pop(sid, None)
     # finalise incentives for the round (rewards/penalties over the closed round's ledgers).
     finalise_incentives(run_ctx, rc, t)
     # take a final q_adv observation at closure so the last interval is credited.

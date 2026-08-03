@@ -296,6 +296,29 @@ class RunContext:
         self.adv_credited_frontier: Dict[str, int] = {}      # slice_id -> work-reward credited end
         self.adv_round_coverage_gap: Dict[Any, int] = {}     # RoundID -> accepted-false-claim gap
         self.adv_gap_rounds_counted: set = set()             # RoundIDs already counted as gapped
+        # ---------------------------------------------- Stage-5A executable corrections
+        # S5A-1: the ACCEPTED frontier layer, kept strictly SEPARATE from the accepted Stage-4C
+        # authoritative physical RangeProgress.committed_frontier (which never rewinds).
+        self.accepted_frontier_records: List[Any] = []
+        self.accepted_frontier_by_id: Dict[Any, Any] = {}
+        self.adv_reeval_window: Dict[Any, Dict[str, Any]] = {}  # slice_id -> open re-eval window
+        self.adv_physical_applied: set = set()               # (RoundID, mid) physical effects done
+        # S5A-3 reported-rate allocation bookkeeping.
+        self.adv_allocated_range_size: Dict[Any, int] = {}
+        self.adv_allocation_projection: Dict[Any, Dict[str, Any]] = {}
+        # S5A-4 executable subassignments + declared virtual identities.
+        self.subassignments: List[Any] = []
+        self.subassignment_by_id: Dict[Any, Any] = {}
+        self.virtual_identities: List[Any] = []
+        self.virtual_identity_by_id: Dict[Any, Any] = {}
+        # S5A-5 EXECUTED abandonment actions (an abandonment penalty requires one of these).
+        self.abandonment_actions: List[Any] = []
+        self.abandonment_by_id: Dict[Any, Any] = {}
+        # S5A-6 real security-floor breach intervals + per-(round, miner) wake generation.
+        self.adv_floor_breach_intervals: List[Any] = []
+        self.adv_wake_generation: Dict[Any, int] = {}
+        # S5A-7 declared per-round adversarial action budget.
+        self.adv_actions_this_round: Dict[Any, int] = {}
         self.availability_snapshot: Dict[Any, float] = {}    # (RoundID, mid) -> residency at start
         self.adversarial_stats: Dict[str, Any] = default_adversarial_stats()
         self.q_adv_state: Dict[str, Any] = default_q_adv_state()
