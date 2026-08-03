@@ -19,14 +19,53 @@ from typing import Any, Dict, Optional
 from .config import Stage2Config, a1_continuous_control_kwh
 from .simulator import run_simulation
 from .search import SUCCESS_MODEL
+from .security import SecurityFloorPolicy, FLOOR_UNATTAINABLE_POLICIES
 
 # Declared result schema keys (stable contract for BlockSim consumers).
-RESULT_SCHEMA_VERSION = "stage3.1"
+RESULT_SCHEMA_VERSION = "stage3a.1"
+
+
+def _security_floor_from_blocksim(b: Dict[str, Any]) -> Optional[SecurityFloorPolicy]:
+    """S3A-8: build a VALIDATED immutable SecurityFloorPolicy from a BlockSim config mapping.
+
+    Returns ``None`` when no floor keys are present (keeping the disabled default).  Rejects
+    unsupported policy names and negative rates/counts/latencies/tolerances by raising
+    ``ValueError`` (from ``SecurityFloorPolicy.__post_init__``); an explicitly invalid config
+    therefore never yields a usable policy.
+    """
+    floor_keys = ("security_floor_enabled", "minimum_active_hash_rate",
+                  "minimum_active_miner_count", "activation_trigger_mode",
+                  "reserve_selection_policy", "maximum_activations_per_round",
+                  "activation_wake_latency", "floor_tolerance")
+    if not any(k in b and b[k] is not None for k in floor_keys):
+        return None
+    default = SecurityFloorPolicy()
+    kwargs: Dict[str, Any] = {"enabled": bool(b.get("security_floor_enabled", True))}
+    if b.get("minimum_active_hash_rate") is not None:
+        kwargs["minimum_active_hash_rate"] = float(b["minimum_active_hash_rate"])
+    if b.get("minimum_active_miner_count") is not None:
+        kwargs["minimum_active_miner_count"] = int(b["minimum_active_miner_count"])
+    if b.get("activation_trigger_mode") is not None:
+        kwargs["activation_trigger_mode"] = str(b["activation_trigger_mode"])
+    if b.get("reserve_selection_policy") is not None:
+        kwargs["reserve_selection_policy"] = str(b["reserve_selection_policy"])
+    if b.get("maximum_activations_per_round") is not None:
+        kwargs["maximum_activations_per_round"] = int(b["maximum_activations_per_round"])
+    if b.get("activation_wake_latency") is not None:
+        kwargs["activation_wake_latency"] = float(b["activation_wake_latency"])
+    if b.get("floor_tolerance") is not None:
+        kwargs["floor_tolerance"] = float(b["floor_tolerance"])
+    return SecurityFloorPolicy(**kwargs)                    # __post_init__ validates
 
 
 def stage2config_from_blocksim(blocksim_config: Optional[Dict[str, Any]] = None
                                ) -> Stage2Config:
-    """Map a BlockSim-style config mapping to a Stage2Config (unknown keys ignored)."""
+    """Map a BlockSim-style config mapping to a Stage2Config (unknown keys ignored).
+
+    S3A-8: this also maps and VALIDATES the Stage-3 security-floor / reserve-activation
+    configuration (``P_reserve``, the security-floor policy fields and
+    ``floor_unattainable_policy``) into an immutable, validated ``SecurityFloorPolicy``.
+    """
     b = dict(blocksim_config or {})
 
     def pick(*names, default=None):
@@ -45,12 +84,22 @@ def stage2config_from_blocksim(blocksim_config: Optional[Dict[str, Any]] = None
     val = pick("run_start_time")
     if val is not None:
         kwargs["run_start_time"] = float(val)
-    for key in ("P_hash", "P_listen", "P_wake", "P_offline", "nonce_domain_size",
-                "difficulty", "batch_size", "base_hash_rate", "reserve_fraction",
-                "template_seed", "wake_latency"):
+    for key in ("P_hash", "P_listen", "P_wake", "P_offline", "P_reserve",
+                "nonce_domain_size", "difficulty", "batch_size", "base_hash_rate",
+                "reserve_fraction", "template_seed", "wake_latency"):
         if key in b and b[key] is not None:
             cur = getattr(Stage2Config, key, None)
             kwargs[key] = type(cur)(b[key]) if isinstance(cur, (int, float)) else b[key]
+    # S3A-8: floor-unattainable policy (validated against the declared vocabulary).
+    if b.get("floor_unattainable_policy") is not None:
+        fup = str(b["floor_unattainable_policy"])
+        if fup not in FLOOR_UNATTAINABLE_POLICIES:
+            raise ValueError(f"unsupported floor_unattainable_policy: {fup!r}")
+        kwargs["floor_unattainable_policy"] = fup
+    # S3A-8: the validated immutable security-floor policy.
+    pol = _security_floor_from_blocksim(b)
+    if pol is not None:
+        kwargs["security_floor"] = pol
     return Stage2Config(**kwargs)
 
 

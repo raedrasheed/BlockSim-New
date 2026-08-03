@@ -7,11 +7,17 @@ reassignment and may increase energy.
 """
 from __future__ import annotations
 
+import pytest
+
 from Models.PoCol.stage2 import (Stage2Config, SecurityFloorPolicy, run_simulation,
                                   RunInitialise, RoundContext, MinerSearchState, EventRef,
                                   compute_h_effective, partition_primary_and_reserve,
-                                  SeatReserveActivation, ReserveMinerRecord, RangeSlice,
-                                  SecurityFloorObservation, target_for_difficulty,
+                                  SeatReserveActivation, SeatReserveActivationTransaction,
+                                  ReserveMinerRecord, RangeSlice, SecurityFloorObservation,
+                                  target_for_difficulty, EvaluateSecurityFloor,
+                                  TERMINAL_RESERVE_STATUSES, TERMINAL_REQUEST_STATUSES,
+                                  FULL_DOMAIN_EXHAUSTED_NO_BLOCK,
+                                  ROUND_CLOSED_WITH_UNUSED_RESERVE_DOMAIN,
                                   ACTIVATED_RESERVE_ASSIGNMENT, PRIMARY_ASSIGNMENT)
 from Models.PoCol.stage2 import run_pocol_stage2
 from Models.PoCol.stage2.security import select_reserves_to_cover
@@ -67,7 +73,8 @@ def test_s3_03_waking_reserve_not_counted():
     st.active_start = 0.0
     rc.search_states["P"] = st
     rc.assignments["A"] = {"MinerID": "P", "AssignmentID": "A", "assignment_version": 1,
-                           "range": (0, 50), "coverage_state": "OPEN"}
+                           "range": (0, 50), "RoundID": "round-1",
+                           "TemplateID": "tpl-round-1", "coverage_state": "OPEN"}
     run.create_miner("R", 0.0, state="WAKING")             # reserve mid-wake, no search state
     h, cnt, ids = compute_h_effective(run, rc)
     assert h == 100.0 and cnt == 1 and "R" not in ids      # WAKING reserve excluded
@@ -322,11 +329,11 @@ def test_s3_18_full_domain_no_block_includes_reserve_slices_once():
 
 # ---------------------------------------------------------------- S3 adapter schema
 def test_s3_adapter_schema_stage3_fields():
-    """The adapter schema is stage3.1 and carries the declared Stage-3 security fields,
+    """The adapter schema is stage3a.1 and carries the declared Stage-3 security fields,
     with continuous_all_active_control_kwh kept as an accounting reference (S3 results)."""
     out = run_pocol_stage2({"num_miners": 6, "horizon_T": 150.0, "nonce_domain_size": 900,
                             "reserve_fraction": 0.34}, include_matched_experiment=False)
-    assert out["schema_version"] == "stage3.1"
+    assert out["schema_version"] == "stage3a.1"
     for key in ("security_floor_enabled", "configured_minimum_active_hash_rate",
                 "minimum_active_miner_count", "security_floor_observation_count",
                 "breach_count", "reserve_activation_decision_count",
@@ -338,3 +345,293 @@ def test_s3_adapter_schema_stage3_fields():
         assert key in out
     assert "continuous_all_active_control_kwh" in out         # accounting reference, kept
     assert "matched_control_kwh" not in out                   # never a matched saving basis
+
+
+# ================================================================ Stage-3A corrections
+def _live_assignment(mid, aid, ver, rng, rid="round-1", tid="tpl-round-1"):
+    return {"MinerID": mid, "AssignmentID": aid, "assignment_version": ver, "range": rng,
+            "RoundID": rid, "TemplateID": tid, "coverage_state": "OPEN"}
+
+
+def _seated_activation(min_rate=250.0):
+    """Seat ONE real reserve activation via EvaluateSecurityFloor (full obs->decision->request
+    chain) and return ``(run, rc, req, start_ref)`` for the identity/lifecycle tests."""
+    run = RunInitialise(floor_cfg(min_rate))
+    rc = RoundContext("round-1", run, round_state="SOLUTION_PROPAGATION",
+                      TemplateID_committed="tpl-round-1")
+    run.current_round_context = rc
+    rc.search_states = {}
+    eq = run.event_queue
+    eq.current_event_time = 5.0
+    eq.current_delta_cycle = 0
+    eq.current_microphase = "RANGE_EXHAUST_ADJUDICATE"
+    eq.current_event_seq = 1
+    eq.current_event_ref = EventRef("ORDINARY_EVENT", "RangeExhaustEvent", 5.0, 0,
+                                    "RANGE_EXHAUST_ADJUDICATE", 1)
+    run.create_miner("M002", 0.0, state="RESERVE")
+    run.reserve_records[("round-1", "M002")] = ReserveMinerRecord(
+        "M002", "round-1", "tpl-round-1", 300.0, "AVAILABLE", 0)
+    sl = RangeSlice("RS-round-1-0", ACTIVATED_RESERVE_ASSIGNMENT, 200, 300)
+    run.reserve_slices["round-1"] = [sl]
+    run.reserve_slice_by_id["RS-round-1-0"] = sl
+    EvaluateSecurityFloor(run, rc, 5.0, "range_exhaust")
+    req = next(iter(run.activation_requests.values()))
+    return run, rc, req, req.start_event_ref
+
+
+# ---------------------------------------------------------------- S3A-01
+def test_s3a_01_active_hashing_missing_assignment_excluded():
+    """An ACTIVE_HASHING miner with a search state but NO assignment record is excluded from
+    H_effective (the missing-assignment-as-current fallback is removed)."""
+    run = RunInitialise(floor_cfg(250.0))
+    rc = RoundContext("round-1", run, round_state="SOLUTION_PROPAGATION",
+                      TemplateID_committed="tpl-round-1")
+    run.current_round_context = rc
+    rc.search_states = {}
+    run.create_miner("P", 0.0, state="ACTIVE_HASHING")
+    stp = MinerSearchState("P", "A", 1, 100.0, 0, 50, 21.5, 2.15)
+    stp.active_start = 0.0
+    rc.search_states["P"] = stp
+    rc.assignments["A"] = _live_assignment("P", "A", 1, (0, 50))
+    # Q is ACTIVE_HASHING with a search state but its assignment record is MISSING.
+    run.create_miner("Q", 0.0, state="ACTIVE_HASHING")
+    stq = MinerSearchState("Q", "AQ", 1, 200.0, 50, 100, 21.5, 2.15)
+    stq.active_start = 0.0
+    rc.search_states["Q"] = stq                              # "AQ" deliberately absent
+    h, cnt, ids = compute_h_effective(run, rc)
+    assert h == 100.0 and cnt == 1 and "Q" not in ids       # no fallback: Q excluded
+    rc.assignments["AQ"] = _live_assignment("Q", "AQ", 1, (50, 100))
+    h2, cnt2, ids2 = compute_h_effective(run, rc)
+    assert h2 == 300.0 and cnt2 == 2 and "Q" in ids2        # a live assignment now counts
+
+
+# ---------------------------------------------------------------- S3A-02
+def test_s3a_02_sequential_wakes_observe_and_measure_initial_interval():
+    """Sequential primary WakeCompleteEvents create observations at each capacity change and
+    the initial below-floor interval (round start -> primaries active) is measured."""
+    run = run_simulation(floor_cfg(250.0, num_miners=4, reserve_fraction=0.5))
+    reasons = [o.observation_reason for o in run.security_observations]
+    assert "participants_prepared" in reasons               # observed at round start
+    assert reasons.count("primary_wake_complete") >= 2       # one observation per primary wake
+    assert run.security_stats["early_wake_below_floor_duration"] > 0
+    r1 = [o for o in run.security_observations if o.RoundID == "round-1"]
+    prep = next(o for o in r1 if o.observation_reason == "participants_prepared")
+    assert prep.breached and prep.effective_active_hash_rate == 0.0   # real first breach at start
+
+
+# ---------------------------------------------------------------- S3A-03
+def test_s3a_03_observation_key_replay_idempotent():
+    """Replaying one SecurityFloorObservationKey creates no duplicate observation, decision or
+    activation and advances no counter."""
+    run = RunInitialise(floor_cfg(250.0))
+    rc = RoundContext("round-1", run, round_state="SOLUTION_PROPAGATION",
+                      TemplateID_committed="tpl-round-1")
+    run.current_round_context = rc
+    rc.search_states = {}
+    eq = run.event_queue
+    eq.current_event_time = 5.0
+    eq.current_delta_cycle = 0
+    eq.current_microphase = "RANGE_EXHAUST_ADJUDICATE"
+    eq.current_event_seq = 1
+    eq.current_event_ref = EventRef("ORDINARY_EVENT", "RangeExhaustEvent", 5.0, 0,
+                                    "RANGE_EXHAUST_ADJUDICATE", 1)
+    run.reserve_records[("round-1", "M002")] = ReserveMinerRecord(
+        "M002", "round-1", "tpl-round-1", 300.0, "AVAILABLE", 0)
+    sl = RangeSlice("RS-round-1-0", ACTIVATED_RESERVE_ASSIGNMENT, 200, 300)
+    run.reserve_slices["round-1"] = [sl]
+    run.reserve_slice_by_id["RS-round-1-0"] = sl
+    EvaluateSecurityFloor(run, rc, 5.0, "range_exhaust")     # first observation: seats one
+    obs0 = run.security_stats["observation_count"]
+    seated0 = run.security_stats["activations_seated"]
+    dec0 = run.security_stats["decision_count"]
+    assert obs0 == 1 and seated0 == 1 and dec0 == 1
+    EvaluateSecurityFloor(run, rc, 5.0, "range_exhaust")     # exact replay: same key
+    assert run.security_stats["observation_count"] == obs0
+    assert run.security_stats["activations_seated"] == seated0
+    assert run.security_stats["decision_count"] == dec0
+    assert run.security_stats["observation_replay_count"] == 1
+
+
+# ---------------------------------------------------------------- S3A-04
+def test_s3a_04_minimum_cardinality_selects_single_high_rate():
+    """Rates [10, 100] with need 90 select ONLY the 100-rate reserve (minimum cardinality)."""
+    r10 = ReserveMinerRecord("M-lo", "round-1", "tpl", 10.0, "AVAILABLE", 0)
+    r100 = ReserveMinerRecord("M-hi", "round-1", "tpl", 100.0, "AVAILABLE", 1)
+    chosen = select_reserves_to_cover([r10, r100], 90.0, 10)
+    assert [r.MinerID for r in chosen] == ["M-hi"] and len(chosen) == 1
+    # cardinality is established BEFORE priority tie-breaking: even when the low-rate reserve
+    # has the lower activation priority, the single 100-rate reserve is still selected.
+    r10b = ReserveMinerRecord("M-lo", "round-1", "tpl", 10.0, "AVAILABLE", 0)
+    r100b = ReserveMinerRecord("M-hi", "round-1", "tpl", 100.0, "AVAILABLE", 9)
+    chosen2 = select_reserves_to_cover([r10b, r100b], 90.0, 10)
+    assert [r.MinerID for r in chosen2] == ["M-hi"] and len(chosen2) == 1
+
+
+# ---------------------------------------------------------------- S3A-05
+def test_s3a_05_start_seat_failure_rolls_back():
+    """A failed StartEvent seat rolls back the slice claim, reserve status, request and
+    counters ALL-OR-NONE."""
+    run = RunInitialise(floor_cfg(250.0))
+    rc = RoundContext("round-1", run, round_state="SOLUTION_PROPAGATION",
+                      TemplateID_committed="tpl-round-1")
+    run.current_round_context = rc
+    eq = run.event_queue
+    eq.current_event_time = 5.0
+    eq.current_delta_cycle = 0
+    eq.current_microphase = "RANGE_EXHAUST_ADJUDICATE"
+    eq.current_event_seq = 1
+    eq.current_event_ref = EventRef("ORDINARY_EVENT", "RangeExhaustEvent", 5.0, 0,
+                                    "RANGE_EXHAUST_ADJUDICATE", 1)
+    rr = ReserveMinerRecord("M002", "round-1", "tpl-round-1", 300.0, "AVAILABLE", 0)
+    run.reserve_records[("round-1", "M002")] = rr
+    sl = RangeSlice("RS-round-1-0", ACTIVATED_RESERVE_ASSIGNMENT, 200, 300)
+    run.reserve_slices["round-1"] = [sl]
+    run.reserve_slice_by_id["RS-round-1-0"] = sl
+    obs = SecurityFloorObservation(("R", "OBS", 1), "round-1", "tpl-round-1", 5.0,
+                                   "range_exhaust", 0.0, 0, 250.0, None, 250.0, 0, True)
+    run.force_activation_start_seat_failure = True
+    res = SeatReserveActivationTransaction(run, rc, rr, sl, obs, ("R", "DEC", 1))
+    assert res.kind == "reserve_activation_seat_failed"
+    assert sl.status == "UNCLAIMED" and sl.claimed_by is None
+    assert rr.reserve_status == "AVAILABLE" and rr.activation_request_id is None
+    assert run.security_stats["activations_seated"] == 0
+    assert run.security_stats["activation_seat_rollback_count"] == 1
+    assert not run.activation_requests                       # no request committed
+
+
+# ---------------------------------------------------------------- S3A-06
+def test_s3a_06_complete_seat_failure_no_stranded_waking():
+    """A failed CompleteEvent seat never leaves a WAKING miner without a controller: the
+    request/reserve are terminalised, the slice restored, and the miner returns to idle."""
+    run, rc, req, start_ref = _seated_activation()
+    eq = run.event_queue
+    rec = eq.queued_event_registry[start_ref]
+    run.force_activation_complete_seat_failure = True
+    eq.current_event_ref = start_ref
+    eq.current_event_time = start_ref.event_time
+    res = _handle_reserve_activation_start(run, rec.immutable_payload, rec.dispatch_envelope)
+    assert res.kind == "reserve_activation_start_complete_seat_failed"
+    assert run.miners["M002"].state == "LOW_POWER_LISTEN"    # NOT stranded WAKING
+    assert run.reserve_records[("round-1", "M002")].reserve_status == "CANCELLED"
+    assert req.status == "FAILED"
+    assert run.reserve_slice_by_id["RS-round-1-0"].status == "UNCLAIMED"   # slice restored
+    assert run.security_stats["activation_complete_seat_failure_count"] == 1
+
+
+# ---------------------------------------------------------------- S3A-07
+def test_s3a_07_tampered_identity_no_effect():
+    """A tampered request / observation / decision id, round-state version or EventRef makes
+    the activation event perform NO effect; the untampered event is the control."""
+    run, rc, req, start_ref = _seated_activation()
+    eq = run.event_queue
+    good = dict(eq.queued_event_registry[start_ref].immutable_payload)
+    eq.current_event_ref = start_ref
+    eq.current_event_time = start_ref.event_time
+
+    def start(**over):
+        p = dict(good)
+        p.update(over)
+        return _handle_reserve_activation_start(run, p, {})
+
+    assert start(ReserveActivationRequestID=("x",)).kind == "reserve_activation_start_no_effect"
+    assert start(SecurityFloorObservationID=("x",)).kind == "reserve_activation_start_no_effect"
+    assert start(ReserveActivationDecisionID=("x",)).kind == "reserve_activation_start_no_effect"
+    assert start(expected_round_state_version=999).kind == "reserve_activation_start_no_effect"
+    # tampered EventRef: the current ref does not match the recorded start ref.
+    eq.current_event_ref = EventRef("ORDINARY_EVENT", "ReserveActivationStartEvent",
+                                    start_ref.event_time, 0, "RESERVE_ACTIVATION_START", 99999)
+    assert _handle_reserve_activation_start(run, good, {}).kind \
+        == "reserve_activation_start_no_effect"
+    # nothing above mutated state: still SEATED / ACTIVATION_PENDING.
+    assert req.status == "SEATED"
+    assert run.reserve_records[("round-1", "M002")].reserve_status == "ACTIVATION_PENDING"
+    # control: the untampered event with the correct ref DOES take effect.
+    eq.current_event_ref = start_ref
+    assert _handle_reserve_activation_start(run, good, {}).kind == "reserve_activation_started"
+
+
+# ---------------------------------------------------------------- S3A-08
+def test_s3a_08_completed_request_has_both_event_refs():
+    """A completed activation request reaches COMPLETED with both EventRefs and timestamps."""
+    run = run_simulation(floor_cfg(250.0))
+    completed = [r for r in run.activation_requests.values() if r.status == "COMPLETED"]
+    assert completed
+    for r in completed:
+        assert r.start_event_ref is not None and r.complete_event_ref is not None
+        assert r.started_at is not None and r.completed_at is not None
+
+
+# ---------------------------------------------------------------- S3A-09
+def test_s3a_09_closure_terminalises_all_records_and_requests():
+    """Round closure leaves every reserve record and activation request terminal — no
+    closed-round record is ACTIVE or AVAILABLE."""
+    run = run_simulation(floor_cfg(250.0))
+    assert run.reserve_records
+    assert all(rr.reserve_status in TERMINAL_RESERVE_STATUSES
+               for rr in run.reserve_records.values())
+    assert all(req.status in TERMINAL_REQUEST_STATUSES
+               for req in run.activation_requests.values())
+    assert not any(rr.reserve_status in ("ACTIVE", "AVAILABLE", "ACTIVATION_PENDING", "WAKING")
+                   for rr in run.reserve_records.values())
+
+
+# ---------------------------------------------------------------- S3A-10
+def test_s3a_10_floor_zero_unused_reserve_domain_not_full_domain():
+    """Floor == 0 with UNCLAIMED reserve slices closes with the explicit unused-reserve-domain
+    disposition and is NEVER labelled full-domain exhaustion."""
+    run = run_simulation(floor_cfg(0.0, D=400))
+    assert run.security_stats["unused_reserve_domain_count"] > 0
+    assert run.security_stats["full_domain_exhausted_count"] == 0
+    assert any(o.kind == "round_aborted"
+               and o.data.get("reason") == ROUND_CLOSED_WITH_UNUSED_RESERVE_DOMAIN
+               for o in run.log)
+    # the reserve domain was NOT searched.
+    assert not any(rec.assignment_kind == ACTIVATED_RESERVE_ASSIGNMENT
+                   for rec in run.evaluation_ledger)
+    assert all(sl.status == "UNUSED_AT_ROUND_CLOSE" for sl in run.reserve_slices["round-1"])
+
+
+# ---------------------------------------------------------------- S3A-11
+def test_s3a_11_true_full_domain_exhaustion_covers_all_once():
+    """A true full-domain no-block exhaustion searches every primary AND reserve nonce exactly
+    once and closes with the full-domain disposition (all reserve slices EXHAUSTED)."""
+    run = run_simulation(floor_cfg(250.0, D=400))
+    assert run.security_stats["full_domain_exhausted_count"] > 0
+    assert any(o.kind == "round_aborted"
+               and o.data.get("reason") == FULL_DOMAIN_EXHAUSTED_NO_BLOCK for o in run.log)
+    r1 = [rec for rec in run.evaluation_ledger if rec.RoundID == "round-1"]
+    covered = []
+    for rec in r1:
+        covered.extend(rec.nonces())
+    assert sorted(covered) == list(range(400))               # every nonce exactly once
+    assert all(sl.status == "EXHAUSTED" for sl in run.reserve_slices["round-1"])
+    assert {rec.assignment_kind for rec in r1} == {PRIMARY_ASSIGNMENT,
+                                                   ACTIVATED_RESERVE_ASSIGNMENT}
+
+
+# ---------------------------------------------------------------- S3A-12
+def test_s3a_12_adapter_enables_floor_and_activates_from_config():
+    """The BlockSim adapter enables the floor and executes reserve activation from a config
+    dictionary, and rejects unsupported policy names and negative values."""
+    out = run_pocol_stage2({
+        "num_miners": 4, "reserve_fraction": 0.5, "nonce_domain_size": 400,
+        "difficulty": _ZERO_SOLUTION, "batch_size": 25, "horizon_T": 300.0,
+        "P_reserve": 2.15, "security_floor_enabled": True,
+        "minimum_active_hash_rate": 250.0, "activation_wake_latency": 1.0,
+        "reserve_selection_policy": "MINIMUM_CARDINALITY",
+        "floor_unattainable_policy": "CONTINUE_DEGRADED",
+    }, include_matched_experiment=False)
+    assert out["security_floor_enabled"] is True
+    assert out["configured_minimum_active_hash_rate"] == 250.0
+    assert out["security_floor_observation_count"] >= 1
+    assert out["reserve_activations_seated"] >= 1
+    assert out["reserve_activations_completed"] >= 1
+    # validation: unsupported policy names and negative rates/latencies are rejected.
+    with pytest.raises(ValueError):
+        run_pocol_stage2({"security_floor_enabled": True,
+                          "reserve_selection_policy": "NONSENSE"})
+    with pytest.raises(ValueError):
+        run_pocol_stage2({"security_floor_enabled": True, "minimum_active_hash_rate": -5})
+    with pytest.raises(ValueError):
+        run_pocol_stage2({"security_floor_enabled": True,
+                          "floor_unattainable_policy": "EXPLODE"})

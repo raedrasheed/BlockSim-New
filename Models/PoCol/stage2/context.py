@@ -121,8 +121,9 @@ class RoundContext:
     # participants (assignments) of this round
     assignments: Dict[Any, Dict[str, Any]] = field(default_factory=dict)
     participant_setup_seated: bool = False
-    # Stage-3 per-round security-floor breach tracking (S3-4/S3-13).
+    # Stage-3 per-round security-floor breach tracking (S3-4/S3-13/S3A-2).
     below_floor_since: Optional[float] = None
+    below_floor_open_reason: Optional[str] = None
     current_breach_id: Any = None
 
     def transition(self, new_state: str) -> None:
@@ -186,12 +187,26 @@ class RunContext:
         self.activations_per_round: Dict[Any, int] = {}  # RoundID -> activations seated
         self.observation_seq: int = 0
         self.decision_seq: int = 0
+        # S3A-1/S3A-2: a capacity-state version that bumps on every miner state transition
+        # (the only thing that changes H_effective's composition), used in the immutable
+        # SecurityFloorObservationKey so a replay at unchanged capacity is idempotent.
+        self.capacity_state_version: int = 0
+        # S3A-2: observation replay registry keyed by the immutable SecurityFloorObservationKey.
+        self.observation_by_key: Dict[Any, Any] = {}
         self.security_stats: Dict[str, Any] = {
             "observation_count": 0, "breach_observation_count": 0, "distinct_breach_count": 0,
             "decision_count": 0, "activations_seated": 0, "activations_completed": 0,
             "activations_cancelled": 0, "floor_unattainable_count": 0,
             "total_duration_below_floor": 0.0, "max_hash_rate_deficit": 0.0,
             "activated_reserve_evaluation_count": 0,
+            # S3A-2/S3A-4/S3A-7 correction metrics.
+            "observation_replay_count": 0,
+            "early_wake_below_floor_duration": 0.0,
+            "activation_seat_rollback_count": 0,
+            "activation_complete_seat_failure_count": 0,
+            "partial_restoration_count": 0,
+            "full_domain_exhausted_count": 0,
+            "unused_reserve_domain_count": 0,
         }
         # audit log
         self.log: List[Outcome] = []
@@ -286,6 +301,10 @@ class RunContext:
         old = m.state
         m.state = new_state
         m.state_since = at_time
+        # S3A-1/S3A-2: a miner state change is the only thing that alters H_effective's
+        # composition — bump the capacity-state version so the next observation gets a fresh
+        # SecurityFloorObservationKey (replay of an unchanged capacity stays idempotent).
+        self.capacity_state_version += 1
         return Outcome("miner_state_transition_applied", MinerID=MinerID,
                        old_state=old, new_state=new_state)
 

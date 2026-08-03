@@ -30,7 +30,11 @@ from .security import (SecurityFloorObservation, ReserveActivationDecision,
                        ReserveActivationRequest, ReserveMinerRecord,
                        compute_h_effective, partition_primary_and_reserve,
                        select_reserves_to_cover, PRIMARY_ASSIGNMENT,
-                       ACTIVATED_RESERVE_ASSIGNMENT)
+                       ACTIVATED_RESERVE_ASSIGNMENT, TERMINAL_RESERVE_STATUSES,
+                       TERMINAL_REQUEST_STATUSES, FULL_DOMAIN_EXHAUSTED_NO_BLOCK,
+                       ROUND_CLOSED_WITH_UNUSED_RESERVE_DOMAIN)
+
+_TERMINAL_ROUND = ("ROUND_ACCEPTED", "ROUND_ABORTED")
 
 # S2B-2: declared causal-accounting rounding tolerance (nonces) for the searched-count
 # vs elapsed-hash-time bound (floats are exact to <1 nonce, so 1 is a safe integer slack).
@@ -287,6 +291,7 @@ def _handle_prepare_participants(run_ctx: RunContext, payload: Dict[str, Any],
         rc.search_states[mid] = st
         rc.assignments[aid] = {"MinerID": mid, "AssignmentID": aid,
                                "assignment_version": version, "range": (start, end),
+                               "RoundID": rc.RoundID, "TemplateID": rc.TemplateID_committed,
                                "coverage_state": "OPEN"}
         run_ctx.search_assignment_kind[(rc.RoundID, mid)] = PRIMARY_ASSIGNMENT
         run_ctx.apply_miner_state_transition(mid, "WAKING", t)
@@ -301,6 +306,13 @@ def _handle_prepare_participants(run_ctx: RunContext, payload: Dict[str, Any],
     run_ctx.round_participants[rc.RoundID] = set(participants)
     run_ctx.round_ranges[rc.RoundID] = {mid: ranges[mid] for mid in participants}
     rc.transition("SOLUTION_PROPAGATION")
+    # S3A-2: take the FIRST security-floor observation as soon as the round begins expecting
+    # capacity (all primaries WAKING, H_effective == 0) — do NOT wait for every primary to
+    # finish WAKING.  Pending WAKING-primary capacity is accounted, so this observes (and
+    # opens) the real initial below-floor interval without spuriously seating reserves.
+    if pol.enabled:
+        # measure-only at round start (no seat/abort until time advances past the ramp).
+        EvaluateSecurityFloor(run_ctx, rc, t, "participants_prepared", decide=False)
     return Outcome("participant_set_prepared", participants=len(participants),
                    nonce_domain_size=cfg.nonce_domain_size,
                    reserve_slices=len(run_ctx.reserve_slices.get(rc.RoundID, [])))
@@ -333,14 +345,14 @@ def _handle_wake_complete(run_ctx: RunContext, payload: Dict[str, Any],
     r = _seat_hash_work(run_ctx, rc, st, at_time=t)
     if r.kind == "scheduled":                              # S2B-7 SCI-3 zero-work justification
         run_ctx.round_first_completion[(rc.RoundID, mid)] = r.event_ref.event_time
-    # S3-4: once ALL primary participants are active, evaluate the security floor once at
-    # full primary capacity (avoids spurious mid-wake breaches while others are WAKING).
+    # S3A-2: observe the floor at EVERY primary WakeCompleteEvent (a genuine capacity change),
+    # never waiting for the all-primary-active point.  Pending WAKING-primary capacity is
+    # accounted so the ramp is measured as a real below-floor interval yet the imminent wakes
+    # are not over-activated against.
     if run_ctx.config.security_floor.enabled:
-        participants = run_ctx.round_participants.get(rc.RoundID, set())
-        if participants and all(run_ctx.miners[p].state != "WAKING" for p in participants):
-            dec = EvaluateSecurityFloor(run_ctx, rc, t, "all_primary_active")
-            if isinstance(dec, Outcome):     # ABORT_ROUND floor-unattainable closed the round
-                return dec
+        dec = EvaluateSecurityFloor(run_ctx, rc, t, "primary_wake_complete")
+        if isinstance(dec, Outcome):     # ABORT_ROUND floor-unattainable closed the round
+            return dec
     return Outcome("wake_completed", MinerID=mid)
 
 
@@ -512,14 +524,21 @@ def _handle_range_exhaust(run_ctx: RunContext, payload: Dict[str, Any],
 
 
 def _maybe_terminate_no_block(run_ctx: RunContext, rc: RoundContext) -> Optional[Outcome]:
-    """No-block round termination that accounts for in-flight reserve activations (S3-2).
+    """No-block round termination with CORRECT reserve-domain exhaustion semantics (S3A-7).
 
     Terminates only when there is no live search work, no block was found, and no reserve
-    activation is pending or waking (so no further capacity can arrive).  Full-domain
-    exhaustion (all primary ranges + all reserve slices searched) is a special case of this.
+    activation is pending or waking (so no further capacity can arrive).  It then classifies
+    the no-block closure honestly:
+
+    * ``FULL_DOMAIN_EXHAUSTED_NO_BLOCK`` — every primary AND reserve slice was searched (all
+      reserve slices EXHAUSTED); a genuine whole-domain exhaustion claim.
+    * ``ROUND_CLOSED_WITH_UNUSED_RESERVE_DOMAIN`` — reserve slices are still UNCLAIMED (the
+      floor did not require them, e.g. ``min_rate == 0``); the reserve domain is NOT searched,
+      so this is NEVER labelled a full-domain exhaustion.
+    * ``round_exhausted_no_block`` — the accepted Stage-2B path when the floor is disabled and
+      there are no reserve slices at all.
     """
-    if rc.round_state in ("ROUND_ACCEPTED", "ROUND_ABORTED") or rc.block_accepted \
-            or rc.acceptance_seq > 0:
+    if rc.round_state in _TERMINAL_ROUND or rc.block_accepted or rc.acceptance_seq > 0:
         return None
     states = list(getattr(rc, "search_states", {}).values())
     if not states:
@@ -531,6 +550,20 @@ def _maybe_terminate_no_block(run_ctx: RunContext, rc: RoundContext) -> Optional
     for (rid, _mid), rr in run_ctx.reserve_records.items():
         if rid == rc.RoundID and rr.reserve_status in ("ACTIVATION_PENDING", "WAKING"):
             return None                                   # reserve capacity still incoming
+    slices = run_ctx.reserve_slices.get(rc.RoundID, [])
+    unclaimed = [sl for sl in slices if sl.status == "UNCLAIMED"]
+    if unclaimed:
+        # S3A-7: the reserve domain is NOT fully searched — never claim full-domain
+        # exhaustion.  The exhaustion observation just taken already gave the floor its
+        # chance to activate; reaching here with UNCLAIMED slices means the floor did not
+        # require them, so close with the explicit unused-reserve-domain disposition.
+        run_ctx.security_stats["unused_reserve_domain_count"] += 1
+        return RoundAbort(run_ctx, rc, reason=ROUND_CLOSED_WITH_UNUSED_RESERVE_DOMAIN,
+                          envelope={})
+    if slices:
+        # every primary AND reserve slice was evaluated: a true full-domain exhaustion.
+        run_ctx.security_stats["full_domain_exhausted_count"] += 1
+        return RoundAbort(run_ctx, rc, reason=FULL_DOMAIN_EXHAUSTED_NO_BLOCK, envelope={})
     return RoundAbort(run_ctx, rc, reason="round_exhausted_no_block", envelope={})
 
 
@@ -554,19 +587,69 @@ def _reserve_records_for(run_ctx: RunContext, rc: RoundContext) -> List[Any]:
     return [rr for (rid, _m), rr in run_ctx.reserve_records.items() if rid == rc.RoundID]
 
 
-def EvaluateSecurityFloor(run_ctx: RunContext, rc: RoundContext, observation_time: float,
-                          observation_reason: str) -> Optional[Outcome]:
-    """S3-4: the ONE authoritative security-floor observation + activation decision.
+def _pending_primary_capacity(run_ctx: RunContext, rc: RoundContext):
+    """S3A-2: primary miners still WAKING with a live current assignment.
 
-    Records a SecurityFloorObservation, tracks the duration below the floor, and — when
-    breached and the round is open — deterministically activates the minimum sufficient
-    reserve subset (S3-5).  Returns ``None`` normally, or a ``RoundAbort`` Outcome when the
-    configured floor-unattainable policy is ABORT_ROUND.  Idempotent for a satisfied floor.
+    They will imminently become ACTIVE_HASHING, so their capacity is counted only when
+    deciding whether to seat reserves — never in ``H_effective`` — so the WAKING ramp is a
+    real below-floor interval that is nonetheless not over-activated against.
+    """
+    rate = 0.0
+    count = 0
+    for mid, st in getattr(rc, "search_states", {}).items():
+        if st.completed:
+            continue
+        if run_ctx.search_assignment_kind.get((rc.RoundID, mid)) != PRIMARY_ASSIGNMENT:
+            continue
+        m = run_ctx.miners.get(mid)
+        if m is None or m.state != "WAKING":
+            continue
+        a = rc.assignments.get(st.AssignmentID)
+        if a is None or a.get("assignment_version") != st.assignment_version \
+                or a.get("RoundID") != rc.RoundID:
+            continue
+        rate += st.hash_rate
+        count += 1
+    return rate, count
+
+
+def _observation_key(run_ctx: RunContext, rc: RoundContext, trigger: Any) -> Any:
+    """S3A-2 immutable SecurityFloorObservationKey."""
+    trig = trigger if trigger is not None else getattr(run_ctx.event_queue,
+                                                       "current_event_ref", None)
+    return (rc.RoundID, rc.TemplateID_committed, trig, rc.state_version,
+            run_ctx.capacity_state_version)
+
+
+def EvaluateSecurityFloor(run_ctx: RunContext, rc: RoundContext, observation_time: float,
+                          observation_reason: str, trigger: Any = None,
+                          decide: bool = True) -> Optional[Outcome]:
+    """S3-4 / S3A-2..5: the ONE authoritative security-floor observation + activation decision.
+
+    Records a SecurityFloorObservation keyed by an immutable SecurityFloorObservationKey
+    (idempotent replay), measures the duration below the floor FROM THE REAL FIRST BREACH,
+    and — when breached and the round is open — deterministically activates the true
+    minimum-cardinality reserve subset (S3A-3) via an all-or-none seating transaction
+    (S3A-4).  Returns ``None`` normally, or a ``RoundAbort`` Outcome when the configured
+    floor-unattainable policy is ABORT_ROUND.
+
+    ``decide=False`` is a MEASURE-ONLY observation (used at ``participants_prepared``, when
+    the round has not yet advanced in time): it records the observation and opens the real
+    initial below-floor interval, but seats no reserve and takes no abort — every actionable
+    decision is deferred to a capacity-change point (wake-complete onward) where simulation
+    time has advanced, so a round is never terminated at its own start time.
     """
     cfg = run_ctx.config
     pol = cfg.security_floor
     if not pol.enabled:
         return None
+    # S3A-2: idempotent replay — the same key returns the existing observation/decision and
+    # seats nothing new (no counters advance, no second activation).
+    key = _observation_key(run_ctx, rc, trigger)
+    if key in run_ctx.observation_by_key:
+        run_ctx.security_stats["observation_replay_count"] += 1
+        return None
+
     h_eff, active_count, _ = compute_h_effective(run_ctx, rc)
     inflight = 0.0
     inflight_count = 0
@@ -574,12 +657,15 @@ def EvaluateSecurityFloor(run_ctx: RunContext, rc: RoundContext, observation_tim
         if rr.reserve_status in ("ACTIVATION_PENDING", "WAKING"):
             inflight += rr.hash_rate
             inflight_count += 1
+    pending_rate, pending_count = _pending_primary_capacity(run_ctx, rc)
     min_rate = pol.minimum_active_hash_rate
     min_count = pol.minimum_active_miner_count
     hash_deficit = max(0.0, min_rate - h_eff)
     count_deficit = 0 if min_count is None else max(0, min_count - active_count)
     breached = (h_eff + pol.floor_tolerance < min_rate) \
         or (min_count is not None and active_count < min_count)
+    round_terminal = rc.round_state in _TERMINAL_ROUND
+
     run_ctx.observation_seq += 1
     obs = SecurityFloorObservation(
         ObservationID=(run_ctx.RunID, "OBS", run_ctx.observation_seq), RoundID=rc.RoundID,
@@ -587,36 +673,53 @@ def EvaluateSecurityFloor(run_ctx: RunContext, rc: RoundContext, observation_tim
         observation_reason=observation_reason, effective_active_hash_rate=h_eff,
         active_miner_count=active_count, minimum_required_hash_rate=min_rate,
         minimum_required_miner_count=min_count, hash_rate_deficit=hash_deficit,
-        miner_count_deficit=count_deficit, breached=breached)
+        miner_count_deficit=count_deficit, breached=breached, observation_key=key)
+    run_ctx.observation_by_key[key] = obs
     run_ctx.security_observations.append(obs)
     run_ctx.security_stats["observation_count"] += 1
-    # S3-13: duration below the floor (breach detection -> restoration/close).
+
+    # S3-13 / S3A-2: measure the duration below the floor from the FIRST breached observation.
     if breached:
         run_ctx.security_stats["breach_observation_count"] += 1
         if hash_deficit > run_ctx.security_stats["max_hash_rate_deficit"]:
             run_ctx.security_stats["max_hash_rate_deficit"] = hash_deficit
-        if rc.below_floor_since is None:
+        # a terminal-round observation never OPENS a breach interval (the round is over);
+        # an already-open interval is closed by _close_security_state at closure.
+        if rc.below_floor_since is None and not round_terminal:
             rc.below_floor_since = observation_time
+            rc.below_floor_open_reason = observation_reason
             rc.current_breach_id = obs.ObservationID
             run_ctx.security_stats["distinct_breach_count"] += 1
     else:
         if rc.below_floor_since is not None:
-            run_ctx.security_stats["total_duration_below_floor"] += \
-                observation_time - rc.below_floor_since
+            dur = observation_time - rc.below_floor_since
+            run_ctx.security_stats["total_duration_below_floor"] += dur
+            if rc.below_floor_open_reason == "participants_prepared":
+                run_ctx.security_stats["early_wake_below_floor_duration"] += dur
             rc.below_floor_since = None
+            rc.below_floor_open_reason = None
             rc.current_breach_id = None
         return None
-    if rc.round_state in ("ROUND_ACCEPTED", "ROUND_ABORTED"):
+
+    if round_terminal:
         _record_decision(run_ctx, obs, [], [], h_eff + inflight, hash_deficit,
                          "ROUND_ALREADY_TERMINAL")
         return None
-    # remaining need beyond already in-flight activations (idempotence: don't over-activate).
-    need = min_rate - (h_eff + inflight)
-    need_count = 0 if min_count is None else max(
-        0, min_count - (active_count + inflight_count))
-    if need <= pol.floor_tolerance and need_count <= 0:
-        _record_decision(run_ctx, obs, [], [], h_eff + inflight, 0.0, "NO_ACTIVATION_REQUIRED")
+    if not decide:
+        # measure-only observation (round start): defer every activation/abort decision to a
+        # capacity-change point where simulation time has advanced.
         return None
+
+    # remaining need beyond in-flight reserve AND pending WAKING-primary capacity
+    # (idempotence: imminent wakes/activations already cover part of the deficit).
+    need = min_rate - (h_eff + inflight + pending_rate)
+    need_count = 0 if min_count is None else max(
+        0, min_count - (active_count + inflight_count + pending_count))
+    if need <= pol.floor_tolerance and need_count <= 0:
+        _record_decision(run_ctx, obs, [], [], h_eff + inflight + pending_rate, 0.0,
+                         "NO_ACTIVATION_REQUIRED")
+        return None
+
     seated_so_far = run_ctx.activations_per_round.get(rc.RoundID, 0)
     remaining = pol.maximum_activations_per_round - seated_so_far
     eligible = sorted([rr for rr in _reserve_records_for(run_ctx, rc)
@@ -624,48 +727,45 @@ def EvaluateSecurityFloor(run_ctx: RunContext, rc: RoundContext, observation_tim
                       key=lambda r: (r.activation_priority, str(r.MinerID)))
     unclaimed = [sl for sl in run_ctx.reserve_slices.get(rc.RoundID, [])
                  if sl.status == "UNCLAIMED"]
-    if remaining <= 0:
-        _record_decision(run_ctx, obs, [], [], h_eff + inflight, hash_deficit,
-                         "ACTIVATION_LIMIT_REACHED")
+    cap = min(len(eligible), len(unclaimed), max(0, remaining))
+    base = h_eff + inflight + pending_rate
+    if cap <= 0:
+        # nothing may be seated (limit reached, no eligible reserve, or no unclaimed slice).
+        _record_decision(run_ctx, obs, [], [], base, hash_deficit, "FLOOR_UNATTAINABLE")
         return _apply_floor_unattainable(run_ctx, rc, observation_time)
-    if not eligible or not unclaimed:
-        _record_decision(run_ctx, obs, [], [], h_eff + inflight, hash_deficit,
-                         "NO_ELIGIBLE_RESERVE")
-        return _apply_floor_unattainable(run_ctx, rc, observation_time)
-    cap = min(len(eligible), len(unclaimed), remaining)
-    seatable = eligible[:cap]
-    max_projected = h_eff + inflight + sum(r.hash_rate for r in seatable)
+
+    top_cap_rates = sorted((r.hash_rate for r in eligible), reverse=True)[:cap]
+    max_projected = base + sum(top_cap_rates)
     attainable = (max_projected + pol.floor_tolerance >= min_rate) \
-        and (min_count is None or (active_count + inflight_count + cap) >= min_count)
+        and (min_count is None
+             or (active_count + inflight_count + pending_count + cap) >= min_count)
     if attainable:
-        selected = select_reserves_to_cover(seatable, need, cap)
-        # extend for a miner-count floor if a hash-sufficient subset is too small.
-        while (min_count is not None
-               and (active_count + inflight_count + len(selected)) < min_count
-               and len(selected) < cap):
-            selected.append(seatable[len(selected)])
+        selected = select_reserves_to_cover(eligible, need, cap, need_count)
         slices = unclaimed[:len(selected)]
-        obs.activation_decision_id = None
-        projected = h_eff + inflight + sum(r.hash_rate for r in selected)
+        projected = base + sum(r.hash_rate for r in selected)
         dec = _record_decision(run_ctx, obs, [r.MinerID for r in selected],
                                [s.RangeSliceID for s in slices], projected,
                                max(0.0, min_rate - projected), "ACTIVATION_SEATED")
         for rr, sl in zip(selected, slices):
-            SeatReserveActivation(run_ctx, rc, rr, sl, obs, dec.DecisionID)
+            SeatReserveActivationTransaction(run_ctx, rc, rr, sl, obs, dec.DecisionID)
         return None
-    # cannot reach the floor with the reserves we may seat.
+
+    # the bounded pool cannot restore the floor this round.
     if cfg.floor_unattainable_policy == "ABORT_ROUND":
         _record_decision(run_ctx, obs, [], [], max_projected,
                          max(0.0, min_rate - max_projected), "FLOOR_UNATTAINABLE")
         return _apply_floor_unattainable(run_ctx, rc, observation_time)
-    # CONTINUE_DEGRADED: seat all we can (best effort) and keep the round executable.
-    projected = max_projected
+    # CONTINUE_DEGRADED: seat every reserve we legally can (PARTIAL_RESTORATION) and keep the
+    # round executable so the reserve domain is progressively searched.
+    seatable = eligible[:cap]
+    slices = unclaimed[:cap]
+    projected = base + sum(r.hash_rate for r in seatable)
     dec = _record_decision(run_ctx, obs, [r.MinerID for r in seatable],
-                           [s.RangeSliceID for s in unclaimed[:cap]], projected,
-                           max(0.0, min_rate - projected), "FLOOR_UNATTAINABLE")
-    run_ctx.security_stats["floor_unattainable_count"] += 1
-    for rr, sl in zip(seatable, unclaimed[:cap]):
-        SeatReserveActivation(run_ctx, rc, rr, sl, obs, dec.DecisionID)
+                           [s.RangeSliceID for s in slices], projected,
+                           max(0.0, min_rate - projected), "PARTIAL_RESTORATION")
+    run_ctx.security_stats["partial_restoration_count"] += 1
+    for rr, sl in zip(seatable, slices):
+        SeatReserveActivationTransaction(run_ctx, rc, rr, sl, obs, dec.DecisionID)
     return None
 
 
@@ -678,9 +778,17 @@ def _apply_floor_unattainable(run_ctx: RunContext, rc: RoundContext,
     return None   # CONTINUE_DEGRADED: keep the round executable; duration keeps accumulating.
 
 
-def SeatReserveActivation(run_ctx: RunContext, rc: RoundContext, rr: Any, sl: Any,
-                          obs: Any, decision_id: Any) -> Any:
-    """S3-6: seat a reserve activation idempotently on its immutable request identity."""
+def SeatReserveActivationTransaction(run_ctx: RunContext, rc: RoundContext, rr: Any, sl: Any,
+                                     obs: Any, decision_id: Any) -> Any:
+    """S3A-4: seat a reserve activation ALL-OR-NONE on its immutable request identity.
+
+    Idempotent replay of an exact request returns the existing request with no second
+    effect (S3-10).  The slice claim, reserve-status transition, request creation, StartEvent
+    scheduling, EventRef publication and activation-counter increment COMMIT TOGETHER; if
+    ``ScheduleEvent`` fails the slice is restored to UNCLAIMED, the reserve to AVAILABLE,
+    every request/slice/event field is cleared, the counter is NOT incremented, and a
+    ``reserve_activation_seat_failed`` Outcome is returned.
+    """
     if rr.activation_generation == 0:
         rr.activation_generation = 1
     req_id = ("RESERVE_ACTIVATION", rc.RoundID, rc.TemplateID_committed, obs.ObservationID,
@@ -690,6 +798,14 @@ def SeatReserveActivation(run_ctx: RunContext, rc: RoundContext, rr: Any, sl: An
         return existing
     eq = run_ctx.event_queue
     now = eq.current_event_time
+    # snapshot the pre-state so a failed seat rolls back to EXACTLY it.
+    prev_slice_status = sl.status
+    prev_slice_claimed_by = sl.claimed_by
+    prev_reserve_status = rr.reserve_status
+    prev_slice_id = rr.assigned_reserve_slice_id
+    prev_request_id = rr.activation_request_id
+    prev_event_ref = rr.activation_event_ref
+    # tentatively claim + mark pending.
     sl.status = "CLAIMED"
     sl.claimed_by = rr.MinerID
     rr.reserve_status = "ACTIVATION_PENDING"
@@ -701,25 +817,51 @@ def SeatReserveActivation(run_ctx: RunContext, rc: RoundContext, rr: Any, sl: An
                "ReserveSliceID": sl.RangeSliceID, "activation_generation": rr.activation_generation,
                "expected_reserve_status": "ACTIVATION_PENDING",
                "expected_round_state_version": rc.state_version}
-    r = ScheduleEvent(eq, rc, "ReserveActivationStartEvent", now, "RESERVE_ACTIVATION_START",
-                      payload, ordinary_dispatch_origin(eq))
-    ev = r.event_ref if r.kind == "scheduled" else None
+    if getattr(run_ctx, "force_activation_start_seat_failure", False):   # S3A-05 injection
+        r = Outcome("rejected_forced_activation_seat_failure")
+    else:
+        r = ScheduleEvent(eq, rc, "ReserveActivationStartEvent", now, "RESERVE_ACTIVATION_START",
+                          payload, ordinary_dispatch_origin(eq))
+    if r.kind != "scheduled":
+        # ROLLBACK: restore the pre-state exactly; commit nothing.
+        sl.status = prev_slice_status
+        sl.claimed_by = prev_slice_claimed_by
+        rr.reserve_status = prev_reserve_status
+        rr.assigned_reserve_slice_id = prev_slice_id
+        rr.activation_request_id = prev_request_id
+        rr.activation_event_ref = prev_event_ref
+        run_ctx.security_stats["activation_seat_rollback_count"] += 1
+        return Outcome("reserve_activation_seat_failed", reason=r, MinerID=rr.MinerID,
+                       ReserveSliceID=sl.RangeSliceID)
+    # COMMIT: publish the EventRef, create the SEATED request, advance the counter.
+    ev = r.event_ref
     rr.activation_event_ref = ev
     req = ReserveActivationRequest(
         ReserveActivationRequestID=req_id, RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed,
-        SecurityFloorBreachID=obs.ObservationID, MinerID=rr.MinerID, ReserveSliceID=sl.RangeSliceID,
-        activation_generation=rr.activation_generation, start_event_ref=ev,
-        disposition=Outcome("reserve_activation_seated"))
+        SecurityFloorBreachID=obs.ObservationID, DecisionID=decision_id, MinerID=rr.MinerID,
+        ReserveSliceID=sl.RangeSliceID, activation_generation=rr.activation_generation,
+        status="SEATED", start_event_ref=ev, disposition=Outcome("reserve_activation_seated"))
     run_ctx.activation_requests[req_id] = req
     run_ctx.activations_per_round[rc.RoundID] = run_ctx.activations_per_round.get(rc.RoundID, 0) + 1
     run_ctx.security_stats["activations_seated"] += 1
     return req
 
 
+# Backward-compatible alias for the exported seating entry point (S3-10 test / __init__).
+SeatReserveActivation = SeatReserveActivationTransaction
+
+
 def _verify_activation_identity(run_ctx: RunContext, rc: RoundContext, payload: Dict[str, Any],
-                                expected_status: str) -> Any:
-    """S3-6: full activation-event identity verification BEFORE any domain mutation."""
-    if rc is None or rc.round_state in ("ROUND_ACCEPTED", "ROUND_ABORTED"):
+                                expected_status: str, expected_request_status,
+                                lifecycle: str) -> Any:
+    """S3A-5: COMPLETE activation-event identity verification BEFORE any domain mutation.
+
+    Verifies the whole request -> observation -> decision chain, the reserve/slice binding,
+    the recorded start/complete EventRef, the expected reserve status, the expected round
+    state version, and the request lifecycle status.  A tampered request / observation /
+    decision id, state version or EventRef performs NO effect.
+    """
+    if rc is None or rc.round_state in _TERMINAL_ROUND:
         return Outcome("activation_no_effect", reason="round_terminal")
     if payload["RoundID_at_seat"] != rc.RoundID:
         return Outcome("activation_no_effect", reason="round_mismatch")   # S3-11 cross-round
@@ -729,51 +871,119 @@ def _verify_activation_identity(run_ctx: RunContext, rc: RoundContext, payload: 
     sl = run_ctx.reserve_slice_by_id.get(payload["ReserveSliceID"])
     if rr is None or sl is None:
         return Outcome("activation_no_effect", reason="unknown_reserve_or_slice")
+    # the request must exist and its immutable identity must match the payload exactly.
+    req = run_ctx.activation_requests.get(payload["ReserveActivationRequestID"])
+    if req is None:
+        return Outcome("activation_no_effect", reason="unknown_request")
+    if req.RoundID != rc.RoundID or req.TemplateID != rc.TemplateID_committed \
+            or req.MinerID != payload["MinerID"] or req.ReserveSliceID != payload["ReserveSliceID"] \
+            or req.activation_generation != payload["activation_generation"]:
+        return Outcome("activation_no_effect", reason="request_identity_mismatch")
+    # request belongs to the stated observation, and the observation to the stated decision.
+    if req.SecurityFloorBreachID != payload["SecurityFloorObservationID"]:
+        return Outcome("activation_no_effect", reason="observation_mismatch")
+    obs = next((o for o in run_ctx.security_observations
+                if o.ObservationID == payload["SecurityFloorObservationID"]), None)
+    if obs is None or obs.activation_decision_id != payload["ReserveActivationDecisionID"]:
+        return Outcome("activation_no_effect", reason="decision_mismatch")
+    if req.DecisionID != payload["ReserveActivationDecisionID"]:
+        return Outcome("activation_no_effect", reason="request_decision_mismatch")
+    dec = next((d for d in run_ctx.activation_decisions
+                if d.DecisionID == payload["ReserveActivationDecisionID"]), None)
+    if dec is None or payload["MinerID"] not in dec.selected_miners \
+            or payload["ReserveSliceID"] not in dec.selected_slices:
+        return Outcome("activation_no_effect", reason="decision_selection_mismatch")
+    if rr.activation_request_id != req.ReserveActivationRequestID:
+        return Outcome("activation_no_effect", reason="reserve_request_link_mismatch")
+    # lifecycle + status + version + slice-claim checks.
+    if req.status != expected_request_status:
+        return Outcome("activation_no_effect", reason="request_lifecycle_mismatch",
+                       actual=req.status)
     if rr.reserve_status != expected_status:
         return Outcome("activation_no_effect", reason="reserve_status_mismatch",
                        actual=rr.reserve_status)
     if rr.activation_generation != payload["activation_generation"]:
         return Outcome("activation_no_effect", reason="generation_mismatch")
-    if sl.claimed_by != payload["MinerID"]:
+    if payload["expected_round_state_version"] != rc.state_version:
+        return Outcome("activation_no_effect", reason="round_state_version_mismatch")
+    if sl.status != "CLAIMED" or sl.claimed_by != payload["MinerID"]:
         return Outcome("activation_no_effect", reason="slice_claim_mismatch")
-    return Outcome("activation_identity_ok", reserve=rr, slice=sl)
+    # the current EventRef must match the recorded start/complete EventRef.
+    cur = getattr(run_ctx.event_queue, "current_event_ref", None)
+    recorded = req.start_event_ref if lifecycle == "START" else req.complete_event_ref
+    if recorded is not None and cur is not None and cur != recorded:
+        return Outcome("activation_no_effect", reason="event_ref_mismatch")
+    return Outcome("activation_identity_ok", reserve=rr, slice=sl, request=req)
 
 
 def _handle_reserve_activation_start(run_ctx: RunContext, payload: Dict[str, Any],
                                      envelope: Dict[str, Any]) -> Outcome:
     rc = run_ctx.current_round_context
-    guard = _verify_activation_identity(run_ctx, rc, payload, "ACTIVATION_PENDING")
+    guard = _verify_activation_identity(run_ctx, rc, payload, "ACTIVATION_PENDING",
+                                        "SEATED", "START")
     if guard.kind != "activation_identity_ok":
         return Outcome("reserve_activation_start_no_effect", reason=guard)
     rr = guard.reserve
+    sl = guard.slice
+    req = guard.request
     mid = payload["MinerID"]
     eq = run_ctx.event_queue
     t = eq.current_event_time
     rr.reserve_status = "WAKING"                            # S3-6: WAKING at activation start
     run_ctx.apply_miner_state_transition(mid, "WAKING", t)
+    req.status = "STARTED"
+    req.started_at = t
     complete_time = t + run_ctx.config.security_floor.activation_wake_latency
     cpayload = dict(payload)
     cpayload["expected_reserve_status"] = "WAKING"
-    r = ScheduleEvent(eq, rc, "ReserveActivationCompleteEvent", complete_time,
-                      "RESERVE_ACTIVATION_COMPLETE", cpayload, ordinary_dispatch_origin(eq))
-    return Outcome("reserve_activation_started", MinerID=mid,
-                   complete_event_ref=r.event_ref if r.kind == "scheduled" else None)
+    cpayload["expected_round_state_version"] = rc.state_version
+    if getattr(run_ctx, "force_activation_complete_seat_failure", False):   # S3A-06 injection
+        r = Outcome("rejected_forced_complete_seat_failure")
+    else:
+        r = ScheduleEvent(eq, rc, "ReserveActivationCompleteEvent", complete_time,
+                          "RESERVE_ACTIVATION_COMPLETE", cpayload, ordinary_dispatch_origin(eq))
+    if r.kind != "scheduled":
+        # S3A-4: a failed CompleteEvent seat must NEVER strand the miner WAKING without a
+        # controller — terminalise the request + reserve, restore the slice (declared policy:
+        # UNCLAIMED so its capacity can be recovered), return the miner to LOW_POWER_LISTEN,
+        # and re-evaluate the floor (which may seat another reserve or apply the policy).
+        run_ctx.apply_miner_state_transition(mid, "LOW_POWER_LISTEN", t)
+        rr.reserve_status = "CANCELLED"
+        rr.disposition = Outcome("reserve_activation_complete_seat_failed", reason=r)
+        rr.activation_request_id = None
+        sl.status = "UNCLAIMED"                             # declared slice-restore policy
+        sl.claimed_by = None
+        req.status = "FAILED"
+        req.disposition = Outcome("reserve_activation_complete_seat_failed", reason=r)
+        run_ctx.security_stats["activation_complete_seat_failure_count"] += 1
+        dec = EvaluateSecurityFloor(run_ctx, rc, t, "reserve_activation_complete_seat_failed")
+        if isinstance(dec, Outcome):
+            return dec
+        return Outcome("reserve_activation_start_complete_seat_failed", MinerID=mid, reason=r)
+    ev = r.event_ref
+    req.complete_event_ref = ev
+    rr.activation_event_ref = ev
+    return Outcome("reserve_activation_started", MinerID=mid, complete_event_ref=ev)
 
 
 def _handle_reserve_activation_complete(run_ctx: RunContext, payload: Dict[str, Any],
                                         envelope: Dict[str, Any]) -> Outcome:
     rc = run_ctx.current_round_context
-    guard = _verify_activation_identity(run_ctx, rc, payload, "WAKING")
+    guard = _verify_activation_identity(run_ctx, rc, payload, "WAKING", "STARTED", "COMPLETE")
     if guard.kind != "activation_identity_ok":
         return Outcome("reserve_activation_complete_no_effect", reason=guard)
     rr = guard.reserve
     sl = guard.slice
+    req = guard.request
     mid = payload["MinerID"]
     cfg = run_ctx.config
     eq = run_ctx.event_queue
     t = eq.current_event_time
     rr.reserve_status = "ACTIVE"                            # S3-6: ACTIVE only at completion
     run_ctx.apply_miner_state_transition(mid, "ACTIVE_HASHING", t)
+    req.status = "COMPLETED"
+    req.completed_at = t
+    req.disposition = Outcome("reserve_activation_completed")
     # S3-7: an activated reserve gets a NORMAL MinerSearchState over its exact reserve slice.
     aid = f"AR-{rc.RoundID}-{mid}"
     version = 1
@@ -783,7 +993,9 @@ def _handle_reserve_activation_complete(run_ctx: RunContext, payload: Dict[str, 
     st.active_start = t
     rc.search_states[mid] = st
     rc.assignments[aid] = {"MinerID": mid, "AssignmentID": aid, "assignment_version": version,
-                           "range": (sl.range_start, sl.range_end), "coverage_state": "OPEN"}
+                           "range": (sl.range_start, sl.range_end),
+                           "RoundID": rc.RoundID, "TemplateID": rc.TemplateID_committed,
+                           "coverage_state": "OPEN"}
     run_ctx.search_assignment_kind[(rc.RoundID, mid)] = ACTIVATED_RESERVE_ASSIGNMENT
     run_ctx.security_stats["activations_completed"] += 1
     r = _seat_hash_work(run_ctx, rc, st, at_time=t)
@@ -800,10 +1012,23 @@ def _handle_reserve_activation_complete(run_ctx: RunContext, payload: Dict[str, 
 
 
 def _close_security_state(run_ctx: RunContext, rc: RoundContext, t: float) -> None:
-    """S3-10: reserve/slice cleanup + floor-metric snapshot at round closure."""
+    """S3-10 / S3A-2 / S3A-6: closure observation + reserve/slice/request terminalisation.
+
+    A closed round leaves NO reserve record ACTIVE or AVAILABLE and NO activation request in
+    a non-terminal status; every queued activation event was already CANCELLED via the
+    round's QUEUED-event loop (they carry ``RoundID_at_seat``).
+    """
+    # S3A-2: a final security-floor observation at closure (the round is already terminal, so
+    # this seats nothing and only records the terminal capacity state).
+    EvaluateSecurityFloor(run_ctx, rc, t, "round_closure",
+                          trigger=("CLOSURE", rc.RoundID, rc.state_version))
     if rc.below_floor_since is not None:                    # close the open breach interval
-        run_ctx.security_stats["total_duration_below_floor"] += t - rc.below_floor_since
+        dur = t - rc.below_floor_since
+        run_ctx.security_stats["total_duration_below_floor"] += dur
+        if rc.below_floor_open_reason == "participants_prepared":
+            run_ctx.security_stats["early_wake_below_floor_duration"] += dur
         rc.below_floor_since = None
+        rc.below_floor_open_reason = None
         rc.current_breach_id = None
     for rr in _reserve_records_for(run_ctx, rc):
         if rr.reserve_status in ("ACTIVATION_PENDING", "WAKING"):
@@ -816,8 +1041,10 @@ def _close_security_state(run_ctx: RunContext, rc: RoundContext, t: float) -> No
         elif rr.reserve_status == "AVAILABLE":
             rr.reserve_status = "UNUSED_AT_ROUND_CLOSE"
         elif rr.reserve_status == "ACTIVE":
+            # S3A-6: a closed-round record is NEVER left ACTIVE.
             st = rc.search_states.get(rr.MinerID)
-            rr.reserve_status = "EXHAUSTED" if (st is not None and st.completed) else "ACTIVE"
+            rr.reserve_status = "EXHAUSTED" if (st is not None and st.completed) \
+                else "CLOSED_AT_ROUND_CLOSE"
     for sl in run_ctx.reserve_slices.get(rc.RoundID, []):
         if sl.status == "UNCLAIMED":
             sl.status = "UNUSED_AT_ROUND_CLOSE"
@@ -826,7 +1053,14 @@ def _close_security_state(run_ctx: RunContext, rc: RoundContext, t: float) -> No
             if st is not None and st.completed and st.cursor >= st.range_end:
                 sl.status = "EXHAUSTED"          # searched to the end by an activated reserve
             else:
-                sl.status = "UNUSED_AT_ROUND_CLOSE"   # claimed but not fully searched (e.g. cancelled)
+                sl.status = "UNUSED_AT_ROUND_CLOSE"   # claimed but not fully searched
+    # S3A-6: every activation request of this closed round must be terminal.
+    for req in run_ctx.activation_requests.values():
+        if req.RoundID != rc.RoundID:
+            continue
+        if req.status not in TERMINAL_REQUEST_STATUSES:
+            req.status = "CANCELLED"
+            req.disposition = Outcome("reserve_activation_request_cancelled_at_round_close")
 
 
 def _seat_acceptance(run_ctx: RunContext, rc: RoundContext, at_time: float,

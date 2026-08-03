@@ -25,12 +25,18 @@ from .search import (Template, MinerSearchState, make_template, partition_domain
 from .security import (SecurityFloorPolicy, RangeSlice, ReserveMinerRecord,
                        SecurityFloorObservation, ReserveActivationDecision,
                        ReserveActivationRequest, compute_h_effective,
-                       partition_primary_and_reserve, RESERVE_STATUSES, POLICY_RESULTS,
+                       partition_primary_and_reserve, select_reserves_to_cover,
+                       RESERVE_STATUSES, TERMINAL_RESERVE_STATUSES, REQUEST_STATUSES,
+                       TERMINAL_REQUEST_STATUSES, POLICY_RESULTS, SLICE_STATUSES,
+                       ACTIVATION_TRIGGER_MODES, RESERVE_SELECTION_POLICIES,
+                       FLOOR_UNATTAINABLE_POLICIES, FULL_DOMAIN_EXHAUSTED_NO_BLOCK,
+                       ROUND_CLOSED_WITH_UNUSED_RESERVE_DOMAIN,
                        PRIMARY_ASSIGNMENT, ACTIVATED_RESERVE_ASSIGNMENT)
 from .simulator import (RunInitialise, RunEventLoopToHorizon, ProcessEventTime,
                         RoundAbort, FinalizeSimulationRun, FinalizeSimulationRunNoRound,
                         FinalizeSimulationRunPartial, run_simulation,
-                        EvaluateSecurityFloor, SeatReserveActivation)
+                        EvaluateSecurityFloor, SeatReserveActivation,
+                        SeatReserveActivationTransaction)
 from .energy_experiment import (run_energy_experiment, EnergyExperimentResult,
                                 MinerEnergyRow)
 from .adapter import (run_pocol_stage2, stage2config_from_blocksim, results_schema,
@@ -58,7 +64,11 @@ __all__ = [
     "RESULT_SCHEMA_VERSION",
     "SecurityFloorPolicy", "RangeSlice", "ReserveMinerRecord", "SecurityFloorObservation",
     "ReserveActivationDecision", "ReserveActivationRequest", "compute_h_effective",
-    "partition_primary_and_reserve", "RESERVE_STATUSES", "POLICY_RESULTS",
+    "partition_primary_and_reserve", "select_reserves_to_cover",
+    "RESERVE_STATUSES", "TERMINAL_RESERVE_STATUSES", "REQUEST_STATUSES",
+    "TERMINAL_REQUEST_STATUSES", "POLICY_RESULTS", "SLICE_STATUSES",
+    "ACTIVATION_TRIGGER_MODES", "RESERVE_SELECTION_POLICIES", "FLOOR_UNATTAINABLE_POLICIES",
+    "FULL_DOMAIN_EXHAUSTED_NO_BLOCK", "ROUND_CLOSED_WITH_UNUSED_RESERVE_DOMAIN",
     "PRIMARY_ASSIGNMENT", "ACTIVATED_RESERVE_ASSIGNMENT",
-    "EvaluateSecurityFloor", "SeatReserveActivation",
+    "EvaluateSecurityFloor", "SeatReserveActivation", "SeatReserveActivationTransaction",
 ]
