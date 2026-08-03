@@ -1,24 +1,22 @@
-name: Stage 2A PoCol tests
+name: Stage 2B PoCol tests
 
-# Machine-generated evidence for S2A-9: runs the Stage-2A executable PoCol test suite
-# (TV325-TV338, E2E-1..E2E-5, SCI-1..SCI-7, adapter) and uploads the pytest log + JUnit XML.
+# Machine-generated evidence for S2B-8: runs the Stage-2B target-coupled / causal-search
+# PoCol test suite (TV325-TV338, E2E-1..E2E-5, SCI-1..SCI-10, S2B-1 target tests, adapter)
+# and uploads the pytest log + JUnit XML.
 
 on:
   push:
     branches:
-      - "thesis-v45-pocol-stage2a-executable-scientific-core-remediation"
-    paths:
-      - "Models/PoCol/stage2/**"
-      - "tests/thesis_revision_v45/stage2/**"
-      - ".github/workflows/stage2a-pocol-tests.yml"
+      - "thesis-v45-pocol-stage2b-target-causal-search-genesis-rollback-lock"
   pull_request:
     paths:
       - "Models/PoCol/stage2/**"
       - "tests/thesis_revision_v45/stage2/**"
+      - ".github/workflows/stage2b-pocol-tests.yml"
   workflow_dispatch: {}
 
 jobs:
-  stage2a-tests:
+  stage2b-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,11 +30,11 @@ jobs:
       - name: Install pytest
         run: python -m pip install --upgrade pip pytest
 
-      - name: Run Stage 2A PoCol test suite
+      - name: Run Stage 2B PoCol test suite
         run: |
           python -m pytest tests/thesis_revision_v45/stage2/ -v --durations=0 \
             -p no:cacheprovider \
-            --junitxml=stage2a_ci.junit.xml | tee stage2a_ci.log
+            --junitxml=stage2b_ci.junit.xml | tee stage2b_ci.log
 
       - name: Run standalone demo (smoke)
         run: python -m Models.PoCol.stage2.demo
@@ -45,7 +43,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: stage2a-pytest-evidence
+          name: stage2b-pytest-evidence
           path: |
-            stage2a_ci.log
-            stage2a_ci.junit.xml
+            stage2b_ci.log
+            stage2b_ci.junit.xml

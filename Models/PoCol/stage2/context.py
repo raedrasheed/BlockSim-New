@@ -72,6 +72,34 @@ class MinerRecord:
     adversarial: bool = False
 
 
+@dataclass
+class EvaluationRecord:
+    """S2B-4: one executable record of a COMMITTED contiguous nonce-evaluation interval.
+
+    Each committed hash-work event appends exactly one record for the interval
+    ``[interval_start, interval_end)`` it evaluated, at its ``completion_time``.  The
+    ledger is the authority for the scientific ledger tests (zero duplicates, in-range,
+    no post-round evaluation, searched_count == ledger count).
+    """
+    RoundID: Any
+    TemplateID: Any
+    MinerID: Any
+    AssignmentID: Any
+    assignment_version: int
+    interval_start: int
+    interval_end: int                 # exclusive
+    completion_time: float
+    contained_solution: bool
+    winning_nonce: Optional[int]
+    event_ref: Any
+
+    def count(self) -> int:
+        return self.interval_end - self.interval_start
+
+    def nonces(self):
+        return range(self.interval_start, self.interval_end)
+
+
 # ------------------------------------------------------------------ RoundContext
 @dataclass
 class RoundContext:
@@ -135,6 +163,14 @@ class RunContext:
         self.next_round_bootstrap_status: str = "OK"
         # population + energy
         self.miners: Dict[Any, MinerRecord] = {}
+        # S2B-4 executable evaluation ledger + per-round scientific provenance.
+        self.evaluation_ledger: List[EvaluationRecord] = []
+        self.round_participants: Dict[Any, set] = {}
+        self.round_ranges: Dict[Any, Dict[Any, Tuple[int, int]]] = {}
+        self.round_terminal_times: Dict[Any, float] = {}
+        self.final_searched: Dict[Any, int] = {}   # (RoundID, MinerID) -> final searched_count
+        self.round_first_completion: Dict[Any, float] = {}  # (RoundID, MinerID) -> first batch completion time
+        self.max_search_time_residual: float = 0.0   # S2B-2: max |searched_count - rate*elapsed|
         # audit log
         self.log: List[Outcome] = []
 

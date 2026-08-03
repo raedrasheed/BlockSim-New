@@ -21,11 +21,15 @@ from .config import Stage2Config
 from .events import (CancelQueuedEvent, EventQueue, Outcome, ScheduleEvent,
                      ordinary_dispatch_origin, next_representable_simulation_time,
                      candidate_template_id)
-from .context import (BootstrapRequest, RunContext, RoundContext, EXACT_ROUND,
-                      NEXT_AVAILABLE_ROUND)
+from .context import (BootstrapRequest, RunContext, RoundContext, EvaluationRecord,
+                      EXACT_ROUND, NEXT_AVAILABLE_ROUND)
 from .driver import (SeatNextRoundBootstrap, SeatPendingDriverRequests, SeatMinerRegister,
                      scope_admits)
 from .search import make_template, partition_domain, MinerSearchState, sha256_int
+
+# S2B-2: declared causal-accounting rounding tolerance (nonces) for the searched-count
+# vs elapsed-hash-time bound (floats are exact to <1 nonce, so 1 is a safe integer slack).
+_SEARCH_COUNT_TOL = 1
 
 
 # ============================================================ RunInitialise
@@ -65,45 +69,60 @@ def _handle_round_initialise(run_ctx: RunContext, payload: Dict[str, Any],
                 round_scope=EXACT_ROUND(rid),
                 payload={"join_request": g["join_request"]})
             if adm.kind != "driver_request_admitted":
-                # backlog-12: structured outcome, never a raw assertion.
-                rc.transition("ROUND_ABORTED")
-                rc.terminal_disposition = "genesis_admission_failed"
-                return Outcome("round_initialise_aborted", RoundID=rid,
-                               reason=Outcome("genesis_admission_failed", detail=adm))
+                # S2B-5: route the structured failure through the ONE round-closure owner
+                # so every PENDING/SEATED round request is terminalised (no leak).
+                run_ctx.genesis_miner_registry = []
+                return _abort_round_initialise(run_ctx, rc, "genesis_admission_failed",
+                                               detail=adm, envelope=envelope)
             expected.add(g["join_request"]["MinerID"])
         rc.barrier_expected = expected
         rc.barrier_registered = set()
         rc.barrier_satisfied = False
         run_ctx.genesis_miner_registry = []
         # AI1: seat each genesis MinerRegisterEvent SYNCHRONOUSLY at the non-finalised t0.
+        seat_count = 0
         for drid in sorted(list(run_ctx.pending_driver_request_index),
                            key=lambda x: (str(x[0]), x[1])):
             dr = run_ctx.driver_request_registry[drid]
             if dr.status != "PENDING" or dr.kind != "MINER_JOIN" \
                     or dr.round_scope != EXACT_ROUND(rid):
                 continue
-            gseat = SeatMinerRegister(run_ctx, dr, admission_mode="IN_DISPATCH_GENESIS")
+            seat_count += 1
+            if getattr(run_ctx, "genesis_seat_fail_at", None) == seat_count:  # TV325 injection
+                run_ctx.force_seat_publication_failure = True
+                gseat = SeatMinerRegister(run_ctx, dr, admission_mode="IN_DISPATCH_GENESIS")
+                run_ctx.force_seat_publication_failure = False
+            else:
+                gseat = SeatMinerRegister(run_ctx, dr, admission_mode="IN_DISPATCH_GENESIS")
             if gseat.kind == "miner_register_seat_failed":
-                run_ctx.set_driver_request_status(
-                    drid, expected_status="PENDING", new_status="REJECTED",
-                    disposition=Outcome("driver_request_rejected", reason=gseat.reason))
-                run_ctx.pending_driver_request_index.discard(drid)
-                rc.transition("ROUND_ABORTED")
-                rc.terminal_disposition = "genesis_registration_seat_failed"
-                return Outcome("round_initialise_aborted", RoundID=rid,
-                               reason=Outcome("genesis_registration_seat_failed_round_abort",
-                                              detail=gseat))
+                # S2B-5: the closure owner cancels the already-seated genesis events and
+                # terminalises every EXACT_ROUND request for this round.
+                return _abort_round_initialise(run_ctx, rc, "genesis_registration_seat_failed",
+                                               detail=gseat, envelope=envelope)
 
     rc.transition("ROUND_INITIALISING")
     rc.transition("TEMPLATE_COMMITMENT")
     # AG4 step 3: seat TemplateCommitEvent (ORDINARY_DISPATCH — inside this dispatch).
     tc = _seat_template_commit(run_ctx, rid)
     if tc.kind == "template_commit_seat_failed":
-        rc.transition("ROUND_ABORTED")
-        rc.terminal_disposition = "template_commit_seat_failed"
-        _close_and_publish(run_ctx, rc, "ROUND_ABORTED", envelope)
-        return Outcome("round_initialise_aborted", RoundID=rid, reason=tc)
+        return _abort_round_initialise(run_ctx, rc, "template_commit_seat_failed",
+                                       detail=tc, envelope=envelope)
     return Outcome("round_initialised", RoundID=rid)
+
+
+def _abort_round_initialise(run_ctx: RunContext, rc: RoundContext, reason_kind: str,
+                            detail: Any, envelope: Dict[str, Any]) -> Outcome:
+    """S2B-5: abort a failed round-initialise through the ONE round-closure owner.
+
+    ``RoundAbort`` cancels every QUEUED event of the round, terminalises every
+    PENDING/SEATED EXACT_ROUND request, publishes the terminal-round result and seats the
+    next round when legal — so a genesis admission or seat failure leaves NO live seat or
+    request (S2B-5).
+    """
+    ab = RoundAbort(run_ctx, rc, reason_kind, envelope)
+    pub = ab.data.get("publication_result") if isinstance(ab, Outcome) else None
+    return Outcome("round_initialise_aborted", RoundID=rc.RoundID,
+                   reason=Outcome(reason_kind, detail=detail), publication_result=pub)
 
 
 def _seat_template_commit(run_ctx: RunContext, rid: Any) -> Outcome:
@@ -233,7 +252,7 @@ def _handle_prepare_participants(run_ctx: RunContext, payload: Dict[str, Any],
     for mid in run_ctx.reserve_miner_ids:
         if run_ctx.miners[mid].state != "RESERVE":
             run_ctx.apply_miner_state_transition(mid, "RESERVE", t)
-    # S2A-1: partition the finite nonce domain into DISJOINT per-miner ranges + search state.
+    # S2B-1: partition the finite nonce domain into DISJOINT per-miner ranges + search state.
     ranges = partition_domain(cfg.nonce_domain_size, participants)
     rc.search_states = {}
     for idx, mid in enumerate(sorted(participants)):
@@ -249,6 +268,15 @@ def _handle_prepare_participants(run_ctx: RunContext, payload: Dict[str, Any],
                                "coverage_state": "OPEN"}
         run_ctx.apply_miner_state_transition(mid, "WAKING", t)
         _start_wake(run_ctx, rc, mid, aid, version)
+        # S2B-7 (SCI-3): an EXPECTED first-batch completion time, so a participant whose
+        # round ends before it even wakes still has a justifiable zero-work interval; the
+        # actual completion overwrites this at WakeCompleteEvent dispatch.
+        expected_first = (t + cfg.wake_latency
+                          + min(cfg.batch_size, st.range_size()) / st.hash_rate)
+        run_ctx.round_first_completion[(rc.RoundID, mid)] = expected_first
+    # S2B-4/S2B-7: record per-round scientific provenance for the ledger tests.
+    run_ctx.round_participants[rc.RoundID] = set(participants)
+    run_ctx.round_ranges[rc.RoundID] = {mid: ranges[mid] for mid in participants}
     rc.transition("SOLUTION_PROPAGATION")
     return Outcome("participant_set_prepared", participants=len(participants),
                    nonce_domain_size=cfg.nonce_domain_size)
@@ -277,80 +305,169 @@ def _handle_wake_complete(run_ctx: RunContext, payload: Dict[str, Any],
     t = run_ctx.event_queue.current_event_time
     run_ctx.apply_miner_state_transition(mid, "ACTIVE_HASHING", t)
     st.active_start = t
-    # S2A-1: EVERY active miner schedules hash work (not just one leader).
-    _seat_hash_work(run_ctx, rc, st, at_time=t)
+    # S2B-2: EVERY active miner plans its first batch-completion event (not just one leader).
+    r = _seat_hash_work(run_ctx, rc, st, at_time=t)
+    if r.kind == "scheduled":                              # S2B-7 SCI-3 zero-work justification
+        run_ctx.round_first_completion[(rc.RoundID, mid)] = r.event_ref.event_time
     return Outcome("wake_completed", MinerID=mid)
+
+
+def _first_solution_in(tpl: Any, start: int, end: int) -> Optional[int]:
+    """First nonce in ``[start, end)`` whose real digest satisfies ``<= target`` (S2B-1)."""
+    for nonce in range(start, end):
+        if sha256_int(tpl.header_bytes, nonce) <= tpl.target:
+            return nonce
+    return None
 
 
 def _seat_hash_work(run_ctx: RunContext, rc: RoundContext, st: Any,
                     at_time: float) -> Outcome:
+    """S2B-2 design B: seat a PLANNED batch-completion event at its completion time.
+
+    The read-only scan here determines ONLY the event completion time (it commits nothing).
+    If the planned batch contains a solution, the event fires at the winning nonce's exact
+    completion time (so the acceptance is causal); otherwise at the full-batch completion
+    time.  Cursor, searched_count and the ledger are mutated ONLY at dispatch.
+    """
     eq = run_ctx.event_queue
-    return ScheduleEvent(eq, rc, "HashWorkEvent", at_time, "HASH_WORK",
-                         {"MinerID": st.MinerID, "AssignmentID": st.AssignmentID,
-                          "unit_index": st.searched_count}, ordinary_dispatch_origin(eq))
+    tpl = rc.template
+    cursor_start = st.cursor
+    cursor_end = min(cursor_start + run_ctx.config.batch_size, st.range_end)
+    if cursor_end <= cursor_start:
+        return Outcome("hash_work_nothing_to_plan", MinerID=st.MinerID)
+    winner = _first_solution_in(tpl, cursor_start, cursor_end)  # timing determination only
+    effective_end = (winner + 1) if winner is not None else cursor_end
+    completion_time = st.active_start + (effective_end - st.range_start) / st.hash_rate
+    if not (completion_time > at_time):                 # causal-forward guard (defensive)
+        completion_time = next_representable_simulation_time(at_time)
+    payload = {"RoundID_at_seat": rc.RoundID, "TemplateID_at_seat": rc.TemplateID_committed,
+               "AssignmentID": st.AssignmentID, "assignment_version": st.assignment_version,
+               "MinerID": st.MinerID, "cursor_start": cursor_start, "cursor_end": cursor_end,
+               "expected_search_generation": st.search_generation}
+    return ScheduleEvent(eq, rc, "HashWorkEvent", completion_time, "HASH_WORK", payload,
+                         ordinary_dispatch_origin(eq))
+
+
+def _verify_hash_identity(rc: RoundContext, st: Any, payload: Dict[str, Any]) -> Outcome:
+    """S2B-3: full immutable-identity verification BEFORE any search-state mutation."""
+    if payload["RoundID_at_seat"] != rc.RoundID:
+        return Outcome("hash_identity_round_mismatch")
+    if payload["TemplateID_at_seat"] != rc.TemplateID_committed:
+        return Outcome("hash_identity_template_mismatch")
+    if st is None:
+        return Outcome("hash_identity_no_assignment")
+    if st.completed:
+        return Outcome("hash_identity_already_completed")
+    if st.AssignmentID != payload["AssignmentID"]:
+        return Outcome("hash_identity_assignment_mismatch")
+    if st.assignment_version != payload["assignment_version"]:
+        return Outcome("hash_identity_version_mismatch")
+    if st.MinerID != payload["MinerID"]:
+        return Outcome("hash_identity_owner_mismatch")
+    if st.cursor != payload["cursor_start"]:
+        return Outcome("hash_identity_cursor_mismatch", expected=st.cursor,
+                       got=payload["cursor_start"])
+    if st.search_generation != payload["expected_search_generation"]:
+        return Outcome("hash_identity_generation_mismatch", expected=st.search_generation,
+                       got=payload["expected_search_generation"])
+    return Outcome("hash_identity_ok")
 
 
 def _handle_hash_work(run_ctx: RunContext, payload: Dict[str, Any],
                       envelope: Dict[str, Any]) -> Outcome:
-    """S2A-1/S2A-2: real batched nonce search under the immutable template."""
+    """S2B-2/3/4: commit ONE planned batch at its completion time (causal accounting)."""
     rc = run_ctx.current_round_context
-    if rc.round_state in ("ROUND_ACCEPTED", "ROUND_ABORTED"):
-        return Outcome("hash_work_stale_noop")
-    cfg = run_ctx.config
     mid = payload["MinerID"]
+    eq = run_ctx.event_queue
+    er = eq.current_event_ref
+    now = eq.current_event_time
+    # a batch whose round already closed (e.g. another miner won first) commits zero work.
+    if rc is None or rc.round_state in ("ROUND_ACCEPTED", "ROUND_ABORTED"):
+        return Outcome("hash_work_no_effect", reason="round_terminal", MinerID=mid)
     st = rc.search_states.get(mid)
-    if st is None or st.completed:
-        return Outcome("hash_work_stale_noop", MinerID=mid)
+    guard = _verify_hash_identity(rc, st, payload)          # S2B-3: replay/superseded guard
+    if guard.kind != "hash_identity_ok":
+        return Outcome("hash_work_no_effect", reason=guard, MinerID=mid)
+    cfg = run_ctx.config
     tpl = rc.template
-    batch_end = min(st.cursor + cfg.batch_size, st.range_end)
-    for offset in range(0, batch_end - st.cursor):
-        nonce = st.cursor + offset
-        _ = sha256_int(tpl.header_bytes, nonce)          # real per-nonce work primitive (counted)
-        if tpl.is_solution(nonce):                        # success model B (sampled winner)
-            st.searched_count += offset + 1
-            st.cursor += offset + 1
-            st.completed = True
-            st.completion_kind = "SOLUTION"
-            sol_time = st.active_start + st.searched_count / st.hash_rate
-            if run_ctx.round_seq in cfg.abort_round_seqs:  # E2E-2 injection
-                return RoundAbort(run_ctx, rc, reason="forced_abort_scenario", envelope={})
-            return _seat_acceptance(run_ctx, rc, at_time=sol_time, winner=mid,
-                                    winning_nonce=nonce)
-    searched_this = batch_end - st.cursor
-    st.searched_count += searched_this
-    st.cursor = batch_end
-    if st.cursor >= st.range_end:                          # range exhaustion -> post-range idle
+    cursor_start = payload["cursor_start"]
+    planned_end = payload["cursor_end"]
+    # PERFORM the real work over the planned interval and commit through the first solution.
+    winner_nonce = _first_solution_in(tpl, cursor_start, planned_end)
+    commit_end = (winner_nonce + 1) if winner_nonce is not None else planned_end
+    committed = commit_end - cursor_start
+    st.cursor = commit_end
+    st.searched_count += committed
+    st.search_generation += 1
+    # S2B-2 causal-accounting assertion: no work is counted beyond elapsed hash time / round end.
+    rtt = rc.round_terminal_time if rc.round_terminal_time is not None else now
+    bound = math.floor(st.hash_rate * (min(rtt, now) - st.active_start)) + _SEARCH_COUNT_TOL
+    assert st.searched_count <= bound, ("searched_count exceeds causal bound",
+                                        mid, st.searched_count, bound)
+    resid = abs(st.searched_count - st.hash_rate * (now - st.active_start))
+    if resid > run_ctx.max_search_time_residual:
+        run_ctx.max_search_time_residual = resid
+    # S2B-4: append the executable evaluation-ledger record for this committed interval.
+    run_ctx.evaluation_ledger.append(EvaluationRecord(
+        RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed, MinerID=mid,
+        AssignmentID=st.AssignmentID, assignment_version=st.assignment_version,
+        interval_start=cursor_start, interval_end=commit_end, completion_time=now,
+        contained_solution=(winner_nonce is not None), winning_nonce=winner_nonce,
+        event_ref=er))
+    run_ctx.final_searched[(rc.RoundID, mid)] = st.searched_count
+    if winner_nonce is not None:                           # first valid solution in sim time
+        st.completed = True
+        st.completion_kind = "SOLUTION"
+        if run_ctx.round_seq in cfg.abort_round_seqs:      # E2E-2 injection
+            return RoundAbort(run_ctx, rc, reason="forced_abort_scenario", envelope={})
+        return _seat_acceptance(run_ctx, rc, at_time=now, winner=mid,
+                                winning_nonce=winner_nonce)
+    if st.cursor >= st.range_end:                          # full range exhausted, no solution
         st.completed = True
         st.completion_kind = "EXHAUSTED"
-        exhaust_time = st.active_start + st.searched_count / st.hash_rate
-        _seat_range_exhaust(run_ctx, rc, st, at_time=exhaust_time)
-        return Outcome("range_exhaust_seated", MinerID=mid, searched=st.searched_count)
-    next_time = st.active_start + st.searched_count / st.hash_rate
-    _seat_hash_work(run_ctx, rc, st, at_time=next_time)    # continuation
-    return Outcome("hash_work_continued", MinerID=mid, searched=st.searched_count)
+        _seat_range_exhaust(run_ctx, rc, st, at_time=now)
+        return Outcome("hash_work_range_exhausted", MinerID=mid, searched=st.searched_count)
+    _seat_hash_work(run_ctx, rc, st, at_time=now)          # plan the next batch
+    return Outcome("hash_work_committed", MinerID=mid, searched=st.searched_count,
+                   committed=committed)
 
 
 def _seat_range_exhaust(run_ctx: RunContext, rc: RoundContext, st: Any,
                         at_time: float) -> Outcome:
     eq = run_ctx.event_queue
+    payload = {"MinerID": st.MinerID, "AssignmentID": st.AssignmentID,
+               "RoundID_at_seat": rc.RoundID, "TemplateID_at_seat": rc.TemplateID_committed,
+               "assignment_version": st.assignment_version,
+               "expected_search_generation": st.search_generation}
     return ScheduleEvent(eq, rc, "RangeExhaustEvent", at_time, "RANGE_EXHAUST_ADJUDICATE",
-                         {"MinerID": st.MinerID, "AssignmentID": st.AssignmentID,
-                          "RoundID_at_seat": rc.RoundID,
-                          "TemplateID_at_seat": rc.TemplateID_committed},
-                         ordinary_dispatch_origin(eq))
+                         payload, ordinary_dispatch_origin(eq))
 
 
 def _handle_range_exhaust(run_ctx: RunContext, payload: Dict[str, Any],
                           envelope: Dict[str, Any]) -> Outcome:
-    """POST-RANGE IDLE POLICY: a miner that exhausted its range moves to idle power."""
+    """POST-RANGE IDLE POLICY (+ no-block termination when the whole domain exhausts)."""
     rc = run_ctx.current_round_context
     mid = payload["MinerID"]
-    if rc.round_state in ("ROUND_ACCEPTED", "ROUND_ABORTED"):
-        return Outcome("range_exhaust_stale_noop", MinerID=mid)
+    if rc is None or rc.round_state in ("ROUND_ACCEPTED", "ROUND_ABORTED"):
+        return Outcome("range_exhaust_no_effect", reason="round_terminal", MinerID=mid)
+    st = rc.search_states.get(mid)
+    # S2B-3: identity verification (assignment + version + owner + round + template).
+    if st is None or st.AssignmentID != payload["AssignmentID"] \
+            or st.assignment_version != payload["assignment_version"] \
+            or st.MinerID != payload["MinerID"] \
+            or payload["RoundID_at_seat"] != rc.RoundID \
+            or payload["TemplateID_at_seat"] != rc.TemplateID_committed:
+        return Outcome("range_exhaust_no_effect", reason="identity_mismatch", MinerID=mid)
     m = run_ctx.miners.get(mid)
     t = run_ctx.event_queue.current_event_time
     if m is not None and m.state == "ACTIVE_HASHING":
         run_ctx.apply_miner_state_transition(mid, "LOW_POWER_LISTEN", t)   # idle policy
+    # S2B-1: full-domain exhaustion with NO block -> terminate the round (no-block abort).
+    states = list(rc.search_states.values())
+    if states and all(s.completed for s in states) \
+            and not any(s.completion_kind == "SOLUTION" for s in states) \
+            and not rc.block_accepted:
+        return RoundAbort(run_ctx, rc, reason="round_exhausted_no_block", envelope={})
     return Outcome("range_exhausted_idle", MinerID=mid)
 
 
@@ -403,6 +520,9 @@ def _close_and_publish(run_ctx: RunContext, rc: RoundContext, disposition: str,
     """CloseRoundAssignments + PublishTerminalRoundAndSeatNext (AH2/AI6)."""
     eq = run_ctx.event_queue
     t = at_time if at_time is not None else eq.current_event_time
+    # S2B-4: snapshot the final per-miner searched_count for the round (ledger cross-check).
+    for mid, st in getattr(rc, "search_states", {}).items():
+        run_ctx.final_searched[(rc.RoundID, mid)] = st.searched_count
     # move ACTIVE_HASHING / WAKING participants off active into the idle state (idle policy).
     for aid, a in rc.assignments.items():
         mid = a["MinerID"]
@@ -457,6 +577,7 @@ def _publish_terminal_and_seat_next(run_ctx: RunContext, rc: RoundContext,
     assert rc.round_state in ("ROUND_ACCEPTED", "ROUND_ABORTED")
     t = at_time
     rc.round_terminal_time = t
+    run_ctx.round_terminal_times[rc.RoundID] = t          # S2B-4 ledger cross-check
     run_ctx.prior_round_terminal_state = {"RoundID": rc.RoundID, "round_terminal_time": t,
                                           "disposition": disposition}
     if envelope.get("envelope_namespace") == "RUN_HOOK":

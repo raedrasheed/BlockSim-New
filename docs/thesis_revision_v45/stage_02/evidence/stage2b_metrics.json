@@ -1,0 +1,54 @@
+{
+  "success_model": "TARGET_COUPLED_SHA256_DIGEST_LEQ_TARGET",
+  "work_primitive": "SHA256(header||nonce)",
+  "A1_kwh": 8.420833333333333,
+  "A1_target": 8.420833333,
+  "difficulty": 1000,
+  "target": 115792089237316195423570985008687907853269984665640564039457584007913129639,
+  "p_success": 0.001,
+  "confirmatory": {
+    "num_miners": 8,
+    "horizon_T": 150.0,
+    "nonce_domain_size": 1200,
+    "difficulty": 1000,
+    "rounds_executed": 79,
+    "rounds_accepted": 56,
+    "rounds_no_block": 22,
+    "evaluation_count": 52795,
+    "ledger_records": 2140,
+    "duplicate_count": 0,
+    "post_round_evaluation_count": 0,
+    "searched_vs_ledger_mismatches": 0,
+    "max_search_time_residual": 5.002220859751105e-12,
+    "residency_reconciles": true,
+    "energy_kwh": 0.0034539899305555417,
+    "continuous_all_active_kwh": 0.007166666666666667,
+    "queue_terminal": {
+      "CONSUMED": 3066,
+      "CANCELLED": 249
+    },
+    "request_terminal": {
+      "CONSUMED": 8
+    }
+  },
+  "zero_solution_run": {
+    "target": 0,
+    "rounds_executed": 25,
+    "zero_solution_rounds": 24,
+    "accepted_block": 0,
+    "domain_fully_covered_round1": true
+  },
+  "energy_experiment": {
+    "scenario": "constructed_matched_identity_validation",
+    "seed": 35,
+    "difficulty": 600,
+    "target": 192986815395526992372618308347813179755449974442734273399095973346521882733,
+    "winner": "M000",
+    "winning_nonce": 205,
+    "round_end": 2.06,
+    "n_idlers": 7,
+    "saving_j": 220.97700000000003,
+    "max_abs_identity_residual_j": 7.105427357601002e-15,
+    "zero_saving_when_pidle_eq_pactive": 0.0
+  }
+}

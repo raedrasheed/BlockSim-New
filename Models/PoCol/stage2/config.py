@@ -41,16 +41,16 @@ class Stage2Config:
     # --- deterministic round timing (seconds) ---
     wake_latency: float = 1.0             # StartWake -> WakeCompleteEvent latency
 
-    # --- scientific search core (S2A-1/S2A-2) ---
+    # --- scientific search core (S2B-1/S2B-2) ---
+    # Success is coupled to the fixed target: a nonce succeeds iff SHA256(header||nonce)
+    # <= target_for_difficulty(difficulty).  No dynamic difficulty; no sampled/placed
+    # winner; no stored-but-unused success field.
     nonce_domain_size: int = 4000         # explicit finite nonce domain [0, D)
     difficulty: int = 1000               # fixed confirmatory difficulty (sets the work target)
-    batch_size: int = 50                 # declared nonce batch per HashWorkEvent
+    batch_size: int = 50                 # declared nonce batch planned per HashWorkEvent
     base_hash_rate: float = 100.0        # base nonces/second per miner
     heterogeneous_hash_rates: bool = True  # vary hash rate by miner to exercise the idle policy
-    template_seed: int = 20260803        # deterministic winning-nonce sampler seed
-
-    # test-injection ONLY (disabled in confirmatory runs); NOT a success mechanism.
-    solution_after_units: int = 0        # 0 => disabled; real success is hash/target vs the sampled winner
+    template_seed: int = 20260803        # deterministic template-header seed
 
     def hash_rate_for(self, index: int) -> float:
         """Deterministic per-miner hash rate (heterogeneous so ranges finish at different times)."""

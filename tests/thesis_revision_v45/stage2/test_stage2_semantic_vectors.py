@@ -52,25 +52,27 @@ def _seat_join(run, mid, scope, requested=0.0):
 
 
 # ---------------------------------------------------------------- TV325
-def test_tv325_partial_genesis_third_seat_actually_fails():
-    """First two genesis seats commit; the THIRD seat actually fails and is compensated."""
-    run = fresh_run()
-    admitting_round(run, "round-1", "ASSIGNMENT", t=0.0)
-    drs = [_seat_join(run, f"G{i}", EXACT_ROUND("round-1")) for i in range(3)]
-    assert SeatMinerRegister(run, drs[0], "DRIVER_INTAKE").kind == "miner_register_seated"
-    assert SeatMinerRegister(run, drs[1], "DRIVER_INTAKE").kind == "miner_register_seated"
-    run.force_seat_publication_failure = True               # the third publication now fails
-    third = SeatMinerRegister(run, drs[2], "DRIVER_INTAKE")
-    assert third.kind == "miner_register_seat_failed"
-    assert third.reason.kind == "seat_publication_failed"
-    # compensation: exactly two live seated events, one cancelled, none leaked.
+def test_tv325_partial_genesis_third_seat_fails_round_aborts_through_closure():
+    """S2B-5: first two genesis seats commit, the THIRD seat fails, and the round aborts
+    through the ONE closure owner — the two seated events become CANCELLED, all three
+    requests terminalise, and nothing leaks to the next round."""
+    run = RunInitialise(Stage2Config(num_miners=3, horizon_T=100.0))
+    run.genesis_seat_fail_at = 3                            # the third genesis seat fails
+    assert SeatNextRoundBootstrap(run).kind == "round_bootstrap_seated"
+    ProcessEventTime(run, 0.0, is_horizon=False)
+    rc = run.current_round_context
+    assert rc.round_state == "ROUND_ABORTED"
+    assert rc.terminal_disposition == "genesis_registration_seat_failed"
     reg = [r for r in run.event_queue.queued_event_registry.values()
            if r.event_type == "MinerRegisterEvent"]
-    assert sum(r.queue_status == "QUEUED" for r in reg) == 2
-    assert sum(r.queue_status == "CANCELLED" for r in reg) == 1
-    assert drs[0].status == "SEATED" and drs[1].status == "SEATED"
-    assert drs[2].status == "PENDING"                      # its seat was compensated, not committed
-    assert third.reason.event_ref not in run.driver_request_by_seat_event_ref
+    assert len(reg) == 3                                    # seats 1, 2 + the compensated 3rd
+    assert all(r.queue_status == "CANCELLED" for r in reg)  # first two cancelled by closure
+    assert not any(r.queue_status == "QUEUED" for r in reg)  # no seat leaks to the next round
+    genesis_reqs = [d for d in run.driver_request_registry.values() if d.kind == "MINER_JOIN"]
+    assert len(genesis_reqs) == 3
+    assert all(d.status in ("CANCELLED", "REJECTED") for d in genesis_reqs)   # all terminal
+    assert not run.pending_driver_request_index
+    assert any(o.kind == "round_initialise_aborted" for o in run.log)
 
 
 # ---------------------------------------------------------------- TV326
@@ -252,6 +254,12 @@ def test_tv335_duplicate_genesis_configuration_structured_failure():
     rc = run.current_round_context
     assert rc.round_state == "ROUND_ABORTED"
     assert rc.terminal_disposition == "genesis_admission_failed"
+    # S2B-5 cleanup: zero PENDING requests, zero QUEUED genesis registrations remain.
+    assert not run.pending_driver_request_index
+    assert not any(r.event_type == "MinerRegisterEvent" and r.queue_status == "QUEUED"
+                   for r in run.event_queue.queued_event_registry.values())
+    assert all(d.status in ("CANCELLED", "REJECTED")
+               for d in run.driver_request_registry.values() if d.kind == "MINER_JOIN")
 
 
 # ---------------------------------------------------------------- TV336

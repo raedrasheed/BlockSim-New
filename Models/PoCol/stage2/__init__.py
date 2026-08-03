@@ -15,12 +15,12 @@ from .events import (EventRef, EventQueue, Outcome, ScheduleEvent, CancelQueuedE
                      next_representable_simulation_time, DESCRIPTORS,
                      MICROPHASE_ORDINAL)
 from .context import (RunContext, RoundContext, BootstrapRequest, DriverRequest,
-                      MinerRecord, EXACT_ROUND, NEXT_AVAILABLE_ROUND, RUN_LEVEL,
-                      MINER_STATES, DRIVER_REQUEST_STATUSES)
+                      MinerRecord, EvaluationRecord, EXACT_ROUND, NEXT_AVAILABLE_ROUND,
+                      RUN_LEVEL, MINER_STATES, DRIVER_REQUEST_STATUSES)
 from .driver import (SeatMinerRegister, SeatReserveActivate, SeatNextRoundBootstrap,
                      SeatPendingDriverRequests, SeatDriverEventTransaction, scope_admits)
 from .search import (Template, MinerSearchState, make_template, partition_domain,
-                     sha256_int, target_for_difficulty, WithoutReplacementSampler,
+                     sha256_int, target_for_difficulty, success_probability,
                      SUCCESS_MODEL, WORK_PRIMITIVE)
 from .simulator import (RunInitialise, RunEventLoopToHorizon, ProcessEventTime,
                         RoundAbort, FinalizeSimulationRun, FinalizeSimulationRunNoRound,
@@ -37,7 +37,7 @@ __all__ = [
     "ordinary_dispatch_origin", "driver_kind_may_seat",
     "next_representable_simulation_time", "DESCRIPTORS", "MICROPHASE_ORDINAL",
     "RunContext", "RoundContext", "BootstrapRequest", "DriverRequest", "MinerRecord",
-    "EXACT_ROUND", "NEXT_AVAILABLE_ROUND", "RUN_LEVEL", "MINER_STATES",
+    "EvaluationRecord", "EXACT_ROUND", "NEXT_AVAILABLE_ROUND", "RUN_LEVEL", "MINER_STATES",
     "DRIVER_REQUEST_STATUSES",
     "SeatMinerRegister", "SeatReserveActivate", "SeatNextRoundBootstrap",
     "SeatPendingDriverRequests", "scope_admits",
@@ -46,7 +46,7 @@ __all__ = [
     "run_simulation",
     "SeatDriverEventTransaction",
     "Template", "MinerSearchState", "make_template", "partition_domain", "sha256_int",
-    "target_for_difficulty", "WithoutReplacementSampler", "SUCCESS_MODEL", "WORK_PRIMITIVE",
+    "target_for_difficulty", "success_probability", "SUCCESS_MODEL", "WORK_PRIMITIVE",
     "run_energy_experiment", "EnergyExperimentResult", "MinerEnergyRow",
     "run_pocol_stage2", "stage2config_from_blocksim", "results_schema",
     "RESULT_SCHEMA_VERSION",

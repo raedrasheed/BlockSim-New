@@ -1,0 +1,63 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0 -- /usr/local/bin/python3
+rootdir: /home/user/blocksim-v45-stage2b
+collecting ... collected 37 items
+
+tests/thesis_revision_v45/stage2/test_stage2_adapter.py::test_adapter_maps_blocksim_config PASSED [  2%]
+tests/thesis_revision_v45/stage2/test_stage2_adapter.py::test_adapter_returns_declared_schema PASSED [  5%]
+tests/thesis_revision_v45/stage2/test_stage2_adapter.py::test_adapter_default_config_is_canonical_a1_reference PASSED [  8%]
+tests/thesis_revision_v45/stage2/test_stage2_adapter.py::test_results_schema_directly PASSED [ 10%]
+tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e1_first_round_reaches_hashing_and_accepts PASSED [ 13%]
+tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e2_first_round_aborts_then_second_round_starts PASSED [ 16%]
+tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e3_consecutive_rounds_no_event_leakage PASSED [ 18%]
+tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e4_reaches_horizon_energy_and_residency_reconcile PASSED [ 21%]
+tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e5_next_round_bootstrap_failure_partial_finalization PASSED [ 24%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci1_simulator_ranges_disjoint_and_cover_domain PASSED [ 27%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci2_ledger_zero_duplicate_template_nonce PASSED [ 29%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci3_every_active_miner_worked_or_justified_zero PASSED [ 32%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci4_no_ledger_completion_after_round_end PASSED [ 35%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci5_searched_count_equals_ledger_count PASSED [ 37%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci6_fixed_target_hash_validation_exact PASSED [ 40%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci7_zero_solution_template_full_domain_exhaustion PASSED [ 43%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci8_matched_control_and_idle_same_template_target_winner_end PASSED [ 45%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci9_pidle_equals_pactive_zero_saving PASSED [ 48%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci10_canonical_a1_baseline PASSED [ 51%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_s2b1_easier_target_is_superset PASSED [ 54%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_s2b1_difficulty_changes_success_distribution PASSED [ 56%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_s2b1_target_is_used_not_stored_and_ignored PASSED [ 59%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_s2b1_zero_and_multi_solution_outcomes_exist PASSED [ 62%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv325_partial_genesis_third_seat_fails_round_aborts_through_closure PASSED [ 64%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv326_template_commit_seat_failure_after_genesis_seats_exist PASSED [ 67%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv327_queued_exact_round_event_cancelled_before_rotation PASSED [ 70%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv328_next_available_effective_round_time_binding PASSED [ 72%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv329_future_events_during_partial_finalization_are_cancelled PASSED [ 75%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv330_failure_between_schedule_commit_and_request_publication PASSED [ 78%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv331_cancellation_status_publication_coherent_and_failure_captured PASSED [ 81%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv332_distinct_equal_deficit_reserve_incidents PASSED [ 83%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv333_exact_replay_returns_status_eventref_disposition PASSED [ 86%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv334_foreign_run_context_sharing_eq_rejected PASSED [ 89%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv335_duplicate_genesis_configuration_structured_failure PASSED [ 91%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv336_cancelled_request_event_at_dispatch_no_domain_effect PASSED [ 94%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv337_driver_target_before_frontier_rejected PASSED [ 97%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv338_driver_binding_stale_round_scope_no_domain_effect PASSED [100%]
+
+- generated xml file: /home/user/blocksim-v45-stage2b/docs/thesis_revision_v45/stage_02/evidence/pytest_stage2b.junit.xml -
+============================== slowest durations ===============================
+0.99s call     tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e4_reaches_horizon_energy_and_residency_reconcile
+0.44s call     tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e2_first_round_aborts_then_second_round_starts
+0.40s call     tests/thesis_revision_v45/stage2/test_stage2_adapter.py::test_adapter_returns_declared_schema
+0.32s call     tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e3_consecutive_rounds_no_event_leakage
+0.23s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci2_ledger_zero_duplicate_template_nonce
+0.21s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci3_every_active_miner_worked_or_justified_zero
+0.20s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci4_no_ledger_completion_after_round_end
+0.19s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci1_simulator_ranges_disjoint_and_cover_domain
+0.19s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci5_searched_count_equals_ledger_count
+0.16s call     tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e1_first_round_reaches_hashing_and_accepts
+0.15s call     tests/thesis_revision_v45/stage2/test_stage2_adapter.py::test_results_schema_directly
+0.09s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci9_pidle_equals_pactive_zero_saving
+0.09s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci8_matched_control_and_idle_same_template_target_winner_end
+0.05s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci7_zero_solution_template_full_domain_exhaustion
+0.01s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_s2b1_difficulty_changes_success_distribution
+
+(96 durations < 0.005s hidden.  Use -vv to show these durations.)
+============================== 37 passed in 3.80s ==============================
