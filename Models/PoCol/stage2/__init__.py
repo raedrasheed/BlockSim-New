@@ -34,7 +34,7 @@ from .security import (SecurityFloorPolicy, RangeSlice, ReserveMinerRecord,
                        PRIMARY_ASSIGNMENT, ACTIVATED_RESERVE_ASSIGNMENT)
 from .leases import (RangeLeasePolicy, RangeLease, RangeProgress,
                      RangeReassignmentDecision, RangeReassignmentRequest,
-                     RangeLeaseObservation, ReassignmentCandidate,
+                     RangeLeaseObservation, ReassignmentWakeHandle, ReassignmentCandidate,
                      select_reassignment_candidate,
                      LEASE_STATUSES, TERMINAL_LEASE_STATUSES, REASSIGN_REQUEST_STATUSES,
                      TERMINAL_REASSIGN_REQUEST_STATUSES, LEASE_DECISIONS,
@@ -50,7 +50,7 @@ from .simulator import (RunInitialise, RunEventLoopToHorizon, ProcessEventTime,
 from .energy_experiment import (run_energy_experiment, EnergyExperimentResult,
                                 MinerEnergyRow)
 from .adapter import (run_pocol_stage2, stage2config_from_blocksim, results_schema,
-                      RESULT_SCHEMA_VERSION)
+                      reassignment_energy_report, RESULT_SCHEMA_VERSION)
 
 __all__ = [
     "Stage2Config", "A1_BASELINE_KWH", "JOULES_PER_KWH", "a1_continuous_control_kwh",
@@ -82,11 +82,12 @@ __all__ = [
     "PRIMARY_ASSIGNMENT", "ACTIVATED_RESERVE_ASSIGNMENT",
     "EvaluateSecurityFloor", "SeatReserveActivation", "SeatReserveActivationTransaction",
     "RangeLeasePolicy", "RangeLease", "RangeProgress", "RangeReassignmentDecision",
-    "RangeReassignmentRequest", "RangeLeaseObservation", "ReassignmentCandidate",
-    "select_reassignment_candidate",
+    "RangeReassignmentRequest", "RangeLeaseObservation", "ReassignmentWakeHandle",
+    "ReassignmentCandidate", "select_reassignment_candidate",
     "LEASE_STATUSES", "TERMINAL_LEASE_STATUSES", "REASSIGN_REQUEST_STATUSES",
     "TERMINAL_REASSIGN_REQUEST_STATUSES", "LEASE_DECISIONS", "REASSIGN_POLICY_RESULTS",
     "LEASE_TRIGGERS", "NO_ELIGIBLE_MINER_POLICIES", "REASSIGNMENT_SELECTION_POLICIES",
     "RESERVE_ACTIVATION_SCOPES", "REASSIGNED_PRIMARY_WORK", "REASSIGNED_RESERVE_WORK",
     "EvaluateRangeLease", "RevokeRangeLeaseTransaction", "SeatRangeReassignmentTransaction",
+    "reassignment_energy_report",
 ]

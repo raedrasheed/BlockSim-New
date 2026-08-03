@@ -227,10 +227,13 @@ class RunContext:
         # frontier, so re-observing the SAME terminal lease returns the existing request with no
         # manual generation rewind.
         self.reassignment_by_predecessor: Dict[Any, Any] = {}
-        # S4A-6: reassignment wake-handle slices (Stage-3 REASSIGNMENT_WAKE_ONLY scope) — a
-        # continuation of an EXISTING slice, NEVER an independent nonce-domain partition member.
-        self.reassignment_wake_slice_by_id: Dict[str, Any] = {}
-        self.lease_observation_by_key: Dict[Any, Any] = {}   # S4-5 idempotent replay registry
+        # S4B-4: reassignment wake handles (Stage-3 REASSIGNMENT_WAKE_ONLY scope) — NON-domain
+        # lifecycle tokens with NO nonce interval; NEVER a nonce-domain partition member.  The
+        # ORIGINAL RangeProgress (OriginalRangeSliceID) remains the sole interval authority.
+        self.reassignment_wake_handles: Dict[str, Any] = {}
+        # S4B-2: the idempotent replay registry stores the FULL stored result per observation key
+        # (observation, decision-or-null, outcome-or-disposition) so an exact replay can return it.
+        self.lease_observation_by_key: Dict[Any, Any] = {}
         self.lease_seq: int = 0
         self.reassignment_decision_seq: int = 0
         self.reassignment_retry_seq: Dict[str, int] = {}
@@ -257,6 +260,10 @@ class RunContext:
             "pathb_rollback_count": 0, "overlapping_slice_count": 0, "orphan_count": 0,
             "reassignment_replay_count": 0, "lease_observation_count": 0,
             "max_reassignment_energy_residual": 0.0,
+            # S4B executable-blocker counters.
+            "unknown_trigger_rejections": 0, "wake_start_seat_failures": 0,
+            "wake_complete_seat_failures": 0, "miners_terminalised_with_lease": 0,
+            "wakes_cancelled_with_lease": 0, "wake_handles_created": 0,
         }
         # audit log
         self.log: List[Outcome] = []

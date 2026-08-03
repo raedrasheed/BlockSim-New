@@ -1,0 +1,194 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0 -- /usr/local/bin/python
+rootdir: /home/user/blocksim-v45-stage4b
+collecting ... collected 115 items
+
+tests/thesis_revision_v45/stage2/test_stage2_adapter.py::test_adapter_maps_blocksim_config PASSED [  0%]
+tests/thesis_revision_v45/stage2/test_stage2_adapter.py::test_adapter_returns_declared_schema PASSED [  1%]
+tests/thesis_revision_v45/stage2/test_stage2_adapter.py::test_adapter_default_config_is_canonical_a1_reference PASSED [  2%]
+tests/thesis_revision_v45/stage2/test_stage2_adapter.py::test_results_schema_directly PASSED [  3%]
+tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e1_first_round_reaches_hashing_and_accepts PASSED [  4%]
+tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e2_first_round_aborts_then_second_round_starts PASSED [  5%]
+tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e3_consecutive_rounds_no_event_leakage PASSED [  6%]
+tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e4_reaches_horizon_energy_and_residency_reconcile PASSED [  6%]
+tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e5_next_round_bootstrap_failure_partial_finalization PASSED [  7%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci1_simulator_ranges_disjoint_and_cover_domain PASSED [  8%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci2_ledger_zero_duplicate_template_nonce PASSED [  9%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci3_every_active_miner_worked_or_justified_zero PASSED [ 10%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci4_no_ledger_completion_after_round_end PASSED [ 11%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci5_searched_count_equals_ledger_count PASSED [ 12%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci6_fixed_target_hash_validation_exact PASSED [ 13%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci7_zero_solution_template_full_domain_exhaustion PASSED [ 13%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci8_matched_control_and_idle_same_template_target_winner_end PASSED [ 14%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci9_pidle_equals_pactive_zero_saving PASSED [ 15%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci10_canonical_a1_baseline PASSED [ 16%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_s2b1_easier_target_is_superset PASSED [ 17%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_s2b1_difficulty_changes_success_distribution PASSED [ 18%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_s2b1_target_is_used_not_stored_and_ignored PASSED [ 19%]
+tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_s2b1_zero_and_multi_solution_outcomes_exist PASSED [ 20%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv325_partial_genesis_third_seat_fails_round_aborts_through_closure PASSED [ 20%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv326_template_commit_seat_failure_after_genesis_seats_exist PASSED [ 21%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv327_queued_exact_round_event_cancelled_before_rotation PASSED [ 22%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv328_next_available_effective_round_time_binding PASSED [ 23%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv329_future_events_during_partial_finalization_are_cancelled PASSED [ 24%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv330_failure_between_schedule_commit_and_request_publication PASSED [ 25%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv331_cancellation_status_publication_coherent_and_failure_captured PASSED [ 26%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv332_distinct_equal_deficit_reserve_incidents PASSED [ 26%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv333_exact_replay_returns_status_eventref_disposition PASSED [ 27%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv334_foreign_run_context_sharing_eq_rejected PASSED [ 28%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv335_duplicate_genesis_configuration_structured_failure PASSED [ 29%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv336_cancelled_request_event_at_dispatch_no_domain_effect PASSED [ 30%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv337_driver_target_before_frontier_rejected PASSED [ 31%]
+tests/thesis_revision_v45/stage2/test_stage2_semantic_vectors.py::test_tv338_driver_binding_stale_round_scope_no_domain_effect PASSED [ 32%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_01_floor_satisfied_no_activation PASSED [ 33%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_02_breach_after_exhaust_seats_activation PASSED [ 33%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_03_waking_reserve_not_counted PASSED [ 34%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_04_completed_reserve_active_counts_and_hashes PASSED [ 35%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_05_minimal_sufficient_subset PASSED [ 36%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_06_two_runs_select_same_reserves_and_slices PASSED [ 37%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_07_primary_and_reserve_slices_disjoint_cover_domain PASSED [ 38%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_08_activated_reserve_searches_only_its_slice PASSED [ 39%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_09_ledger_zero_duplicate_across_primary_and_reserve PASSED [ 40%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_10_exact_replay_creates_no_second_activation PASSED [ 40%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_11_stale_cross_round_activation_no_effect PASSED [ 41%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_12_pool_insufficient_floor_unattainable_reports_residual PASSED [ 42%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_13_continue_degraded_accumulates_exact_duration_below_floor PASSED [ 43%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_14_abort_round_closes_through_owner_no_live_activation PASSED [ 44%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_15_closure_cancels_pending_waking_and_terminalises_slices PASSED [ 45%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_16_reserve_energy_equals_residency_terms PASSED [ 46%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_17_floor_does_not_change_target_or_difficulty PASSED [ 46%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_18_full_domain_no_block_includes_reserve_slices_once PASSED [ 47%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_adapter_schema_stage3_fields PASSED [ 48%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_01_active_hashing_missing_assignment_excluded PASSED [ 49%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_02_sequential_wakes_observe_and_measure_initial_interval PASSED [ 50%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_03_observation_key_replay_idempotent PASSED [ 51%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_04_minimum_cardinality_selects_single_high_rate PASSED [ 52%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_05_start_seat_failure_rolls_back PASSED [ 53%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_06_complete_seat_failure_no_stranded_waking PASSED [ 53%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_07_tampered_identity_no_effect PASSED [ 54%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_08_completed_request_has_both_event_refs PASSED [ 55%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_09_closure_terminalises_all_records_and_requests PASSED [ 56%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_10_floor_zero_unused_reserve_domain_not_full_domain PASSED [ 57%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_11_true_full_domain_exhaustion_covers_all_once PASSED [ 58%]
+tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_12_adapter_enables_floor_and_activates_from_config PASSED [ 59%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_01_every_primary_gets_one_active_lease PASSED [ 60%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_02_every_activated_reserve_gets_one_active_lease PASSED [ 60%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_03_committed_progress_is_exact PASSED [ 61%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_04_planning_does_not_advance_frontier PASSED [ 62%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_05_miner_failure_revokes_lease_and_cancels_hash_event PASSED [ 63%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_06_new_lease_begins_at_committed_frontier PASSED [ 64%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_07_reassignee_evaluates_no_nonce_below_frontier PASSED [ 65%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_08_zero_duplicate_nonce_across_predecessor_and_successor PASSED [ 66%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_09_stale_old_lease_hash_event_no_effect PASSED [ 66%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_10_exact_replay_creates_no_second_lease_or_event PASSED [ 67%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_11_two_runs_select_same_reassignment_miner PASSED [ 68%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_12_reserve_reassignee_uses_stage3_wake_lifecycle PASSED [ 69%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_13_no_eligible_continue_records_uncovered_suffix PASSED [ 70%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_14_no_eligible_abort_closes_through_owner PASSED [ 71%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_15_reassignment_seat_failure_leaves_coherent_state PASSED [ 72%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_16_closure_terminalises_all_leases_and_requests PASSED [ 73%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_17_full_domain_rejected_with_unassigned_suffix PASSED [ 73%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_18_true_full_domain_after_reassignment_covers_all_once PASSED [ 74%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_19_reassignment_energy_equals_residency_terms PASSED [ 75%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_20_lease_policy_does_not_change_target_or_difficulty PASSED [ 76%]
+tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_adapter_schema_and_execution_from_config PASSED [ 77%]
+tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_01_lease_expiry_is_executable PASSED [ 78%]
+tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_02_expiry_cancels_that_leases_queued_events PASSED [ 79%]
+tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_03_progress_timeout_is_executable PASSED [ 80%]
+tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_04_progress_timeout_refreshes_on_causal_advance_not_planning PASSED [ 80%]
+tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_05_miner_cancelled_is_distinct_from_failure PASSED [ 81%]
+tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_06_evaluate_range_lease_is_authoritative PASSED [ 82%]
+tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_07_one_observation_per_observation_and_replay_is_idempotent PASSED [ 83%]
+tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_08_range_exhaust_is_stale_safe_under_leases PASSED [ 84%]
+tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_09_pathb_removes_overlapping_slice_and_binds_original_progress PASSED [ 85%]
+tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_10_pathb_wake_rollback_leaves_no_orphan PASSED [ 86%]
+tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_11_reassignment_replay_is_natural PASSED [ 86%]
+tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_12_reassignment_energy_attributed_by_lifecycle_interval PASSED [ 87%]
+tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_13_exact_metrics_across_all_correction_scenarios PASSED [ 88%]
+tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_14_disabled_by_default_and_target_unchanged PASSED [ 89%]
+tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_01_lease_expiry_before_wake_never_activates_the_miner PASSED [ 90%]
+tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_02_expiry_after_wake_no_active_miner_without_active_lease PASSED [ 91%]
+tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_03_progress_timeout_transitions_miner_to_low_power PASSED [ 92%]
+tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_04_unknown_trigger_is_rejected_and_leaves_state_unchanged PASSED [ 93%]
+tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_05_range_exhaust_without_lease_id_is_rejected PASSED [ 93%]
+tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_06_premature_current_lease_range_exhaust_is_no_effect PASSED [ 94%]
+tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_07_every_frontier_advance_bumps_progress_generation_and_refreshes_timeout PASSED [ 95%]
+tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_08_pathb_uses_wake_handle_and_creates_no_range_slice PASSED [ 96%]
+tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_09_pathb_start_seat_failure_leaves_no_orphan PASSED [ 97%]
+tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_10_pathb_complete_seat_failure_leaves_no_orphan_or_inflight PASSED [ 98%]
+tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_11_natural_replay_returns_complete_stored_result PASSED [ 99%]
+tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_12_per_request_energy_attribution_is_complete_and_reconciles PASSED [100%]
+
+- generated xml file: /home/user/blocksim-v45-stage4b/docs/thesis_revision_v45/stage_04b/evidence/pytest_stage4b.junit.xml -
+============================== slowest durations ===============================
+1.26s call     tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e4_reaches_horizon_energy_and_residency_reconcile
+1.08s call     tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_13_exact_metrics_across_all_correction_scenarios
+0.59s call     tests/thesis_revision_v45/stage2/test_stage2_adapter.py::test_adapter_returns_declared_schema
+0.53s call     tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e2_first_round_aborts_then_second_round_starts
+0.51s call     tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_03_progress_timeout_transitions_miner_to_low_power
+0.48s call     tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_03_progress_timeout_is_executable
+0.44s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_15_closure_cancels_pending_waking_and_terminalises_slices
+0.41s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_13_continue_degraded_accumulates_exact_duration_below_floor
+0.40s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_06_two_runs_select_same_reserves_and_slices
+0.39s call     tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e3_consecutive_rounds_no_event_leakage
+0.37s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_12_pool_insufficient_floor_unattainable_reports_residual
+0.32s call     tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_05_miner_cancelled_is_distinct_from_failure
+0.31s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci2_ledger_zero_duplicate_template_nonce
+0.27s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_09_ledger_zero_duplicate_across_primary_and_reserve
+0.25s call     tests/thesis_revision_v45/stage2/test_stage2_adapter.py::test_results_schema_directly
+0.25s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_16_reserve_energy_equals_residency_terms
+0.25s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci3_every_active_miner_worked_or_justified_zero
+0.24s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci1_simulator_ranges_disjoint_and_cover_domain
+0.24s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_11_true_full_domain_exhaustion_covers_all_once
+0.24s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci4_no_ledger_completion_after_round_end
+0.23s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci5_searched_count_equals_ledger_count
+0.21s call     tests/thesis_revision_v45/stage2/test_stage2_e2e.py::test_e2e1_first_round_reaches_hashing_and_accepts
+0.20s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_adapter_schema_stage3_fields
+0.19s call     tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_01_lease_expiry_is_executable
+0.19s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_12_adapter_enables_floor_and_activates_from_config
+0.19s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_01_floor_satisfied_no_activation
+0.18s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_02_sequential_wakes_observe_and_measure_initial_interval
+0.18s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_10_floor_zero_unused_reserve_domain_not_full_domain
+0.17s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_08_completed_request_has_both_event_refs
+0.17s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3a_09_closure_terminalises_all_records_and_requests
+0.17s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_05_minimal_sufficient_subset
+0.17s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_18_full_domain_no_block_includes_reserve_slices_once
+0.17s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_08_activated_reserve_searches_only_its_slice
+0.17s call     tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_12_per_request_energy_attribution_is_complete_and_reconciles
+0.17s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_07_primary_and_reserve_slices_disjoint_cover_domain
+0.16s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_02_breach_after_exhaust_seats_activation
+0.16s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_04_completed_reserve_active_counts_and_hashes
+0.15s call     tests/thesis_revision_v45/stage2/test_stage3_security_floor.py::test_s3_14_abort_round_closes_through_owner_no_live_activation
+0.15s call     tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_07_every_frontier_advance_bumps_progress_generation_and_refreshes_timeout
+0.14s call     tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_04_progress_timeout_refreshes_on_causal_advance_not_planning
+0.13s call     tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_12_reassignment_energy_attributed_by_lifecycle_interval
+0.12s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci9_pidle_equals_pactive_zero_saving
+0.12s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci8_matched_control_and_idle_same_template_target_winner_end
+0.11s call     tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_11_two_runs_select_same_reassignment_miner
+0.11s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_sci7_zero_solution_template_full_domain_exhaustion
+0.11s call     tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_07_reassignee_evaluates_no_nonce_below_frontier
+0.08s call     tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_01_lease_expiry_before_wake_never_activates_the_miner
+0.07s call     tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_09_pathb_removes_overlapping_slice_and_binds_original_progress
+0.07s call     tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_08_pathb_uses_wake_handle_and_creates_no_range_slice
+0.07s call     tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_09_pathb_start_seat_failure_leaves_no_orphan
+0.07s call     tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_10_pathb_complete_seat_failure_leaves_no_orphan_or_inflight
+0.07s call     tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_10_pathb_wake_rollback_leaves_no_orphan
+0.06s call     tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_08_zero_duplicate_nonce_across_predecessor_and_successor
+0.06s call     tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_adapter_schema_and_execution_from_config
+0.06s call     tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_06_new_lease_begins_at_committed_frontier
+0.06s call     tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_19_reassignment_energy_equals_residency_terms
+0.06s call     tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_18_true_full_domain_after_reassignment_covers_all_once
+0.06s call     tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_03_committed_progress_is_exact
+0.06s call     tests/thesis_revision_v45/stage2/test_stage4b_terminal_pathb_replay_energy.py::test_s4b_02_expiry_after_wake_no_active_miner_without_active_lease
+0.06s call     tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_05_miner_failure_revokes_lease_and_cancels_hash_event
+0.05s call     tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_16_closure_terminalises_all_leases_and_requests
+0.05s call     tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_14_disabled_by_default_and_target_unchanged
+0.04s call     tests/thesis_revision_v45/stage2/test_stage4a_lease_lifecycle.py::test_s4a_02_expiry_cancels_that_leases_queued_events
+0.04s call     tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_12_reserve_reassignee_uses_stage3_wake_lifecycle
+0.03s call     tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_02_every_activated_reserve_gets_one_active_lease
+0.01s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_s2b1_difficulty_changes_success_distribution
+0.01s call     tests/thesis_revision_v45/stage2/test_stage4_range_leases.py::test_s4_14_no_eligible_abort_closes_through_owner
+0.01s call     tests/thesis_revision_v45/stage2/test_stage2_scientific.py::test_s2b1_easier_target_is_superset
+
+(277 durations < 0.005s hidden.  Use -vv to show these durations.)
+============================= 115 passed in 14.39s =============================

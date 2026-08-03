@@ -212,17 +212,49 @@ class RangeReassignmentRequest:
     seated_at: Optional[float] = None
     started_at: Optional[float] = None
     completed_at: Optional[float] = None
-    # S4A-9: exact reassignment-lifecycle interval timestamps + residency snapshots for energy
-    # attribution.  The wake/active energy is charged over the LIFECYCLE INTERVAL only (never the
-    # reassignee's full residency, which may include its own earlier primary work); the snapshots
-    # let the adapter reconcile the interval attribution against the residency ledger EXACTLY.
+    # S4A-9/S4B-7: exact reassignment-lifecycle interval timestamps + residency snapshots for a
+    # COMPLETE per-request energy attribution.  Every interval energy is charged over its LIFECYCLE
+    # INTERVAL only (never the reassignee's full residency), and each snapshot lets the adapter
+    # reconcile the interval attribution against the residency ledger EXACTLY.  The wake window is
+    # attributed even when the wake FAILS (S4B-5/S4B-7).
+    wake_handle_id: Any = None
+    predecessor_MinerID: Any = None
+    terminal_time: Optional[float] = None
     reassigned_search_start_time: Optional[float] = None
     reassigned_search_end_time: Optional[float] = None
     wake_residency_at_start: Optional[float] = None
     wake_residency_at_end: Optional[float] = None
     active_residency_at_search_start: Optional[float] = None
     active_residency_at_search_end: Optional[float] = None
+    # S4B-7 predecessor + reassignee-standby residency snapshots (at revocation / at wake start).
+    predecessor_active_residency_at_revoke: Optional[float] = None
+    predecessor_low_residency_at_revoke: Optional[float] = None
+    predecessor_offline_residency_at_revoke: Optional[float] = None
+    reassignee_reserve_residency_at_wake_start: Optional[float] = None
+    reassignee_low_residency_at_wake_start: Optional[float] = None
     disposition: Any = None
+
+
+@dataclass
+class ReassignmentWakeHandle:
+    """S4B-4: a NON-domain lifecycle token used to wake a reserve reassignee via the accepted
+    Stage-3 activation lifecycle WITHOUT instantiating a RangeSlice.
+
+    It carries NO nonce interval — the ORIGINAL ``RangeProgress`` (``OriginalRangeSliceID``)
+    remains the sole interval authority.  It is registered only in
+    ``RunContext.reassignment_wake_handles`` and NEVER in ``reserve_slice_by_id`` /
+    ``reserve_slices`` / any nonce-domain range registry.
+    """
+
+    WakeHandleID: str
+    RoundID: Any
+    TemplateID: Any
+    OriginalRangeSliceID: str
+    RangeReassignmentRequestID: Any
+    MinerID: Any
+    generation: int
+    status: str = "UNCLAIMED"           # UNCLAIMED | CLAIMED | ACTIVE | EXHAUSTED | CANCELLED
+    claimed_by: Optional[Any] = None
 
 
 @dataclass

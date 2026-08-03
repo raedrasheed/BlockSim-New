@@ -180,6 +180,81 @@ def results_schema(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
     return out
 
 
+def reassignment_energy_report(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
+    """S4B-7: a COMPLETE per-request reassignment-energy attribution over the lifecycle intervals.
+
+    One row per RangeReassignmentRequest — COMPLETED, FAILED and CANCELLED alike — with the
+    predecessor active-before / idle-after energy, the reassignee standby-before-wake energy, the
+    (possibly failed) wake energy, the reassigned active-hashing energy, every lifecycle timestamp
+    and the request status/disposition.  ``energy consumed by a failed wake / reassignment path``
+    is NOT omitted.  Each interval energy is a residency-ledger delta (attributed by interval, not
+    by full residency), and ``max_energy_residual_j`` is the largest interval-vs-ledger mismatch
+    (0.0 J when every interval reconciles).
+    """
+    P = cfg.per_miner_power
+    Pw, Ph = P("WAKING"), P("ACTIVE_HASHING")
+    Pres, Plow, Poff = P("RESERVE"), P("LOW_POWER_LISTEN"), P("OFFLINE")
+    rows = []
+    agg = {"predecessor_active_energy_j": 0.0, "predecessor_idle_or_offline_energy_j": 0.0,
+           "reassignee_standby_energy_j": 0.0, "reassignment_wake_energy_j": 0.0,
+           "reassignment_active_hashing_energy_j": 0.0}
+    max_residual = 0.0
+    for req in run_ctx.reassignment_requests.values():
+        pm = run_ctx.miners.get(req.predecessor_MinerID)
+        nm = run_ctx.miners.get(req.new_MinerID)
+        # predecessor: active energy BEFORE revocation + idle/offline energy AFTER revocation.
+        pred_active_j = Ph * (req.predecessor_active_residency_at_revoke or 0.0)
+        pred_idle_j = 0.0
+        if pm is not None and req.predecessor_low_residency_at_revoke is not None:
+            pred_idle_j = (Plow * (pm.duration.get("LOW_POWER_LISTEN", 0.0)
+                                   - req.predecessor_low_residency_at_revoke)
+                           + Poff * (pm.duration.get("OFFLINE", 0.0)
+                                     - (req.predecessor_offline_residency_at_revoke or 0.0)))
+        # reassignee standby (RESERVE + LOW_POWER) accrued BEFORE the wake.
+        standby_j = (Pres * (req.reassignee_reserve_residency_at_wake_start or 0.0)
+                     + Plow * (req.reassignee_low_residency_at_wake_start or 0.0))
+        # wake interval [started_at, completed_at] (or [started_at, terminal_time] if failed).
+        wake_j = 0.0
+        if req.started_at is not None:
+            wake_end = req.completed_at if req.completed_at is not None else req.terminal_time
+            if wake_end is not None:
+                wake_dur = wake_end - req.started_at
+                wake_j = Pw * wake_dur
+                if req.wake_residency_at_start is not None and req.wake_residency_at_end is not None:
+                    ledger = req.wake_residency_at_end - req.wake_residency_at_start
+                    max_residual = max(max_residual, Pw * abs(ledger - wake_dur))
+        # reassigned active-hashing interval [search_start, search_end] (COMPLETED only).
+        active_j = 0.0
+        if req.reassigned_search_start_time is not None \
+                and req.reassigned_search_end_time is not None:
+            act_dur = req.reassigned_search_end_time - req.reassigned_search_start_time
+            active_j = Ph * act_dur
+            if req.active_residency_at_search_start is not None \
+                    and req.active_residency_at_search_end is not None:
+                ledger = req.active_residency_at_search_end - req.active_residency_at_search_start
+                max_residual = max(max_residual, Ph * abs(ledger - act_dur))
+        agg["predecessor_active_energy_j"] += pred_active_j
+        agg["predecessor_idle_or_offline_energy_j"] += pred_idle_j
+        agg["reassignee_standby_energy_j"] += standby_j
+        agg["reassignment_wake_energy_j"] += wake_j
+        agg["reassignment_active_hashing_energy_j"] += active_j
+        rows.append({
+            "RangeReassignmentRequestID": req.RangeReassignmentRequestID, "status": req.status,
+            "needs_stage3_wake": req.needs_stage3_wake,
+            "predecessor_MinerID": req.predecessor_MinerID, "reassignee_MinerID": req.new_MinerID,
+            "seated_at": req.seated_at, "started_at": req.started_at,
+            "completed_at": req.completed_at, "search_start": req.reassigned_search_start_time,
+            "search_end": req.reassigned_search_end_time, "terminal_time": req.terminal_time,
+            "predecessor_active_energy_before_revocation_j": pred_active_j,
+            "predecessor_idle_or_offline_energy_after_revocation_j": pred_idle_j,
+            "reassignee_standby_energy_before_wake_j": standby_j,
+            "reassignment_wake_energy_j": wake_j,
+            "reassignment_active_hashing_energy_j": active_j,
+            "disposition": getattr(req.disposition, "kind", None)})
+    return {"per_request": rows, "aggregate": agg,
+            "request_count": len(rows), "max_energy_residual_j": max_residual}
+
+
 def _range_lease_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
     """S4-13 / S4A-9 result fields: range-lease / reassignment metrics + reassignment energy.
 
@@ -240,7 +315,9 @@ def _range_lease_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
                              if l.lease_status not in TERMINAL_LEASE_STATUSES)
     nonterminal_requests = sum(1 for r in run_ctx.reassignment_requests.values()
                                if r.status not in TERMINAL_REASSIGN_REQUEST_STATUSES)
-    s["max_reassignment_energy_residual"] = max_energy_residual
+    energy_report = reassignment_energy_report(run_ctx, cfg)
+    residual = max(max_energy_residual, energy_report["max_energy_residual_j"])
+    s["max_reassignment_energy_residual"] = residual
     return {
         "range_lease_enabled": pol.enabled,
         "lease_duration": pol.lease_duration,
@@ -266,7 +343,13 @@ def _range_lease_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
         "stale_exhaust_events": s["stale_exhaust_events"],
         "lease_observation_count": s["lease_observation_count"],
         "lease_observation_replay_count": s["lease_observation_replay_count"],
+        "unknown_trigger_rejections": s["unknown_trigger_rejections"],
         "pathb_rollback_count": s["pathb_rollback_count"],
+        "wake_handles_created": s["wake_handles_created"],
+        "wake_start_seat_failures": s["wake_start_seat_failures"],
+        "wake_complete_seat_failures": s["wake_complete_seat_failures"],
+        "miners_terminalised_with_lease": s["miners_terminalised_with_lease"],
+        "wakes_cancelled_with_lease": s["wakes_cancelled_with_lease"],
         "overlapping_slice_count": s["overlapping_slice_count"],
         "uncovered_range_count": s["uncovered_range_count"],
         "uncovered_nonce_count": s["uncovered_nonce_count"],
@@ -274,9 +357,12 @@ def _range_lease_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
         "nonterminal_reassignment_request_count": nonterminal_requests,
         "total_reassignment_latency": s["total_reassignment_latency"],
         "maximum_reassignment_latency": s["maximum_reassignment_latency"],
-        "reassignment_wake_energy_kwh": wake_j / 3_600_000.0,
-        "reassignment_active_energy_kwh": active_j / 3_600_000.0,
-        "reassignment_energy_residual_j": max_energy_residual,
+        "reassignment_wake_energy_kwh": energy_report["aggregate"]["reassignment_wake_energy_j"]
+        / 3_600_000.0,
+        "reassignment_active_energy_kwh":
+        energy_report["aggregate"]["reassignment_active_hashing_energy_j"] / 3_600_000.0,
+        "reassignment_energy_residual_j": residual,
+        "reassignment_energy_report": energy_report,
         "duplicate_nonce_count": dup,
         "post_round_evaluation_count": post,
     }

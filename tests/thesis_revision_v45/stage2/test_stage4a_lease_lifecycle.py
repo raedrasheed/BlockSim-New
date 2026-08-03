@@ -295,8 +295,8 @@ def test_s4a_10_pathb_wake_rollback_leaves_no_orphan():
     run.force_activation_start_seat_failure = True           # force the Stage-3 wake seat to fail
     RunEventLoopToHorizon(run)
     assert run.lease_stats["pathb_rollback_count"] >= 1
-    # NO orphan wake-handle slice anywhere.
-    assert not run.reassignment_wake_slice_by_id
+    # NO orphan wake handle anywhere (S4B-4 renamed the registry to reassignment_wake_handles).
+    assert not run.reassignment_wake_handles
     assert not any(sid.startswith("WH-") for sid in run.reserve_slice_by_id)
     assert not any(str(k).startswith("WH-") for k in run.reassign_by_suffix_slice)
     # NO orphan synthetic reserve-wake observation / decision survived the rollback.
