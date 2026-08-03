@@ -20,7 +20,7 @@ from .config import Stage2Config, a1_continuous_control_kwh
 from .simulator import run_simulation
 from .search import SUCCESS_MODEL
 from .security import SecurityFloorPolicy, FLOOR_UNATTAINABLE_POLICIES
-from .leases import RangeLeasePolicy
+from .leases import RangeLeasePolicy, REASSIGNED_PRIMARY_WORK, REASSIGNED_RESERVE_WORK
 
 # Declared result schema keys (stable contract for BlockSim consumers).
 RESULT_SCHEMA_VERSION = "stage4.1"
@@ -180,64 +180,181 @@ def results_schema(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
     return out
 
 
-def reassignment_energy_report(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
-    """S4B-7: a COMPLETE per-request reassignment-energy attribution over the lifecycle intervals.
+def _res_delta(start: Any, end: Any) -> float:
+    """A non-negative residency-ledger delta over an interval; 0.0 when either end is unknown."""
+    if start is None or end is None:
+        return 0.0
+    return max(0.0, end - start)
 
-    One row per RangeReassignmentRequest — COMPLETED, FAILED and CANCELLED alike — with the
-    predecessor active-before / idle-after energy, the reassignee standby-before-wake energy, the
-    (possibly failed) wake energy, the reassigned active-hashing energy, every lifecycle timestamp
-    and the request status/disposition.  ``energy consumed by a failed wake / reassignment path``
-    is NOT omitted.  Each interval energy is a residency-ledger delta (attributed by interval, not
-    by full residency), and ``max_energy_residual_j`` is the largest interval-vs-ledger mismatch
-    (0.0 J when every interval reconciles).
+
+def reassignment_energy_report(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
+    """S4C-1/S4C-2: a COMPLETE per-request reassignment-energy attribution in which EVERY component
+    is a TRUE request-interval residency-ledger DELTA (never the miner's whole-run cumulative
+    residency), plus five independent per-component residuals, an interval-overlap audit and an
+    aggregate-vs-integrated-run-residency bound.
+
+    Five components per request (COMPLETED / FAILED / CANCELLED alike):
+      1 predecessor ACTIVE energy over [lease_start, revocation];
+      2 predecessor IDLE/OFFLINE energy over [revocation, request_terminal];
+      3 reassignee STANDBY (reserve+low+offline) energy over [seat, wake_start] (or [seat, terminal]
+        when the wake never started);
+      4 reassignment WAKE energy over [wake_start, wake_end];
+      5 reassigned ACTIVE-hashing energy over [search_start, search_end].
+
+    A chained (reassigned) predecessor's active work is already owned by the request that
+    provisioned it (its component 5), so component 1 is NOT re-charged for it — no residency second
+    is charged to two requests.  ``max_request_energy_residual_j`` is the largest of the five
+    per-component residuals over all requests (0.0 J when every component reconciles).
+    ``overlapping_charged_interval_count`` proves no miner-state residency interval is charged
+    twice, and the aggregate per (miner, state) never exceeds P_state x that miner's total run
+    residency.
     """
     P = cfg.per_miner_power
     Pw, Ph = P("WAKING"), P("ACTIVE_HASHING")
     Pres, Plow, Poff = P("RESERVE"), P("LOW_POWER_LISTEN"), P("OFFLINE")
+    P_OF = {"WAKING": Pw, "ACTIVE_HASHING": Ph, "RESERVE": Pres,
+            "LOW_POWER_LISTEN": Plow, "OFFLINE": Poff}
+    reassigned_kinds = (REASSIGNED_PRIMARY_WORK, REASSIGNED_RESERVE_WORK)
+    TOL = 1e-9
+
+    charged: Dict[Any, list] = {}      # (miner, state) -> [(lo, hi), ...] cumulative-residency spans
+
+    def _claim(miner: Any, state: str, lo: Any, hi: Any) -> None:
+        if lo is None or hi is None or (hi - lo) <= TOL:
+            return
+        charged.setdefault((miner, state), []).append((lo, hi))
+
+    def _consistency_resid(power: float, miner: Any, state: str, lo: Any, hi: Any) -> float:
+        """Snapshot-vs-final-ledger consistency: a valid charged span is ordered and lies within
+        [0, final cumulative residency]; any violation is a real (non-zero) residual."""
+        if lo is None or hi is None or miner is None:
+            return 0.0                                  # no ledger to reconcile a snapshot against
+        final = miner.duration.get(state, 0.0)
+        bad = 0.0
+        if hi < lo:
+            bad += (lo - hi)
+        if hi > final + TOL:
+            bad += (hi - final)
+        if lo < -TOL:
+            bad += (-lo)
+        return power * bad
+
+    def _time_resid(power: float, snap_lo: Any, snap_hi: Any, t_lo: Any, t_hi: Any) -> float:
+        """A provably single-continuous-state interval: the ledger delta must equal the wall
+        interval (energy = power x that duration)."""
+        if None in (snap_lo, snap_hi, t_lo, t_hi):
+            return 0.0
+        return power * abs((snap_hi - snap_lo) - (t_hi - t_lo))
+
     rows = []
     agg = {"predecessor_active_energy_j": 0.0, "predecessor_idle_or_offline_energy_j": 0.0,
            "reassignee_standby_energy_j": 0.0, "reassignment_wake_energy_j": 0.0,
            "reassignment_active_hashing_energy_j": 0.0}
-    max_residual = 0.0
+    comp_resid = {"predecessor_active_j": 0.0, "predecessor_idle_or_offline_j": 0.0,
+                  "reassignee_standby_j": 0.0, "reassignment_wake_j": 0.0,
+                  "reassignment_active_hashing_j": 0.0}
+    counts = {"COMPLETED": 0, "FAILED": 0, "CANCELLED": 0}
+
     for req in run_ctx.reassignment_requests.values():
         pm = run_ctx.miners.get(req.predecessor_MinerID)
-        nm = run_ctx.miners.get(req.new_MinerID)
-        # predecessor: active energy BEFORE revocation + idle/offline energy AFTER revocation.
-        pred_active_j = Ph * (req.predecessor_active_residency_at_revoke or 0.0)
-        pred_idle_j = 0.0
-        if pm is not None and req.predecessor_low_residency_at_revoke is not None:
-            pred_idle_j = (Plow * (pm.duration.get("LOW_POWER_LISTEN", 0.0)
-                                   - req.predecessor_low_residency_at_revoke)
-                           + Poff * (pm.duration.get("OFFLINE", 0.0)
-                                     - (req.predecessor_offline_residency_at_revoke or 0.0)))
-        # reassignee standby (RESERVE + LOW_POWER) accrued BEFORE the wake.
-        standby_j = (Pres * (req.reassignee_reserve_residency_at_wake_start or 0.0)
-                     + Plow * (req.reassignee_low_residency_at_wake_start or 0.0))
-        # wake interval [started_at, completed_at] (or [started_at, terminal_time] if failed).
-        wake_j = 0.0
-        if req.started_at is not None:
-            wake_end = req.completed_at if req.completed_at is not None else req.terminal_time
-            if wake_end is not None:
-                wake_dur = wake_end - req.started_at
-                wake_j = Pw * wake_dur
-                if req.wake_residency_at_start is not None and req.wake_residency_at_end is not None:
-                    ledger = req.wake_residency_at_end - req.wake_residency_at_start
-                    max_residual = max(max_residual, Pw * abs(ledger - wake_dur))
-        # reassigned active-hashing interval [search_start, search_end] (COMPLETED only).
-        active_j = 0.0
-        if req.reassigned_search_start_time is not None \
-                and req.reassigned_search_end_time is not None:
-            act_dur = req.reassigned_search_end_time - req.reassigned_search_start_time
-            active_j = Ph * act_dur
-            if req.active_residency_at_search_start is not None \
-                    and req.active_residency_at_search_end is not None:
-                ledger = req.active_residency_at_search_end - req.active_residency_at_search_start
-                max_residual = max(max_residual, Ph * abs(ledger - act_dur))
+        cm = run_ctx.miners.get(req.new_MinerID)
+        pred_lease = run_ctx.range_leases.get(req.predecessor_lease_id)
+        pred_kind = pred_lease.assignment_kind if pred_lease is not None else None
+        counts[req.status] = counts.get(req.status, 0) + 1
+
+        # (1) predecessor ACTIVE energy over [lease_start, revocation].  A chained predecessor's
+        # active work was already charged as its provisioning request's component 5 -> not re-charged.
+        a_ls = pred_lease.active_residency_at_lease_start if pred_lease is not None else None
+        a_rev = req.predecessor_active_residency_at_revocation
+        if pred_kind in reassigned_kinds:
+            pred_active_j, r1 = 0.0, 0.0
+        else:
+            pred_active_j = Ph * _res_delta(a_ls, a_rev)
+            r1 = _consistency_resid(Ph, pm, "ACTIVE_HASHING", a_ls, a_rev)
+            _claim(req.predecessor_MinerID, "ACTIVE_HASHING", a_ls, a_rev)
+
+        # (2) predecessor IDLE/OFFLINE energy over [revocation, request_terminal].
+        low_lo, low_hi = (req.predecessor_low_residency_at_revocation,
+                          req.predecessor_low_residency_at_request_terminal)
+        off_lo, off_hi = (req.predecessor_offline_residency_at_revocation,
+                          req.predecessor_offline_residency_at_request_terminal)
+        pred_idle_j = Plow * _res_delta(low_lo, low_hi) + Poff * _res_delta(off_lo, off_hi)
+        r2 = (_consistency_resid(Plow, pm, "LOW_POWER_LISTEN", low_lo, low_hi)
+              + _consistency_resid(Poff, pm, "OFFLINE", off_lo, off_hi))
+        # the predecessor is idled continuously over [revocation, terminal]; the idle-state deltas
+        # must sum to that wall interval.
+        if req.revocation_time is not None and req.terminal_time is not None \
+                and low_hi is not None and off_hi is not None:
+            idle_delta = _res_delta(low_lo, low_hi) + _res_delta(off_lo, off_hi)
+            r2 += max(Plow, Poff) * abs(idle_delta - (req.terminal_time - req.revocation_time))
+        _claim(req.predecessor_MinerID, "LOW_POWER_LISTEN", low_lo, low_hi)
+        _claim(req.predecessor_MinerID, "OFFLINE", off_lo, off_hi)
+
+        # (3) reassignee STANDBY over [seat, wake_start] (or [seat, terminal] if the wake never ran).
+        standby_j = (Pres * _res_delta(req.reassignee_reserve_residency_at_seat,
+                                       req.reassignee_reserve_residency_at_wake_start)
+                     + Plow * _res_delta(req.reassignee_low_residency_at_seat,
+                                         req.reassignee_low_residency_at_wake_start)
+                     + Poff * _res_delta(req.reassignee_offline_residency_at_seat,
+                                         req.reassignee_offline_residency_at_wake_start))
+        r3 = (_consistency_resid(Pres, cm, "RESERVE",
+                                 req.reassignee_reserve_residency_at_seat,
+                                 req.reassignee_reserve_residency_at_wake_start)
+              + _consistency_resid(Plow, cm, "LOW_POWER_LISTEN",
+                                   req.reassignee_low_residency_at_seat,
+                                   req.reassignee_low_residency_at_wake_start)
+              + _consistency_resid(Poff, cm, "OFFLINE",
+                                   req.reassignee_offline_residency_at_seat,
+                                   req.reassignee_offline_residency_at_wake_start))
+        standby_end_t = req.started_at if req.started_at is not None else req.terminal_time
+        if req.seated_at is not None and standby_end_t is not None \
+                and req.reassignee_reserve_residency_at_wake_start is not None:
+            standby_delta = (_res_delta(req.reassignee_reserve_residency_at_seat,
+                                        req.reassignee_reserve_residency_at_wake_start)
+                             + _res_delta(req.reassignee_low_residency_at_seat,
+                                          req.reassignee_low_residency_at_wake_start)
+                             + _res_delta(req.reassignee_offline_residency_at_seat,
+                                          req.reassignee_offline_residency_at_wake_start))
+            r3 += max(Pres, Plow, Poff) * abs(standby_delta - (standby_end_t - req.seated_at))
+        _claim(req.new_MinerID, "RESERVE", req.reassignee_reserve_residency_at_seat,
+               req.reassignee_reserve_residency_at_wake_start)
+        _claim(req.new_MinerID, "LOW_POWER_LISTEN", req.reassignee_low_residency_at_seat,
+               req.reassignee_low_residency_at_wake_start)
+        _claim(req.new_MinerID, "OFFLINE", req.reassignee_offline_residency_at_seat,
+               req.reassignee_offline_residency_at_wake_start)
+
+        # (4) WAKE over [wake_start, wake_end] (continuous WAKING; not omitted when the wake fails).
+        wake_end_t = req.completed_at if req.completed_at is not None else req.terminal_time
+        wake_j = Pw * _res_delta(req.wake_residency_at_start, req.wake_residency_at_end)
+        r4 = _time_resid(Pw, req.wake_residency_at_start, req.wake_residency_at_end,
+                         req.started_at, wake_end_t) \
+            + _consistency_resid(Pw, cm, "WAKING", req.wake_residency_at_start,
+                                 req.wake_residency_at_end)
+        _claim(req.new_MinerID, "WAKING", req.wake_residency_at_start, req.wake_residency_at_end)
+
+        # (5) reassigned ACTIVE-hashing over [search_start, search_end] (continuous ACTIVE_HASHING).
+        active_j = Ph * _res_delta(req.active_residency_at_search_start,
+                                   req.active_residency_at_search_end)
+        r5 = _time_resid(Ph, req.active_residency_at_search_start,
+                         req.active_residency_at_search_end,
+                         req.reassigned_search_start_time, req.reassigned_search_end_time) \
+            + _consistency_resid(Ph, cm, "ACTIVE_HASHING", req.active_residency_at_search_start,
+                                 req.active_residency_at_search_end)
+        _claim(req.new_MinerID, "ACTIVE_HASHING", req.active_residency_at_search_start,
+               req.active_residency_at_search_end)
+
         agg["predecessor_active_energy_j"] += pred_active_j
         agg["predecessor_idle_or_offline_energy_j"] += pred_idle_j
         agg["reassignee_standby_energy_j"] += standby_j
         agg["reassignment_wake_energy_j"] += wake_j
         agg["reassignment_active_hashing_energy_j"] += active_j
+        comp_resid["predecessor_active_j"] = max(comp_resid["predecessor_active_j"], r1)
+        comp_resid["predecessor_idle_or_offline_j"] = \
+            max(comp_resid["predecessor_idle_or_offline_j"], r2)
+        comp_resid["reassignee_standby_j"] = max(comp_resid["reassignee_standby_j"], r3)
+        comp_resid["reassignment_wake_j"] = max(comp_resid["reassignment_wake_j"], r4)
+        comp_resid["reassignment_active_hashing_j"] = \
+            max(comp_resid["reassignment_active_hashing_j"], r5)
         rows.append({
             "RangeReassignmentRequestID": req.RangeReassignmentRequestID, "status": req.status,
             "needs_stage3_wake": req.needs_stage3_wake,
@@ -250,9 +367,38 @@ def reassignment_energy_report(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any
             "reassignee_standby_energy_before_wake_j": standby_j,
             "reassignment_wake_energy_j": wake_j,
             "reassignment_active_hashing_energy_j": active_j,
+            "residual_predecessor_active_j": r1, "residual_predecessor_idle_or_offline_j": r2,
+            "residual_reassignee_standby_j": r3, "residual_reassignment_wake_j": r4,
+            "residual_reassignment_active_hashing_j": r5,
             "disposition": getattr(req.disposition, "kind", None)})
+
+    # interval-overlap audit + aggregate-vs-integrated-run-residency bound (per miner, per state).
+    overlap = 0
+    aggregate_exceeds_run_residency = 0
+    for (miner_id, state), spans in charged.items():
+        spans_sorted = sorted(spans)
+        prev_hi = None
+        total = 0.0
+        for lo, hi in spans_sorted:
+            if prev_hi is not None and lo < prev_hi - TOL:
+                overlap += 1
+            prev_hi = hi if prev_hi is None else max(prev_hi, hi)
+            total += (hi - lo)
+        m = run_ctx.miners.get(miner_id)
+        if m is None:
+            continue                                    # no ledger to bound a synthetic miner against
+        final = m.duration.get(state, 0.0)
+        if total > final + TOL:
+            aggregate_exceeds_run_residency += 1
+
+    max_req_resid = max([0.0] + list(comp_resid.values()))
     return {"per_request": rows, "aggregate": agg,
-            "request_count": len(rows), "max_energy_residual_j": max_residual}
+            "component_residuals_j": comp_resid,
+            "request_count": len(rows), "request_count_by_status": counts,
+            "max_request_energy_residual_j": max_req_resid,
+            "max_energy_residual_j": max_req_resid,      # back-compat alias (S4B name)
+            "overlapping_charged_interval_count": overlap,
+            "aggregate_exceeds_run_residency_count": aggregate_exceeds_run_residency}
 
 
 def _range_lease_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
@@ -336,14 +482,17 @@ def _range_lease_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
         "reassignment_requests_seated": s["reassignment_requests_seated"],
         "reassignment_requests_completed": s["reassignment_requests_completed"],
         "reassignment_requests_failed": s["reassignment_requests_failed"],
-        "reassignment_replay_count": s["reassignment_replay_count"],
+        # S4C-6: the replay / rejection counters are DIAGNOSTIC (non-protocol) and live outside
+        # lease_stats; they are surfaced here for reporting but never mutate protocol state.
+        "reassignment_replay_count": run_ctx.lease_diagnostics["reassignment_replay_count"],
         "stale_old_lease_events": s["stale_old_lease_events"],
         "stale_expiry_events": s["stale_expiry_events"],
         "stale_timeout_events": s["stale_timeout_events"],
         "stale_exhaust_events": s["stale_exhaust_events"],
         "lease_observation_count": s["lease_observation_count"],
-        "lease_observation_replay_count": s["lease_observation_replay_count"],
-        "unknown_trigger_rejections": s["unknown_trigger_rejections"],
+        "lease_observation_replay_count":
+            run_ctx.lease_diagnostics["lease_observation_replay_count"],
+        "unknown_trigger_rejections": run_ctx.lease_diagnostics["unknown_trigger_rejections"],
         "pathb_rollback_count": s["pathb_rollback_count"],
         "wake_handles_created": s["wake_handles_created"],
         "wake_start_seat_failures": s["wake_start_seat_failures"],

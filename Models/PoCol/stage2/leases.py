@@ -137,6 +137,12 @@ class RangeLease:
     # S4A-1: the seated RangeLeaseExpiryEvent ref for this ACTIVE lease (cancelled when the
     # lease terminalises early so no stale deadline fires).
     expiry_event_ref: Any = None
+    # S4C-1: the miner's cumulative per-state residency AT lease start, so the predecessor's
+    # active energy is charged over EXACTLY this lease's interval (never the miner's whole-run
+    # cumulative residency, which may include earlier-round work under other leases).
+    active_residency_at_lease_start: Optional[float] = None
+    low_residency_at_lease_start: Optional[float] = None
+    offline_residency_at_lease_start: Optional[float] = None
     disposition: Any = None
 
 
@@ -226,12 +232,21 @@ class RangeReassignmentRequest:
     wake_residency_at_end: Optional[float] = None
     active_residency_at_search_start: Optional[float] = None
     active_residency_at_search_end: Optional[float] = None
-    # S4B-7 predecessor + reassignee-standby residency snapshots (at revocation / at wake start).
-    predecessor_active_residency_at_revoke: Optional[float] = None
-    predecessor_low_residency_at_revoke: Optional[float] = None
-    predecessor_offline_residency_at_revoke: Optional[float] = None
+    # S4C-1: EXACT request-interval residency snapshots.  Every energy component is charged over
+    # its own [start, end] interval as a residency-ledger delta, so no earlier-round or later-round
+    # residency of the same miner is ever charged to this request.
+    revocation_time: Optional[float] = None
+    predecessor_active_residency_at_revocation: Optional[float] = None
+    predecessor_low_residency_at_revocation: Optional[float] = None
+    predecessor_offline_residency_at_revocation: Optional[float] = None
+    predecessor_low_residency_at_request_terminal: Optional[float] = None
+    predecessor_offline_residency_at_request_terminal: Optional[float] = None
+    reassignee_reserve_residency_at_seat: Optional[float] = None
+    reassignee_low_residency_at_seat: Optional[float] = None
+    reassignee_offline_residency_at_seat: Optional[float] = None
     reassignee_reserve_residency_at_wake_start: Optional[float] = None
     reassignee_low_residency_at_wake_start: Optional[float] = None
+    reassignee_offline_residency_at_wake_start: Optional[float] = None
     disposition: Any = None
 
 

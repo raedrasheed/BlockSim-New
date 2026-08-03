@@ -165,6 +165,9 @@ class ReserveActivationDecision:
     projected_hash_rate_after_wake: float
     residual_deficit: float
     policy_result: str
+    # S4C-3: an explicit terminal disposition so a synthetic Path-B activation decision that fails
+    # its wake is never left labelled ACTIVATION_SEATED without a recorded failed terminal outcome.
+    disposition: Any = None
 
 
 @dataclass
@@ -196,6 +199,13 @@ class ReserveActivationRequest:
     # binds to the ORIGINAL RangeProgress and creates no new reserve-domain slice).
     activation_scope: str = "RESERVE_DOMAIN_CLAIM"
     range_reassignment_request_id: Any = None
+    # S4C-4: explicit, auditable Path-B identity stored ON the activation request so the wake's
+    # non-domain lifecycle token (WakeHandleID), its authoritative RangeProgress
+    # (OriginalRangeSliceID) and its linked reassignment request (RangeReassignmentRequestID) are
+    # never overloaded onto ReserveSliceID and remain auditable AFTER the wake handle is removed.
+    WakeHandleID: Any = None
+    OriginalRangeSliceID: Any = None
+    RangeReassignmentRequestID: Any = None
     disposition: Any = None
 
 

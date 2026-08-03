@@ -247,7 +247,7 @@ class RunContext:
             "leases_revoked": 0, "leases_reassigned": 0, "reassignment_decisions": 0,
             "reassignment_requests_seated": 0, "reassignment_requests_completed": 0,
             "reassignment_requests_failed": 0, "reassignment_seat_rollback_count": 0,
-            "stale_old_lease_events": 0, "lease_observation_replay_count": 0,
+            "stale_old_lease_events": 0,
             "uncovered_range_count": 0, "uncovered_nonce_count": 0,
             "total_reassignment_latency": 0.0, "maximum_reassignment_latency": 0.0,
             "reassignment_wake_energy_j": 0.0, "reassignment_active_energy_j": 0.0,
@@ -258,12 +258,21 @@ class RunContext:
             "stale_expiry_events": 0, "stale_timeout_events": 0, "stale_exhaust_events": 0,
             # S4A-7/S4A-6/S4A-8/S4A-9 transactional-integrity counters.
             "pathb_rollback_count": 0, "overlapping_slice_count": 0, "orphan_count": 0,
-            "reassignment_replay_count": 0, "lease_observation_count": 0,
+            "lease_observation_count": 0,
             "max_reassignment_energy_residual": 0.0,
             # S4B executable-blocker counters.
-            "unknown_trigger_rejections": 0, "wake_start_seat_failures": 0,
+            "wake_start_seat_failures": 0,
             "wake_complete_seat_failures": 0, "miners_terminalised_with_lease": 0,
             "wakes_cancelled_with_lease": 0, "wake_handles_created": 0,
+        }
+        # S4C-6: DIAGNOSTIC counters that live OUTSIDE the protocol-state ledger.  They record how
+        # many exact replays / unknown-trigger rejections were observed, but the state-pure
+        # acceptance paths that produce them mutate NO protocol state (lease_stats, leases,
+        # progress, miner state, decisions, observations, queue, sequences) — so these are excluded
+        # from the deterministic result metrics and from the S4C-9 protocol-state snapshot.
+        self.lease_diagnostics: Dict[str, int] = {
+            "reassignment_replay_count": 0, "lease_observation_replay_count": 0,
+            "unknown_trigger_rejections": 0,
         }
         # audit log
         self.log: List[Outcome] = []

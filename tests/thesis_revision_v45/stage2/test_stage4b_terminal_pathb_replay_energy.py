@@ -137,10 +137,15 @@ def test_s4b_04_unknown_trigger_is_rejected_and_leaves_state_unchanged():
     run.event_queue.current_event_time = 5.0
     run.event_queue.current_event_ref = None
     before = dict(run.lease_stats)
+    diag_before = dict(run.lease_diagnostics)
     out = EvaluateRangeLease(run, rc, lease.LeaseID, 5.0, "SOMETHING_BOGUS")
     assert out.kind == "range_lease_observation_rejected_unknown_trigger"
     assert lease.lease_status == "ACTIVE"
-    assert run.lease_stats["unknown_trigger_rejections"] == before["unknown_trigger_rejections"] + 1
+    # S4C-6: the rejection is state-pure — lease_stats is untouched; only the DIAGNOSTIC
+    # (non-protocol) counter, which lives outside lease_stats, records the rejection.
+    assert run.lease_stats == before
+    assert run.lease_diagnostics["unknown_trigger_rejections"] \
+        == diag_before["unknown_trigger_rejections"] + 1
     assert run.lease_observations == []
     assert run.lease_stats["leases_revoked"] == before["leases_revoked"]
     assert run.lease_stats["leases_expired"] == before["leases_expired"]

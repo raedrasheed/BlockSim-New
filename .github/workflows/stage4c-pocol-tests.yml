@@ -1,0 +1,50 @@
+name: Stage 4C PoCol tests
+
+# S4C evidence: runs the COMPLETE Stage-2B + Stage-3 + Stage-3A + Stage-4 + Stage-4A + Stage-4B +
+# Stage-4C PoCol test suite (TV325-TV338, E2E-1..5, SCI-1..10, target/adapter, S3-01..S3-18,
+# S3A-01..S3A-12, S4-01..S4-20, S4A-01..S4A-14, S4B-01..S4B-12, and S4C-01..S4C-09 — 124 tests) on
+# the Stage-4C correction branch, and uploads the pytest log + JUnit XML.
+
+on:
+  push:
+    branches:
+      - "thesis-v45-pocol-stage4c-exact-energy-pathb-links-deadline-identity-lock"
+  pull_request:
+    paths:
+      - "Models/PoCol/stage2/**"
+      - "tests/thesis_revision_v45/stage2/**"
+      - ".github/workflows/stage4c-pocol-tests.yml"
+  workflow_dispatch: {}
+
+jobs:
+  stage4c-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pytest
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Run complete Stage-2B .. Stage-4C test suite
+        run: |
+          python -m pytest tests/thesis_revision_v45/stage2/ -v --durations=0 \
+            -p no:cacheprovider \
+            --junitxml=stage4c_ci.junit.xml | tee stage4c_ci.log
+
+      - name: Run standalone demo (smoke)
+        run: python -m Models.PoCol.stage2.demo
+
+      - name: Upload pytest evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage4c-pytest-evidence
+          path: |
+            stage4c_ci.log
+            stage4c_ci.junit.xml

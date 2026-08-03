@@ -225,13 +225,14 @@ def test_s4a_07_one_observation_per_observation_and_replay_is_idempotent():
     eq.current_event_ref = ref
     EvaluateRangeLease(run, rc, lease.LeaseID, 2.5, "MINER_FAILED", triggering_event_ref=ref)
     n_obs = len(run.lease_observations)
-    n_replay = run.lease_stats["lease_observation_replay_count"]
+    # S4C-6: the replay counter is DIAGNOSTIC and lives outside lease_stats.
+    n_replay = run.lease_diagnostics["lease_observation_replay_count"]
     assert n_obs == 1 and run.lease_observations[0].condition_satisfied is True
     assert run.lease_observations[0].decision_result in ("REASSIGNMENT_REQUIRED", "NO_ELIGIBLE_MINER")
     # exact replay of the SAME trigger EventRef: idempotent.
     EvaluateRangeLease(run, rc, lease.LeaseID, 2.5, "MINER_FAILED", triggering_event_ref=ref)
     assert len(run.lease_observations) == n_obs
-    assert run.lease_stats["lease_observation_replay_count"] == n_replay + 1
+    assert run.lease_diagnostics["lease_observation_replay_count"] == n_replay + 1
 
 
 # ---------------------------------------------------------------- S4A-08
@@ -341,7 +342,8 @@ def test_s4a_11_reassignment_replay_is_natural():
     assert again is not None and again.kind == "range_reassignment_already_exists"
     assert len(run.reassignment_requests) == n_req
     assert run.lease_stats["reassignment_requests_seated"] == seated
-    assert run.lease_stats["reassignment_replay_count"] >= 1
+    # S4C-6: the replay counter is DIAGNOSTIC and lives outside lease_stats.
+    assert run.lease_diagnostics["reassignment_replay_count"] >= 1
 
 
 # ---------------------------------------------------------------- S4A-12

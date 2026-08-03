@@ -1,0 +1,276 @@
+{
+ "stage": "4C",
+ "note": "Stage-4C makes every reassignment-energy component a TRUE request-interval residency-ledger delta (no earlier/later-round residency leaks in; no residency interval is charged to two requests), completes the Path-B reverse-link cleanup, stores the Path-B identity explicitly, makes both deadline payloads totally + safely verified, and makes replay / unknown-trigger rejection state-pure.  Reassignment is a liveness/coverage mechanism that may INCREASE energy and NEVER saves it; the fixed SHA-256 target/difficulty are never changed; the energy-saving mechanism remains the idle policy within PoCol.",
+ "scenarios": {
+  "s1_time_expiry": {
+   "leases_created": 738,
+   "leases_expired": 146,
+   "leases_revoked": 0,
+   "leases_cancelled": 8,
+   "leases_reassigned": 146,
+   "progress_timeouts": 0,
+   "request_count": 146,
+   "request_count_by_status": {
+    "COMPLETED": 146,
+    "FAILED": 0,
+    "CANCELLED": 0
+   },
+   "energy_totals_j": {
+    "predecessor_active_energy_j": 1883.3999999999871,
+    "predecessor_idle_or_offline_energy_j": 353.1374999999991,
+    "reassignee_standby_energy_j": 0.0,
+    "reassignment_wake_energy_j": 1569.5,
+    "reassignment_active_hashing_energy_j": 392.375
+   },
+   "component_residuals_j": {
+    "predecessor_active_j": 0.0,
+    "predecessor_idle_or_offline_j": 3.819167204710538e-15,
+    "reassignee_standby_j": 0.0,
+    "reassignment_wake_j": 1.9095836023552692e-14,
+    "reassignment_active_hashing_j": 0.0
+   },
+   "max_request_energy_residual_j": 1.9095836023552692e-14,
+   "overlapping_charged_interval_count": 0,
+   "aggregate_exceeds_run_residency_count": 0,
+   "stale_reserve_reverse_link_count": 0,
+   "wake_handle_reference_residue_count": 0,
+   "tampered_or_stale_deadline_no_effect_count": 438,
+   "replay_state_delta_count": 0,
+   "duplicate_nonce_count": 0,
+   "post_round_evaluation_count": 0,
+   "nonterminal_lease_count": 0,
+   "nonterminal_reassignment_request_count": 0,
+   "residency_reconciles": true,
+   "lease_diagnostics": {
+    "reassignment_replay_count": 0,
+    "lease_observation_replay_count": 0,
+    "unknown_trigger_rejections": 0
+   }
+  },
+  "s2_progress_timeout": {
+   "leases_created": 2672,
+   "leases_expired": 2664,
+   "leases_revoked": 0,
+   "leases_cancelled": 8,
+   "leases_reassigned": 0,
+   "progress_timeouts": 2664,
+   "request_count": 0,
+   "request_count_by_status": {
+    "COMPLETED": 0,
+    "FAILED": 0,
+    "CANCELLED": 0
+   },
+   "energy_totals_j": {
+    "predecessor_active_energy_j": 0.0,
+    "predecessor_idle_or_offline_energy_j": 0.0,
+    "reassignee_standby_energy_j": 0.0,
+    "reassignment_wake_energy_j": 0.0,
+    "reassignment_active_hashing_energy_j": 0.0
+   },
+   "component_residuals_j": {
+    "predecessor_active_j": 0.0,
+    "predecessor_idle_or_offline_j": 0.0,
+    "reassignee_standby_j": 0.0,
+    "reassignment_wake_j": 0.0,
+    "reassignment_active_hashing_j": 0.0
+   },
+   "max_request_energy_residual_j": 0.0,
+   "overlapping_charged_interval_count": 0,
+   "aggregate_exceeds_run_residency_count": 0,
+   "stale_reserve_reverse_link_count": 0,
+   "wake_handle_reference_residue_count": 0,
+   "tampered_or_stale_deadline_no_effect_count": 0,
+   "replay_state_delta_count": 0,
+   "duplicate_nonce_count": 0,
+   "post_round_evaluation_count": 0,
+   "nonterminal_lease_count": 0,
+   "nonterminal_reassignment_request_count": 0,
+   "residency_reconciles": true,
+   "lease_diagnostics": {
+    "reassignment_replay_count": 0,
+    "lease_observation_replay_count": 0,
+    "unknown_trigger_rejections": 0
+   }
+  },
+  "s3_pathb_wake": {
+   "leases_created": 269,
+   "leases_expired": 0,
+   "leases_revoked": 1,
+   "leases_cancelled": 1,
+   "leases_reassigned": 1,
+   "progress_timeouts": 0,
+   "request_count": 1,
+   "request_count_by_status": {
+    "COMPLETED": 1,
+    "FAILED": 0,
+    "CANCELLED": 0
+   },
+   "energy_totals_j": {
+    "predecessor_active_energy_j": 6.450000000000001,
+    "predecessor_idle_or_offline_energy_j": 0.0,
+    "reassignee_standby_energy_j": 0.0,
+    "reassignment_wake_energy_j": 10.749999999999998,
+    "reassignment_active_hashing_energy_j": 9.40625
+   },
+   "component_residuals_j": {
+    "predecessor_active_j": 0.0,
+    "predecessor_idle_or_offline_j": 0.0,
+    "reassignee_standby_j": 0.0,
+    "reassignment_wake_j": 0.0,
+    "reassignment_active_hashing_j": 0.0
+   },
+   "max_request_energy_residual_j": 0.0,
+   "overlapping_charged_interval_count": 0,
+   "aggregate_exceeds_run_residency_count": 0,
+   "stale_reserve_reverse_link_count": 0,
+   "wake_handle_reference_residue_count": 0,
+   "tampered_or_stale_deadline_no_effect_count": 0,
+   "replay_state_delta_count": 0,
+   "duplicate_nonce_count": 0,
+   "post_round_evaluation_count": 0,
+   "nonterminal_lease_count": 0,
+   "nonterminal_reassignment_request_count": 0,
+   "residency_reconciles": true,
+   "lease_diagnostics": {
+    "reassignment_replay_count": 0,
+    "lease_observation_replay_count": 0,
+    "unknown_trigger_rejections": 0
+   }
+  },
+  "s4_pathb_complete_seat_failure": {
+   "leases_created": 268,
+   "leases_expired": 0,
+   "leases_revoked": 1,
+   "leases_cancelled": 1,
+   "leases_reassigned": 1,
+   "progress_timeouts": 0,
+   "request_count": 1,
+   "request_count_by_status": {
+    "COMPLETED": 0,
+    "FAILED": 1,
+    "CANCELLED": 0
+   },
+   "energy_totals_j": {
+    "predecessor_active_energy_j": 6.450000000000001,
+    "predecessor_idle_or_offline_energy_j": 0.0,
+    "reassignee_standby_energy_j": 0.0,
+    "reassignment_wake_energy_j": 0.0,
+    "reassignment_active_hashing_energy_j": 0.0
+   },
+   "component_residuals_j": {
+    "predecessor_active_j": 0.0,
+    "predecessor_idle_or_offline_j": 0.0,
+    "reassignee_standby_j": 0.0,
+    "reassignment_wake_j": 0.0,
+    "reassignment_active_hashing_j": 0.0
+   },
+   "max_request_energy_residual_j": 0.0,
+   "overlapping_charged_interval_count": 0,
+   "aggregate_exceeds_run_residency_count": 0,
+   "stale_reserve_reverse_link_count": 0,
+   "wake_handle_reference_residue_count": 0,
+   "tampered_or_stale_deadline_no_effect_count": 0,
+   "replay_state_delta_count": 0,
+   "duplicate_nonce_count": 0,
+   "post_round_evaluation_count": 0,
+   "nonterminal_lease_count": 0,
+   "nonterminal_reassignment_request_count": 0,
+   "residency_reconciles": true,
+   "lease_diagnostics": {
+    "reassignment_replay_count": 0,
+    "lease_observation_replay_count": 0,
+    "unknown_trigger_rejections": 0
+   }
+  },
+  "s5_combined_multi_fault": {
+   "leases_created": 775,
+   "leases_expired": 0,
+   "leases_revoked": 1,
+   "leases_cancelled": 9,
+   "leases_reassigned": 1,
+   "progress_timeouts": 0,
+   "request_count": 1,
+   "request_count_by_status": {
+    "COMPLETED": 1,
+    "FAILED": 0,
+    "CANCELLED": 0
+   },
+   "energy_totals_j": {
+    "predecessor_active_energy_j": 12.900000000000002,
+    "predecessor_idle_or_offline_energy_j": 0.0,
+    "reassignee_standby_energy_j": 0.0,
+    "reassignment_wake_energy_j": 10.75,
+    "reassignment_active_hashing_energy_j": 4.514999999999999
+   },
+   "component_residuals_j": {
+    "predecessor_active_j": 0.0,
+    "predecessor_idle_or_offline_j": 0.0,
+    "reassignee_standby_j": 0.0,
+    "reassignment_wake_j": 0.0,
+    "reassignment_active_hashing_j": 0.0
+   },
+   "max_request_energy_residual_j": 0.0,
+   "overlapping_charged_interval_count": 0,
+   "aggregate_exceeds_run_residency_count": 0,
+   "stale_reserve_reverse_link_count": 0,
+   "wake_handle_reference_residue_count": 0,
+   "tampered_or_stale_deadline_no_effect_count": 0,
+   "replay_state_delta_count": 0,
+   "duplicate_nonce_count": 0,
+   "post_round_evaluation_count": 0,
+   "nonterminal_lease_count": 0,
+   "nonterminal_reassignment_request_count": 0,
+   "residency_reconciles": true,
+   "lease_diagnostics": {
+    "reassignment_replay_count": 0,
+    "lease_observation_replay_count": 0,
+    "unknown_trigger_rejections": 0
+   }
+  },
+  "s6_cancellation": {
+   "leases_created": 801,
+   "leases_expired": 0,
+   "leases_revoked": 0,
+   "leases_cancelled": 3,
+   "leases_reassigned": 1,
+   "progress_timeouts": 0,
+   "request_count": 1,
+   "request_count_by_status": {
+    "COMPLETED": 1,
+    "FAILED": 0,
+    "CANCELLED": 0
+   },
+   "energy_totals_j": {
+    "predecessor_active_energy_j": 6.450000000000001,
+    "predecessor_idle_or_offline_energy_j": 2.553124999999999,
+    "reassignee_standby_energy_j": 0.0,
+    "reassignment_wake_energy_j": 10.749999999999998,
+    "reassignment_active_hashing_energy_j": 4.03125
+   },
+   "component_residuals_j": {
+    "predecessor_active_j": 0.0,
+    "predecessor_idle_or_offline_j": 0.0,
+    "reassignee_standby_j": 0.0,
+    "reassignment_wake_j": 0.0,
+    "reassignment_active_hashing_j": 0.0
+   },
+   "max_request_energy_residual_j": 0.0,
+   "overlapping_charged_interval_count": 0,
+   "aggregate_exceeds_run_residency_count": 0,
+   "stale_reserve_reverse_link_count": 0,
+   "wake_handle_reference_residue_count": 0,
+   "tampered_or_stale_deadline_no_effect_count": 0,
+   "replay_state_delta_count": 0,
+   "duplicate_nonce_count": 0,
+   "post_round_evaluation_count": 0,
+   "nonterminal_lease_count": 0,
+   "nonterminal_reassignment_request_count": 0,
+   "residency_reconciles": true,
+   "lease_diagnostics": {
+    "reassignment_replay_count": 0,
+    "lease_observation_replay_count": 0,
+    "unknown_trigger_rejections": 0
+   }
+  }
+ }
+}

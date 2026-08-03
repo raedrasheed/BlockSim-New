@@ -105,7 +105,8 @@ _LEASE_EXPIRY_PAYLOAD_KEYS = (
 )
 _PROGRESS_TIMEOUT_PAYLOAD_KEYS = (
     "LeaseID", "RoundID_at_seat", "TemplateID_at_seat", "RangeSliceID", "MinerID",
-    "lease_generation", "expected_committed_frontier", "expected_progress_generation",
+    "lease_generation", "expected_lease_status",       # S4C-5: BOTH deadlines carry it explicitly
+    "expected_committed_frontier", "expected_progress_generation",
     "timeout_generation", "expected_round_state_version",
 )
 

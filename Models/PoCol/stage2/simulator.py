@@ -727,6 +727,31 @@ def _maybe_terminate_no_block(run_ctx: RunContext, rc: RoundContext) -> Optional
 
 
 # ============================================================ Stage-4 range leases
+def _residency(m: Any, state: str, t: Optional[float] = None) -> float:
+    """S4C-1: a miner's cumulative residency (seconds) in one state AT time ``t``, 0.0 for a missing
+    miner.  The residency ledger only accumulates CLOSED intervals, so when the miner is CURRENTLY
+    in ``state`` its still-open interval ``[state_since, t]`` must be added — otherwise a snapshot
+    taken mid-interval (e.g. an OFFLINE predecessor between revocation and round close) understates
+    the true residency.  ``t`` omitted returns the closed-interval total only."""
+    if m is None:
+        return 0.0
+    base = m.duration.get(state, 0.0)
+    since = getattr(m, "state_since", None)
+    if t is not None and m.state == state and since is not None and t >= since:
+        base += (t - since)
+    return base
+
+
+def _stamp_lease_start_residency(run_ctx: RunContext, lease: Any, t: float) -> None:
+    """S4C-1: snapshot the lease-holder's cumulative per-state residency AT lease start, so the
+    predecessor active / idle energy is later charged over EXACTLY this lease's interval (a
+    residency-ledger DELTA), never the miner's whole-run cumulative residency."""
+    m = run_ctx.miners.get(lease.MinerID)
+    lease.active_residency_at_lease_start = _residency(m, "ACTIVE_HASHING", t)
+    lease.low_residency_at_lease_start = _residency(m, "LOW_POWER_LISTEN", t)
+    lease.offline_residency_at_lease_start = _residency(m, "OFFLINE", t)
+
+
 def _create_range_progress_and_lease(run_ctx: RunContext, rc: RoundContext, mid: Any,
                                      aid: Any, version: int, slice_id: str, start: int,
                                      end: int, kind: str, t: float) -> Any:
@@ -748,6 +773,7 @@ def _create_range_progress_and_lease(run_ctx: RunContext, rc: RoundContext, mid:
         lease_start_time=t, lease_expiry_time=t + run_ctx.config.range_lease.lease_duration,
         lease_status="ACTIVE")
     run_ctx.range_leases[lid] = lease
+    _stamp_lease_start_residency(run_ctx, lease, t)         # S4C-1
     run_ctx.lease_stats["leases_created"] += 1
     # S4A-1/S4A-2: arm the lease-time-expiry + progress-timeout deadlines for this ACTIVE lease.
     _seat_lease_expiry(run_ctx, rc, lease, prog, t)
@@ -814,6 +840,7 @@ def _refresh_progress_timeout(run_ctx: RunContext, rc: RoundContext, prog: Any, 
     payload = {"LeaseID": lease.LeaseID, "RoundID_at_seat": rc.RoundID,
                "TemplateID_at_seat": rc.TemplateID_committed, "RangeSliceID": prog.RangeSliceID,
                "MinerID": lease.MinerID, "lease_generation": lease.lease_generation,
+               "expected_lease_status": "ACTIVE",         # S4C-5: BOTH deadlines carry it explicitly
                "expected_committed_frontier": prog.committed_frontier,
                "expected_progress_generation": prog.progress_generation,
                "timeout_generation": prog.timeout_generation,
@@ -933,6 +960,25 @@ def _verify_exhaust_lease(run_ctx: RunContext, rc: RoundContext, st: Any, mid: A
     return Outcome("exhaust_lease_ok")
 
 
+def _stamp_request_terminal(run_ctx: RunContext, req: Any, t: float) -> None:
+    """S4C-1: at a reassignment request's terminal time, CLOSE the predecessor's post-revocation
+    idle/offline interval [revocation, terminal] with a residency snapshot, and — when the wake
+    NEVER started — close the reassignee's standby interval at [seat, terminal] (its wake-start
+    snapshots become the terminal residency).  Charging always uses the earlier of these interval
+    ends, never the final run residency.  Idempotent: only the FIRST terminalisation stamps."""
+    if req.terminal_time is not None:
+        return
+    req.terminal_time = t
+    pm = run_ctx.miners.get(req.predecessor_MinerID)
+    req.predecessor_low_residency_at_request_terminal = _residency(pm, "LOW_POWER_LISTEN", t)
+    req.predecessor_offline_residency_at_request_terminal = _residency(pm, "OFFLINE", t)
+    if req.started_at is None:                              # wake never began
+        cm = run_ctx.miners.get(req.new_MinerID)
+        req.reassignee_reserve_residency_at_wake_start = _residency(cm, "RESERVE", t)
+        req.reassignee_low_residency_at_wake_start = _residency(cm, "LOW_POWER_LISTEN", t)
+        req.reassignee_offline_residency_at_wake_start = _residency(cm, "OFFLINE", t)
+
+
 def _stamp_reassignee_active_end(run_ctx: RunContext, rc: RoundContext, mid: Any,
                                  t: float) -> None:
     """S4A-9: close a reassignee's reassigned ACTIVE_HASHING interval at ``t`` (energy attribution).
@@ -1024,10 +1070,17 @@ def _eligible_reassignment_candidates(run_ctx: RunContext, rc: RoundContext, sli
     prog = run_ctx.range_progress.get(slice_id)
     suffix = max(0, (prog.range_end - frontier) if prog else 0)
     cands: List[Any] = []
+    # S4C-2: a miner that already has an IN-FLIGHT reassignment this round (a SEATED / STARTED
+    # request not yet COMPLETED / FAILED / CANCELLED) is NOT available — it is between its own
+    # reassignment seat and completion, so recruiting it again would double-book its single search
+    # (and double-charge its ACTIVE residency to two requests).  One reassignment in flight per miner.
+    in_flight = {r.new_MinerID for r in run_ctx.reassignment_requests.values()
+                 if r.RoundID == rc.RoundID
+                 and r.status not in TERMINAL_REASSIGN_REQUEST_STATUSES}
     # categories 0/1: alive miners (primary / activated-reserve) that EXHAUSTED their own range
     # (searched all of it, found no block) and are therefore genuinely free to help.
     for mid, st in rc.search_states.items():
-        if mid == revoked_owner or not st.completed:
+        if mid == revoked_owner or not st.completed or mid in in_flight:
             continue
         # S4B-1: a miner whose OWN lease was terminalised (EXPIRED / REVOKED / CANCELLED) is marked
         # completed by RevokeRangeLeaseTransaction, but it is NOT an available reassignee — it was
@@ -1046,7 +1099,8 @@ def _eligible_reassignment_candidates(run_ctx: RunContext, rc: RoundContext, sli
         cands.append(ReassignmentCandidate(mid, cat, proj, 0, False, rate))
     # category 2: AVAILABLE reserves (never activated) requiring the accepted Stage-3 wake.
     for (rid, mid), rr in run_ctx.reserve_records.items():
-        if rid != rc.RoundID or mid == revoked_owner or rr.reserve_status != "AVAILABLE":
+        if rid != rc.RoundID or mid == revoked_owner or rr.reserve_status != "AVAILABLE" \
+                or mid in in_flight:                       # S4C-2: not already reassigning
             continue
         m = run_ctx.miners.get(mid)
         if m is not None and m.state in ("OFFLINE", "DISQUALIFIED"):
@@ -1121,10 +1175,12 @@ def EvaluateRangeLease(run_ctx: RunContext, rc: RoundContext, lease_id_val: Any,
     lease = run_ctx.range_leases.get(lease_id_val)
     if lease is None:
         return None
-    # S4B-2: an unknown trigger is REJECTED before any mutation, counter or state change — there
-    # is NO default REVOKED fallback for a trigger outside the declared vocabulary.
+    # S4B-2/S4C-6: an unknown trigger is REJECTED before any mutation and the rejection path is
+    # STATE-PURE — it changes NO protocol state (lease_stats, lease, progress, miner, decisions,
+    # observations, queue, sequences) and there is NO default REVOKED fallback.  Only the DIAGNOSTIC
+    # (non-protocol, metrics-excluded) counter records that a rejection was observed.
     if trigger not in LEASE_TRIGGERS:
-        run_ctx.lease_stats["unknown_trigger_rejections"] += 1
+        run_ctx.lease_diagnostics["unknown_trigger_rejections"] += 1
         return Outcome("range_lease_observation_rejected_unknown_trigger",
                        trigger=trigger, LeaseID=lease_id_val)
     if observation_reason is None:
@@ -1133,9 +1189,10 @@ def EvaluateRangeLease(run_ctx: RunContext, rc: RoundContext, lease_id_val: Any,
         else getattr(run_ctx.event_queue, "current_event_ref", None)
     key = _lease_observation_key(run_ctx, rc, lease, trig)
     if key in run_ctx.lease_observation_by_key:
-        # S4B-2: an exact replay returns the COMPLETE stored result (observation, decision-or-null,
-        # outcome-or-disposition) — never None — and mutates nothing further.
-        run_ctx.lease_stats["lease_observation_replay_count"] += 1
+        # S4B-2/S4C-6: an exact replay returns the COMPLETE stored result (observation,
+        # decision-or-null, outcome-or-disposition) — never None — and is STATE-PURE: it mutates no
+        # protocol state.  Only the DIAGNOSTIC counter records that a replay was observed.
+        run_ctx.lease_diagnostics["lease_observation_replay_count"] += 1
         stored_obs, stored_dec, stored_outcome = run_ctx.lease_observation_by_key[key]
         return Outcome("range_lease_observation_already_exists", observation=stored_obs,
                        decision=stored_dec, outcome=stored_outcome)
@@ -1295,7 +1352,7 @@ def SeatRangeReassignmentTransaction(run_ctx: RunContext, rc: RoundContext, prog
     # dependence) and returns the COMPLETE stored result with no side effect.
     existing = run_ctx.reassignment_by_predecessor.get(predecessor_lease.LeaseID)
     if existing is not None:
-        run_ctx.lease_stats["reassignment_replay_count"] += 1
+        run_ctx.lease_diagnostics["reassignment_replay_count"] += 1   # S4C-6: state-pure
         return _reassignment_already_exists(run_ctx, existing, predecessor_lease.LeaseID)
     new_gen = run_ctx.lease_generation_of_slice.get(slice_id,
                                                     predecessor_lease.lease_generation) + 1
@@ -1303,16 +1360,18 @@ def SeatRangeReassignmentTransaction(run_ctx: RunContext, rc: RoundContext, prog
     req_id = _mk_reassign_id(rc.RoundID, rc.TemplateID_committed, slice_id,
                              predecessor_lease.LeaseID, frontier, chosen.MinerID, new_gen)
     if req_id in run_ctx.reassignment_requests:              # defensive exact-id replay guard
-        run_ctx.lease_stats["reassignment_replay_count"] += 1
+        run_ctx.lease_diagnostics["reassignment_replay_count"] += 1   # S4C-6: state-pure
         return _reassignment_already_exists(run_ctx, req_id, predecessor_lease.LeaseID)
     result = "REASSIGNMENT_PENDING_WAKE" if chosen.needs_stage3_wake else "REASSIGNMENT_SEATED"
     projected_start = now + (cfg.security_floor.activation_wake_latency
                              if chosen.needs_stage3_wake else cfg.range_lease.reassignment_wake_latency)
     dec = _record_reassignment_decision(run_ctx, rc, predecessor_lease, chosen, result,
                                         new_gen=new_gen, projected_start=projected_start)
-    # S4B-7: snapshot the predecessor's residency at revocation (its ACTIVE_HASHING is finalised
-    # by the revoke idle transition) so per-request energy attribution is complete + exact.
+    # S4C-1: snapshot the predecessor's residency AT REVOCATION (its ACTIVE_HASHING is finalised by
+    # the revoke idle transition) and the reassignee's standby residency AT SEATING, so every
+    # per-request energy component is later charged over EXACTLY its own [start, end] interval.
     pm = run_ctx.miners.get(predecessor_lease.MinerID)
+    cm = run_ctx.miners.get(chosen.MinerID)
     req = RangeReassignmentRequest(
         RangeReassignmentRequestID=req_id, DecisionID=dec.DecisionID, RoundID=rc.RoundID,
         TemplateID=rc.TemplateID_committed, RangeSliceID=slice_id,
@@ -1320,12 +1379,13 @@ def SeatRangeReassignmentTransaction(run_ctx: RunContext, rc: RoundContext, prog
         new_MinerID=chosen.MinerID, new_lease_generation=new_gen, new_lease_id=new_lease_id,
         needs_stage3_wake=chosen.needs_stage3_wake, status="SEATED", seated_at=now,
         predecessor_MinerID=predecessor_lease.MinerID,
-        predecessor_active_residency_at_revoke=(pm.duration.get("ACTIVE_HASHING", 0.0)
-                                                if pm is not None else 0.0),
-        predecessor_low_residency_at_revoke=(pm.duration.get("LOW_POWER_LISTEN", 0.0)
-                                             if pm is not None else 0.0),
-        predecessor_offline_residency_at_revoke=(pm.duration.get("OFFLINE", 0.0)
-                                                 if pm is not None else 0.0))
+        revocation_time=now,
+        predecessor_active_residency_at_revocation=_residency(pm, "ACTIVE_HASHING", now),
+        predecessor_low_residency_at_revocation=_residency(pm, "LOW_POWER_LISTEN", now),
+        predecessor_offline_residency_at_revocation=_residency(pm, "OFFLINE", now),
+        reassignee_reserve_residency_at_seat=_residency(cm, "RESERVE", now),
+        reassignee_low_residency_at_seat=_residency(cm, "LOW_POWER_LISTEN", now),
+        reassignee_offline_residency_at_seat=_residency(cm, "OFFLINE", now))
     def _rollback_seat(reason: Any) -> Optional[Outcome]:
         # S4-9: a failed seat leaves a coherent state — the (revoked) predecessor is NOT
         # promoted to REASSIGNED, the FAILED request is registered for audit, the slice is
@@ -1334,7 +1394,7 @@ def SeatRangeReassignmentTransaction(run_ctx: RunContext, rc: RoundContext, prog
         run_ctx.lease_stats["reassignment_seat_rollback_count"] += 1
         run_ctx.lease_stats["reassignment_requests_failed"] += 1
         req.status = "FAILED"
-        req.terminal_time = now
+        _stamp_request_terminal(run_ctx, req, now)          # S4C-1 close predecessor/standby
         req.disposition = Outcome("reassignment_seat_failed", reason=reason)
         prog.terminal_status = "UNASSIGNED_PENDING_RETRY"
         run_ctx.reassignment_requests[req_id] = req
@@ -1434,7 +1494,8 @@ def _seat_reserve_reassignment_wake(run_ctx: RunContext, rc: RoundContext, prog:
     act_req = SeatReserveActivationTransaction(
         run_ctx, rc, rr, wake_handle, obs, s3dec.DecisionID,
         activation_scope="REASSIGNMENT_WAKE_ONLY",
-        range_reassignment_request_id=req.RangeReassignmentRequestID)
+        range_reassignment_request_id=req.RangeReassignmentRequestID,
+        wake_handle_id=wake_handle_id, original_range_slice_id=slice_id)   # S4C-4 explicit identity
     if not isinstance(act_req, ReserveActivationRequest):
         return _rollback_wake()
     req.reserve_activation_request_id = act_req.ReserveActivationRequestID
@@ -1496,9 +1557,10 @@ def _handle_range_reassignment_start(run_ctx: RunContext, payload: Dict[str, Any
     # S4A-9/S4B-7: snapshot the pre-wake cumulative WAKING + standby residency so the reassignment
     # wake interval (and the reassignee's standby-before-wake) is attributed EXACTLY.
     m = run_ctx.miners.get(mid)
-    req.wake_residency_at_start = m.duration.get("WAKING", 0.0) if m is not None else 0.0
-    req.reassignee_reserve_residency_at_wake_start = m.duration.get("RESERVE", 0.0) if m is not None else 0.0
-    req.reassignee_low_residency_at_wake_start = m.duration.get("LOW_POWER_LISTEN", 0.0) if m is not None else 0.0
+    req.wake_residency_at_start = _residency(m, "WAKING", t)
+    req.reassignee_reserve_residency_at_wake_start = _residency(m, "RESERVE", t)   # S4C-1
+    req.reassignee_low_residency_at_wake_start = _residency(m, "LOW_POWER_LISTEN", t)
+    req.reassignee_offline_residency_at_wake_start = _residency(m, "OFFLINE", t)
     run_ctx.apply_miner_state_transition(mid, "WAKING", t)
     req.status = "STARTED"
     req.started_at = t
@@ -1516,10 +1578,10 @@ def _handle_range_reassignment_start(run_ctx: RunContext, payload: Dict[str, Any
         # S4-9: never strand the reassignee WAKING without a controller.
         run_ctx.apply_miner_state_transition(mid, "LOW_POWER_LISTEN", t)
         req.status = "FAILED"
-        req.terminal_time = t
-        _rm = run_ctx.miners.get(mid)                       # S4B-7: close the failed wake interval
+        _rm = run_ctx.miners.get(mid)                       # S4C-1: close the failed wake interval
         if _rm is not None and req.wake_residency_at_start is not None:
-            req.wake_residency_at_end = _rm.duration.get("WAKING", 0.0)
+            req.wake_residency_at_end = _residency(_rm, "WAKING", t)
+        _stamp_request_terminal(run_ctx, req, t)            # S4C-1 close predecessor interval
         req.disposition = Outcome("reassignment_complete_seat_failed", reason=r)
         prog.terminal_status = "UNASSIGNED_PENDING_RETRY"
         run_ctx.lease_stats["reassignment_requests_failed"] += 1
@@ -1596,6 +1658,7 @@ def _bind_reassigned_lease(run_ctx: RunContext, rc: RoundContext, mid: Any, prog
         lease_expiry_time=t + cfg.range_lease.lease_duration, lease_status="ACTIVE",
         predecessor_lease_id=pred_lease_id)
     run_ctx.range_leases[new_lid] = lease
+    _stamp_lease_start_residency(run_ctx, lease, t)         # S4C-1
     prog.current_lease_id = new_lid
     prog.progress_generation += 1
     prog.terminal_status = "OPEN"
@@ -1632,6 +1695,7 @@ def _bind_reserve_reassignment_if_any(run_ctx: RunContext, rc: RoundContext, mid
         lease_status="ACTIVE", predecessor_lease_id=req.predecessor_lease_id,
         reserve_activation_request_id=req.reserve_activation_request_id)
     run_ctx.range_leases[new_lid] = lease
+    _stamp_lease_start_residency(run_ctx, lease, t)         # S4C-1
     prog.current_lease_id = new_lid
     prog.progress_generation += 1
     prog.terminal_status = "OPEN"
@@ -1777,36 +1841,52 @@ def _handle_miner_cancelled(run_ctx: RunContext, payload: Dict[str, Any],
     return Outcome("miner_cancelled_lease_terminalised", MinerID=mid, LeaseID=lease.LeaseID)
 
 
+_MISSING = object()
+_DEADLINE_REQUIRED = ("LeaseID", "MinerID", "RangeSliceID", "lease_generation",
+                      "expected_lease_status", "expected_progress_generation",
+                      "expected_committed_frontier", "expected_round_state_version",
+                      "RoundID_at_seat", "TemplateID_at_seat")
+
+
 def _verify_deadline_identity(run_ctx: RunContext, rc: RoundContext, payload: Dict[str, Any],
                               is_timeout: bool) -> Any:
-    """S4B-8: verify EVERY declared deadline-payload field before any effect.
+    """S4C-5: TOTAL, SAFE verification of EVERY declared deadline-payload field before any effect.
 
-    A stale or tampered expiry / progress-timeout event (any mismatched LeaseID, MinerID,
-    RangeSliceID, lease_generation, expected_lease_status, expected_progress_generation,
-    expected_committed_frontier, timeout_generation [timeout only], expected_round_state_version,
-    RoundID or TemplateID) performs NO effect.
+    Both RangeLeaseExpiryEvent and RangeProgressTimeoutEvent payloads MUST explicitly carry
+    LeaseID, MinerID, RangeSliceID, lease_generation, expected_lease_status,
+    expected_progress_generation, expected_committed_frontier, expected_round_state_version,
+    RoundID_at_seat, TemplateID_at_seat (+ timeout_generation for a timeout).  A MISSING declared
+    field is treated as tampered identity (no default is substituted for expected_lease_status).
+    Every field is read with safe extraction (no KeyError) and any missing / mismatched field —
+    or a current EventRef that is not the lease's / progress's currently-armed deadline ref —
+    performs NO effect.  Returns ``(lease, prog)`` only when EVERY check passes, else ``None``.
     """
-    lid = payload["LeaseID"]
-    lease = run_ctx.range_leases.get(lid)
-    prog = run_ctx.range_progress.get(payload["RangeSliceID"])
+    required = _DEADLINE_REQUIRED + (("timeout_generation",) if is_timeout else ())
+    for k in required:                                     # a missing declared field is tampered
+        if payload.get(k, _MISSING) is _MISSING:
+            return None
+    lease = run_ctx.range_leases.get(payload.get("LeaseID"))
+    prog = run_ctx.range_progress.get(payload.get("RangeSliceID"))
     if lease is None or prog is None:
         return None
-    # the progress-timeout payload does not carry expected_lease_status; both deadlines require
-    # the lease to be ACTIVE, so verify that directly (the expiry payload also declares it).
-    expected_status = payload.get("expected_lease_status", "ACTIVE")
-    if payload["RoundID_at_seat"] != rc.RoundID \
-            or payload["TemplateID_at_seat"] != rc.TemplateID_committed \
-            or lease.RangeSliceID != payload["RangeSliceID"] \
-            or lease.MinerID != payload["MinerID"] \
-            or lease.lease_generation != payload["lease_generation"] \
-            or lease.lease_status != expected_status \
+    cur_ref = getattr(run_ctx.event_queue, "current_event_ref", None)
+    stored_ref = prog.timeout_event_ref if is_timeout else lease.expiry_event_ref
+    if payload.get("RoundID_at_seat") != rc.RoundID \
+            or payload.get("TemplateID_at_seat") != rc.TemplateID_committed \
+            or lease.RangeSliceID != payload.get("RangeSliceID") \
+            or lease.MinerID != payload.get("MinerID") \
+            or lease.lease_generation != payload.get("lease_generation") \
+            or lease.lease_status != payload.get("expected_lease_status") \
             or lease.lease_status != "ACTIVE" \
-            or prog.current_lease_id != lid \
-            or prog.progress_generation != payload["expected_progress_generation"] \
-            or prog.committed_frontier != payload["expected_committed_frontier"] \
-            or rc.state_version != payload["expected_round_state_version"]:
+            or prog.current_lease_id != lease.LeaseID \
+            or prog.progress_generation != payload.get("expected_progress_generation") \
+            or prog.committed_frontier != payload.get("expected_committed_frontier") \
+            or rc.state_version != payload.get("expected_round_state_version"):
         return None
-    if is_timeout and prog.timeout_generation != payload["timeout_generation"]:
+    if is_timeout and prog.timeout_generation != payload.get("timeout_generation"):
+        return None
+    # S4C-5: the firing event must be the lease's / progress's CURRENTLY-armed deadline ref.
+    if stored_ref is not None and cur_ref is not None and cur_ref != stored_ref:
         return None
     return (lease, prog)
 
@@ -1826,7 +1906,8 @@ def _handle_range_lease_expiry(run_ctx: RunContext, payload: Dict[str, Any],
     verified = _verify_deadline_identity(run_ctx, rc, payload, is_timeout=False)
     if verified is None:
         run_ctx.lease_stats["stale_expiry_events"] += 1
-        return Outcome("range_lease_expiry_no_effect", reason="stale_or_superseded")
+        return Outcome("range_deadline_no_effect", reason="missing_or_tampered_identity",
+                       deadline="RangeLeaseExpiryEvent")
     lid = payload["LeaseID"]
     t = run_ctx.event_queue.current_event_time
     dec = EvaluateRangeLease(run_ctx, rc, lid, t, "LEASE_TIME_EXPIRED",
@@ -1855,7 +1936,8 @@ def _handle_range_progress_timeout(run_ctx: RunContext, payload: Dict[str, Any],
     verified = _verify_deadline_identity(run_ctx, rc, payload, is_timeout=True)
     if verified is None:
         run_ctx.lease_stats["stale_timeout_events"] += 1
-        return Outcome("range_progress_timeout_no_effect", reason="stale_or_superseded")
+        return Outcome("range_deadline_no_effect", reason="missing_or_tampered_identity",
+                       deadline="RangeProgressTimeoutEvent")
     lid = payload["LeaseID"]
     t = run_ctx.event_queue.current_event_time
     dec = EvaluateRangeLease(run_ctx, rc, lid, t, "PROGRESS_TIMEOUT",
@@ -1894,13 +1976,12 @@ def _close_lease_state(run_ctx: RunContext, rc: RoundContext, t: float) -> None:
                 and req.reassigned_search_end_time is None:
             req.reassigned_search_end_time = t
             m = run_ctx.miners.get(req.new_MinerID)
-            req.active_residency_at_search_end = m.duration.get("ACTIVE_HASHING", 0.0) \
-                if m is not None else None
+            req.active_residency_at_search_end = _residency(m, "ACTIVE_HASHING", t)
         if req.status not in TERMINAL_REASSIGN_REQUEST_STATUSES:
             req.status = "CANCELLED"
             req.disposition = Outcome("reassignment_cancelled_at_round_close")
-        if req.terminal_time is None:                       # S4B-7: every request has a terminal time
-            req.terminal_time = t
+        # S4C-1: every request gets a terminal time + closed predecessor/standby snapshots.
+        _stamp_request_terminal(run_ctx, req, t)
     # S4B-4: terminalise every wake handle of this round (no live UNCLAIMED/CLAIMED/ACTIVE handle).
     for wh in run_ctx.reassignment_wake_handles.values():
         if wh.RoundID == rc.RoundID and wh.status not in ("EXHAUSTED", "CANCELLED"):
@@ -2161,7 +2242,9 @@ def _apply_floor_unattainable(run_ctx: RunContext, rc: RoundContext,
 def SeatReserveActivationTransaction(run_ctx: RunContext, rc: RoundContext, rr: Any, sl: Any,
                                      obs: Any, decision_id: Any,
                                      activation_scope: str = "RESERVE_DOMAIN_CLAIM",
-                                     range_reassignment_request_id: Any = None) -> Any:
+                                     range_reassignment_request_id: Any = None,
+                                     wake_handle_id: Any = None,
+                                     original_range_slice_id: Any = None) -> Any:
     """S3A-4: seat a reserve activation ALL-OR-NONE on its immutable request identity.
 
     Idempotent replay of an exact request returns the existing request with no second
@@ -2225,6 +2308,10 @@ def SeatReserveActivationTransaction(run_ctx: RunContext, rc: RoundContext, rr: 
         ReserveSliceID=sid, activation_generation=rr.activation_generation,
         status="SEATED", start_event_ref=ev, activation_scope=activation_scope,
         range_reassignment_request_id=range_reassignment_request_id,
+        # S4C-4: explicit, auditable Path-B identity (ReserveSliceID is NOT overloaded as the wake
+        # identity) — retained even after the wake handle is later removed.
+        WakeHandleID=wake_handle_id, OriginalRangeSliceID=original_range_slice_id,
+        RangeReassignmentRequestID=range_reassignment_request_id,
         disposition=Outcome("reserve_activation_seated"))
     run_ctx.activation_requests[req_id] = req
     run_ctx.activations_per_round[rc.RoundID] = run_ctx.activations_per_round.get(rc.RoundID, 0) + 1
@@ -2306,26 +2393,59 @@ def _verify_activation_identity(run_ctx: RunContext, rc: RoundContext, payload: 
     return Outcome("activation_identity_ok", reserve=rr, slice=sl, request=req)
 
 
+def _terminalise_synthetic_activation_decision(run_ctx: RunContext, decision_id: Any,
+                                               reason: Any) -> None:
+    """S4C-3: give the synthetic Path-B activation decision an explicit terminal FAILURE
+    disposition so no decision remains labelled ACTIVATION_SEATED without a recorded failed
+    terminal outcome after its wake fails."""
+    if decision_id is None:
+        return
+    for dec in run_ctx.activation_decisions:
+        if dec.DecisionID == decision_id:
+            dec.disposition = Outcome("reassignment_wake_activation_failed", reason=reason)
+            break
+
+
+def _clear_reserve_record_activation_fields(rr: Any) -> None:
+    """S4C-3: clear EVERY reverse link a failed activation left on the reserve record."""
+    if rr is None:
+        return
+    rr.assigned_reserve_slice_id = None
+    rr.activation_request_id = None
+    rr.activation_event_ref = None
+
+
 def _fail_pathb_wake(run_ctx: RunContext, rc: RoundContext, act_req: Any, t: float,
                      reason: Any) -> Optional[Outcome]:
-    """S4B-5: fully clean up a Path-B reassignment whose Stage-3 wake seat failed at a start /
-    complete point — terminalise the linked RangeReassignmentRequest FAILED, close its
-    wake-energy interval, remove the wake handle and every reverse link, preserve the committed
-    frontier (current_lease_id stays None from the revoke), and apply the no-eligible policy."""
+    """S4B-5/S4C-3: fully clean up a Path-B reassignment whose Stage-3 wake seat failed at a start
+    / complete point — terminalise the linked ReserveActivationRequest AND RangeReassignmentRequest
+    FAILED, close every wake/standby timestamp, remove the wake handle + every reverse link
+    (``reassign_by_suffix_slice`` + reserve-record fields), give the synthetic activation decision a
+    terminal failure disposition, preserve the committed frontier (``current_lease_id`` stays None
+    from the revoke), and apply the no-eligible policy — leaving NO registry / reverse binding that
+    still references the removed WakeHandleID."""
+    # S4C-3: terminalise the activation request itself + clear the reserve record + the decision.
+    act_req.status = "FAILED"
+    act_req.disposition = Outcome("reserve_activation_wake_seat_failed", reason=reason)
+    _terminalise_synthetic_activation_decision(run_ctx, act_req.DecisionID, reason)
+    _clear_reserve_record_activation_fields(
+        run_ctx.reserve_records.get((rc.RoundID, act_req.MinerID)))
     rreq = run_ctx.reassignment_requests.get(act_req.range_reassignment_request_id)
     prog = None
     if rreq is not None and rreq.status not in TERMINAL_REASSIGN_REQUEST_STATUSES:
         rreq.status = "FAILED"
-        rreq.terminal_time = t
-        rreq.disposition = Outcome("reassignment_wake_seat_failed", reason=reason)
         rm = run_ctx.miners.get(rreq.new_MinerID)          # close the failed wake-energy interval
         if rm is not None and rreq.wake_residency_at_start is not None:
-            rreq.wake_residency_at_end = rm.duration.get("WAKING", 0.0)
+            rreq.wake_residency_at_end = _residency(rm, "WAKING", t)
+        _stamp_request_terminal(run_ctx, rreq, t)          # S4C-1 close predecessor/standby
+        rreq.disposition = Outcome("reassignment_wake_seat_failed", reason=reason)
         run_ctx.lease_stats["reassignment_requests_failed"] += 1
         run_ctx.lease_stats["pathb_rollback_count"] += 1
-        if rreq.wake_handle_id is not None:                # remove the wake handle + reverse links
-            run_ctx.reassignment_wake_handles.pop(rreq.wake_handle_id, None)
-            run_ctx.reassign_by_suffix_slice.pop(rreq.wake_handle_id, None)
+        wh_id = rreq.wake_handle_id
+        if wh_id is not None:                              # remove the wake handle + reverse links
+            run_ctx.reassignment_wake_handles.pop(wh_id, None)
+            run_ctx.reassign_by_suffix_slice.pop(wh_id, None)
+            rreq.wake_handle_id = None
         prog = run_ctx.range_progress.get(rreq.RangeSliceID)
     if prog is not None:
         if prog.current_lease_id is None and prog.committed_frontier < prog.range_end:
@@ -2359,11 +2479,10 @@ def _handle_reserve_activation_start(run_ctx: RunContext, payload: Dict[str, Any
         if rreq is not None and rreq.started_at is None:
             rreq.started_at = t
             rm = run_ctx.miners.get(mid)
-            rreq.wake_residency_at_start = rm.duration.get("WAKING", 0.0) if rm is not None else 0.0
-            rreq.reassignee_reserve_residency_at_wake_start = \
-                rm.duration.get("RESERVE", 0.0) if rm is not None else 0.0
-            rreq.reassignee_low_residency_at_wake_start = \
-                rm.duration.get("LOW_POWER_LISTEN", 0.0) if rm is not None else 0.0
+            rreq.wake_residency_at_start = _residency(rm, "WAKING", t)   # S4C-1
+            rreq.reassignee_reserve_residency_at_wake_start = _residency(rm, "RESERVE", t)
+            rreq.reassignee_low_residency_at_wake_start = _residency(rm, "LOW_POWER_LISTEN", t)
+            rreq.reassignee_offline_residency_at_wake_start = _residency(rm, "OFFLINE", t)
     complete_time = t + run_ctx.config.security_floor.activation_wake_latency
     cpayload = dict(payload)
     cpayload["expected_reserve_status"] = "WAKING"
@@ -2381,7 +2500,7 @@ def _handle_reserve_activation_start(run_ctx: RunContext, payload: Dict[str, Any
         run_ctx.apply_miner_state_transition(mid, "LOW_POWER_LISTEN", t)
         rr.reserve_status = "CANCELLED"
         rr.disposition = Outcome("reserve_activation_complete_seat_failed", reason=r)
-        rr.activation_request_id = None
+        _clear_reserve_record_activation_fields(rr)         # S4C-3: clear ALL reverse links
         sl.status = "UNCLAIMED"                             # declared slice-restore policy
         sl.claimed_by = None
         req.status = "FAILED"
