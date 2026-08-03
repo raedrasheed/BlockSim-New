@@ -92,7 +92,13 @@ class EvaluationRecord:
     contained_solution: bool
     winning_nonce: Optional[int]
     event_ref: Any
-    assignment_kind: str = "PRIMARY_ASSIGNMENT"   # S3-7: PRIMARY_ASSIGNMENT | ACTIVATED_RESERVE_ASSIGNMENT
+    assignment_kind: str = "PRIMARY_ASSIGNMENT"   # S3-7/S4-3: PRIMARY/ACTIVATED_RESERVE/REASSIGNED_*
+    # S4-3: the range slice + lease provenance for the committed interval.
+    RangeSliceID: Any = None
+    LeaseID: Any = None
+    lease_generation: int = 0
+    progress_generation: int = 0
+    predecessor_lease_id: Any = None
 
     def count(self) -> int:
         return self.interval_end - self.interval_start
@@ -207,6 +213,30 @@ class RunContext:
             "partial_restoration_count": 0,
             "full_domain_exhausted_count": 0,
             "unused_reserve_domain_count": 0,
+        }
+        # Stage-4 range-lease + reassignment state.
+        self.range_leases: Dict[Any, Any] = {}          # LeaseID -> RangeLease
+        self.range_progress: Dict[str, Any] = {}        # RangeSliceID -> RangeProgress
+        self.slice_of_miner: Dict[Any, str] = {}        # (RoundID, MinerID) -> RangeSliceID
+        self.reassignment_decisions: List[Any] = []
+        self.reassignment_requests: Dict[Any, Any] = {}  # RangeReassignmentRequestID -> request
+        self.reassignments_per_slice: Dict[str, int] = {}  # RangeSliceID -> count
+        self.lease_generation_of_slice: Dict[str, int] = {}  # RangeSliceID -> latest generation
+        self.reassign_by_suffix_slice: Dict[str, Any] = {}   # suffix RangeSliceID -> (req_id, slice_id)
+        self.lease_observation_by_key: Dict[Any, Any] = {}   # S4-5 idempotent replay registry
+        self.lease_seq: int = 0
+        self.reassignment_decision_seq: int = 0
+        self.reassignment_retry_seq: Dict[str, int] = {}
+        self.lease_stats: Dict[str, Any] = {
+            "leases_created": 0, "leases_completed": 0, "leases_expired": 0,
+            "leases_revoked": 0, "leases_reassigned": 0, "reassignment_decisions": 0,
+            "reassignment_requests_seated": 0, "reassignment_requests_completed": 0,
+            "reassignment_requests_failed": 0, "reassignment_seat_rollback_count": 0,
+            "stale_old_lease_events": 0, "lease_observation_replay_count": 0,
+            "uncovered_range_count": 0, "uncovered_nonce_count": 0,
+            "total_reassignment_latency": 0.0, "maximum_reassignment_latency": 0.0,
+            "reassignment_wake_energy_j": 0.0, "reassignment_active_energy_j": 0.0,
+            "max_progress_frontier_residual": 0, "max_reassignment_latency_residual": 0.0,
         }
         # audit log
         self.log: List[Outcome] = []

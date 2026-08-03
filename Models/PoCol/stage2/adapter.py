@@ -20,9 +20,43 @@ from .config import Stage2Config, a1_continuous_control_kwh
 from .simulator import run_simulation
 from .search import SUCCESS_MODEL
 from .security import SecurityFloorPolicy, FLOOR_UNATTAINABLE_POLICIES
+from .leases import RangeLeasePolicy
 
 # Declared result schema keys (stable contract for BlockSim consumers).
-RESULT_SCHEMA_VERSION = "stage3a.1"
+RESULT_SCHEMA_VERSION = "stage4.1"
+
+
+def _range_lease_from_blocksim(b: Dict[str, Any]) -> Optional[RangeLeasePolicy]:
+    """S4-8: build a VALIDATED immutable RangeLeasePolicy from a BlockSim config mapping.
+
+    Returns ``None`` when no lease keys are present (keeping the disabled default).  Rejects
+    unsupported policy names and negative durations/timeouts/latencies/tolerances by raising
+    ``ValueError`` (from ``RangeLeasePolicy.__post_init__``).
+    """
+    lease_keys = ("range_lease_enabled", "lease_duration", "progress_timeout",
+                  "reassignment_enabled", "reassignment_selection_policy",
+                  "maximum_reassignments_per_slice", "reassignment_wake_latency",
+                  "no_eligible_miner_policy", "lease_tolerance")
+    if not any(k in b and b[k] is not None for k in lease_keys):
+        return None
+    kwargs: Dict[str, Any] = {"enabled": bool(b.get("range_lease_enabled", True))}
+    if b.get("lease_duration") is not None:
+        kwargs["lease_duration"] = float(b["lease_duration"])
+    if b.get("progress_timeout") is not None:
+        kwargs["progress_timeout"] = float(b["progress_timeout"])
+    if b.get("reassignment_enabled") is not None:
+        kwargs["reassignment_enabled"] = bool(b["reassignment_enabled"])
+    if b.get("reassignment_selection_policy") is not None:
+        kwargs["reassignment_selection_policy"] = str(b["reassignment_selection_policy"])
+    if b.get("maximum_reassignments_per_slice") is not None:
+        kwargs["maximum_reassignments_per_slice"] = int(b["maximum_reassignments_per_slice"])
+    if b.get("reassignment_wake_latency") is not None:
+        kwargs["reassignment_wake_latency"] = float(b["reassignment_wake_latency"])
+    if b.get("no_eligible_miner_policy") is not None:
+        kwargs["no_eligible_miner_policy"] = str(b["no_eligible_miner_policy"])
+    if b.get("lease_tolerance") is not None:
+        kwargs["lease_tolerance"] = float(b["lease_tolerance"])
+    return RangeLeasePolicy(**kwargs)                       # __post_init__ validates
 
 
 def _security_floor_from_blocksim(b: Dict[str, Any]) -> Optional[SecurityFloorPolicy]:
@@ -100,6 +134,10 @@ def stage2config_from_blocksim(blocksim_config: Optional[Dict[str, Any]] = None
     pol = _security_floor_from_blocksim(b)
     if pol is not None:
         kwargs["security_floor"] = pol
+    # S4-8: the validated immutable range-lease / reassignment policy.
+    lease_pol = _range_lease_from_blocksim(b)
+    if lease_pol is not None:
+        kwargs["range_lease"] = lease_pol
     return Stage2Config(**kwargs)
 
 
@@ -138,7 +176,66 @@ def results_schema(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
                    "nonce_domain_size": cfg.nonce_domain_size, "difficulty": cfg.difficulty},
     }
     out.update(_security_floor_results(run_ctx, cfg))
+    out.update(_range_lease_results(run_ctx, cfg))
     return out
+
+
+def _range_lease_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
+    """S4-13 result fields: range-lease / reassignment metrics + reassignment energy.
+
+    Reassignment is a liveness/coverage mechanism that may INCREASE energy and latency; these
+    fields never claim it saves energy.  The accepted security-floor and energy labels are
+    kept unchanged.
+    """
+    s = run_ctx.lease_stats
+    pol = cfg.range_lease
+    P = cfg.per_miner_power
+    # reassignment wake/active energy: attributed to reassigned (REASSIGNED_*) work miners.
+    reassigned_miners = set()
+    for (rid, mid), kind in run_ctx.search_assignment_kind.items():
+        if kind in ("REASSIGNED_PRIMARY_WORK", "REASSIGNED_RESERVE_WORK"):
+            reassigned_miners.add(mid)
+    wake_j = sum(P("WAKING") * run_ctx.miners[mid].duration.get("WAKING", 0.0)
+                 for mid in reassigned_miners if mid in run_ctx.miners)
+    active_j = sum(P("ACTIVE_HASHING") * run_ctx.miners[mid].duration.get("ACTIVE_HASHING", 0.0)
+                   for mid in reassigned_miners if mid in run_ctx.miners)
+    # duplicate-nonce / post-round-evaluation cross-checks over the ledger (S4-8 / S4-2).
+    seen = set()
+    dup = 0
+    post = 0
+    for rec in run_ctx.evaluation_ledger:
+        tt = run_ctx.round_terminal_times.get(rec.RoundID)
+        if tt is not None and rec.completion_time > tt + 1e-9:
+            post += 1
+        for n in rec.nonces():
+            k = (rec.TemplateID, rec.RangeSliceID, n)
+            if k in seen:
+                dup += 1
+            seen.add(k)
+    return {
+        "range_lease_enabled": pol.enabled,
+        "lease_duration": pol.lease_duration,
+        "reassignment_enabled": pol.reassignment_enabled,
+        "no_eligible_miner_policy": pol.no_eligible_miner_policy,
+        "leases_created": s["leases_created"],
+        "leases_completed": s["leases_completed"],
+        "leases_expired": s["leases_expired"],
+        "leases_revoked": s["leases_revoked"],
+        "leases_reassigned": s["leases_reassigned"],
+        "reassignment_decisions": s["reassignment_decisions"],
+        "reassignment_requests_seated": s["reassignment_requests_seated"],
+        "reassignment_requests_completed": s["reassignment_requests_completed"],
+        "reassignment_requests_failed": s["reassignment_requests_failed"],
+        "stale_old_lease_events": s["stale_old_lease_events"],
+        "uncovered_range_count": s["uncovered_range_count"],
+        "uncovered_nonce_count": s["uncovered_nonce_count"],
+        "total_reassignment_latency": s["total_reassignment_latency"],
+        "maximum_reassignment_latency": s["maximum_reassignment_latency"],
+        "reassignment_wake_energy_kwh": wake_j / 3_600_000.0,
+        "reassignment_active_energy_kwh": active_j / 3_600_000.0,
+        "duplicate_nonce_count": dup,
+        "post_round_evaluation_count": post,
+    }
 
 
 def _security_floor_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:

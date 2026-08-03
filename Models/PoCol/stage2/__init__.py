@@ -32,11 +32,20 @@ from .security import (SecurityFloorPolicy, RangeSlice, ReserveMinerRecord,
                        FLOOR_UNATTAINABLE_POLICIES, FULL_DOMAIN_EXHAUSTED_NO_BLOCK,
                        ROUND_CLOSED_WITH_UNUSED_RESERVE_DOMAIN,
                        PRIMARY_ASSIGNMENT, ACTIVATED_RESERVE_ASSIGNMENT)
+from .leases import (RangeLeasePolicy, RangeLease, RangeProgress,
+                     RangeReassignmentDecision, RangeReassignmentRequest,
+                     ReassignmentCandidate, select_reassignment_candidate,
+                     LEASE_STATUSES, TERMINAL_LEASE_STATUSES, REASSIGN_REQUEST_STATUSES,
+                     TERMINAL_REASSIGN_REQUEST_STATUSES, LEASE_DECISIONS,
+                     REASSIGN_POLICY_RESULTS, LEASE_TRIGGERS, NO_ELIGIBLE_MINER_POLICIES,
+                     REASSIGNMENT_SELECTION_POLICIES, REASSIGNED_PRIMARY_WORK,
+                     REASSIGNED_RESERVE_WORK)
 from .simulator import (RunInitialise, RunEventLoopToHorizon, ProcessEventTime,
                         RoundAbort, FinalizeSimulationRun, FinalizeSimulationRunNoRound,
                         FinalizeSimulationRunPartial, run_simulation,
                         EvaluateSecurityFloor, SeatReserveActivation,
-                        SeatReserveActivationTransaction)
+                        SeatReserveActivationTransaction, EvaluateRangeLease,
+                        RevokeRangeLeaseTransaction, SeatRangeReassignmentTransaction)
 from .energy_experiment import (run_energy_experiment, EnergyExperimentResult,
                                 MinerEnergyRow)
 from .adapter import (run_pocol_stage2, stage2config_from_blocksim, results_schema,
@@ -71,4 +80,11 @@ __all__ = [
     "FULL_DOMAIN_EXHAUSTED_NO_BLOCK", "ROUND_CLOSED_WITH_UNUSED_RESERVE_DOMAIN",
     "PRIMARY_ASSIGNMENT", "ACTIVATED_RESERVE_ASSIGNMENT",
     "EvaluateSecurityFloor", "SeatReserveActivation", "SeatReserveActivationTransaction",
+    "RangeLeasePolicy", "RangeLease", "RangeProgress", "RangeReassignmentDecision",
+    "RangeReassignmentRequest", "ReassignmentCandidate", "select_reassignment_candidate",
+    "LEASE_STATUSES", "TERMINAL_LEASE_STATUSES", "REASSIGN_REQUEST_STATUSES",
+    "TERMINAL_REASSIGN_REQUEST_STATUSES", "LEASE_DECISIONS", "REASSIGN_POLICY_RESULTS",
+    "LEASE_TRIGGERS", "NO_ELIGIBLE_MINER_POLICIES", "REASSIGNMENT_SELECTION_POLICIES",
+    "REASSIGNED_PRIMARY_WORK", "REASSIGNED_RESERVE_WORK",
+    "EvaluateRangeLease", "RevokeRangeLeaseTransaction", "SeatRangeReassignmentTransaction",
 ]

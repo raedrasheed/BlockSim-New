@@ -15,9 +15,10 @@ No dynamic difficulty is used in the confirmatory core.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .security import SecurityFloorPolicy
+from .leases import RangeLeasePolicy
 
 # A1 accounting invariant — the frozen matched control (kWh).
 A1_BASELINE_KWH = 8.420833333
@@ -68,8 +69,14 @@ class Stage2Config:
     security_floor: SecurityFloorPolicy = SecurityFloorPolicy()
     floor_unattainable_policy: str = "CONTINUE_DEGRADED"   # or ABORT_ROUND
 
+    # --- Stage-4 range leases + reassignment (disabled by default) ---
+    range_lease: RangeLeasePolicy = RangeLeasePolicy()
+
     # --- scenario injection (tests only; empty in confirmatory runs) ---
     abort_round_seqs: frozenset = frozenset()   # round seqs that abort instead of accepting
+    # S4-4: injected lease faults — each entry is (round_seq, MinerID, fail_time, reason).
+    # Empty in confirmatory runs; a fault seats a MinerFailureEvent that revokes the lease.
+    injected_lease_faults: tuple = ()
 
     # --- bounds ---
     maximum_setup_retries: int = 3

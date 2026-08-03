@@ -66,6 +66,11 @@ MICROPHASE_ORDINAL: Dict[str, int] = {
     # Stage-3 reserve-activation lifecycle (after range-exhaust adjudication).
     "RESERVE_ACTIVATION_START": 16,
     "RESERVE_ACTIVATION_COMPLETE": 17,
+    # Stage-4 range-lease / reassignment lifecycle.
+    "MINER_FAILURE": 18,
+    "RANGE_REASSIGNMENT_START": 19,
+    "RANGE_REASSIGNMENT_COMPLETE": 20,
+    "RANGE_REASSIGNMENT_RETRY": 21,
 }
 
 # Stage-3 activation-event payload identity (S3-6): full round/template/assignment identity.
@@ -73,6 +78,15 @@ _ACTIVATION_PAYLOAD_KEYS = (
     "ReserveActivationRequestID", "SecurityFloorObservationID", "ReserveActivationDecisionID",
     "RoundID_at_seat", "TemplateID_at_seat", "MinerID", "ReserveSliceID",
     "activation_generation", "expected_reserve_status", "expected_round_state_version",
+)
+
+# Stage-4 reassignment-event payload identity (S4-8): full predecessor/successor identity.
+_REASSIGN_PAYLOAD_KEYS = (
+    "RangeReassignmentRequestID", "DecisionID", "predecessor_lease_id", "new_lease_id",
+    "RoundID_at_seat", "TemplateID_at_seat", "RangeSliceID", "old_MinerID", "new_MinerID",
+    "predecessor_committed_frontier", "new_lease_generation", "expected_old_lease_status",
+    "expected_new_request_status", "expected_progress_generation",
+    "expected_round_state_version",
 )
 
 
@@ -84,6 +98,10 @@ class EventDescriptor:
     tie_key_fields: Tuple[str, ...]
     allowed_payload_keys: Tuple[str, ...]
     recv_env: bool = False
+    # Stage-4: keys that MAY appear in the payload but are not required (e.g. an optional
+    # LeaseID carried only when the range-lease layer is enabled).  Backward-compatible: an
+    # empty tuple reproduces the exact prior strict-schema behaviour.
+    optional_payload_keys: Tuple[str, ...] = ()
 
 
 DESCRIPTORS: Dict[str, EventDescriptor] = {
@@ -103,21 +121,25 @@ DESCRIPTORS: Dict[str, EventDescriptor] = {
                         ("RoundID_at_seat", "activation_seq"),
                         ("RoundID_at_seat", "deficit", "activation_seq",
                          "DriverRequestID", "round_scope"), recv_env=True),
+        # S4-3: a range-exhaust event OPTIONALLY carries the current LeaseID + generation.
         EventDescriptor("RangeExhaustEvent", "RANGE_EXHAUST_ADJUDICATE",
                         ("MinerID", "AssignmentID"),
                         ("MinerID", "AssignmentID", "RoundID_at_seat",
                          "TemplateID_at_seat", "assignment_version",
-                         "expected_search_generation"), recv_env=True),
+                         "expected_search_generation"), recv_env=True,
+                        optional_payload_keys=("LeaseID", "lease_generation")),
         EventDescriptor("WakeCompleteEvent", "WAKE_COMPLETE",
                         ("MinerID", "AssignmentID", "assignment_version"),
                         ("MinerID", "AssignmentID", "assignment_version"), recv_env=True),
         # S2B-3: a hash event carries the complete immutable round/template/assignment
         # identity plus the planned cursor interval and the expected search generation.
+        # S4-3: it OPTIONALLY also carries the current LeaseID + lease generation.
         EventDescriptor("HashWorkEvent", "HASH_WORK",
                         ("MinerID", "AssignmentID", "cursor_start"),
                         ("RoundID_at_seat", "TemplateID_at_seat", "AssignmentID",
                          "assignment_version", "MinerID", "cursor_start", "cursor_end",
-                         "expected_search_generation"), recv_env=True),
+                         "expected_search_generation"), recv_env=True,
+                        optional_payload_keys=("LeaseID", "lease_generation")),
         EventDescriptor("AcceptanceEvent", "ACCEPTANCE_FINALIZE",
                         ("RoundID_at_seat", "acceptance_seq"),
                         ("RoundID_at_seat", "acceptance_seq"), recv_env=True),
@@ -128,6 +150,20 @@ DESCRIPTORS: Dict[str, EventDescriptor] = {
         EventDescriptor("ReserveActivationCompleteEvent", "RESERVE_ACTIVATION_COMPLETE",
                         ("MinerID", "ReserveSliceID"), _ACTIVATION_PAYLOAD_KEYS,
                         recv_env=True),
+        # Stage-4 range-lease / reassignment lifecycle (S4-4/S4-8).
+        EventDescriptor("MinerFailureEvent", "MINER_FAILURE", ("MinerID",),
+                        ("MinerID", "RoundID_at_seat", "TemplateID_at_seat", "fault_reason"),
+                        recv_env=True),
+        EventDescriptor("RangeReassignmentStartEvent", "RANGE_REASSIGNMENT_START",
+                        ("RangeSliceID", "new_lease_generation"), _REASSIGN_PAYLOAD_KEYS,
+                        recv_env=True),
+        EventDescriptor("RangeReassignmentCompleteEvent", "RANGE_REASSIGNMENT_COMPLETE",
+                        ("RangeSliceID", "new_lease_generation"), _REASSIGN_PAYLOAD_KEYS,
+                        recv_env=True),
+        EventDescriptor("RangeReassignmentRetryEvent", "RANGE_REASSIGNMENT_RETRY",
+                        ("RangeSliceID", "retry_seq"),
+                        ("RangeSliceID", "RoundID_at_seat", "TemplateID_at_seat",
+                         "predecessor_lease_id", "retry_seq"), recv_env=True),
     ]
 }
 
@@ -384,7 +420,8 @@ def ScheduleEvent(eq: EventQueue, round_context: Any, event_type: str,
                        target_microphase=target_microphase,
                        expected_microphase=d.target_microphase)
     missing = [k for k in d.allowed_payload_keys if k not in payload]
-    extra = [k for k in payload if k not in d.allowed_payload_keys]
+    permitted = set(d.allowed_payload_keys) | set(d.optional_payload_keys)
+    extra = [k for k in payload if k not in permitted]
     if missing or extra:
         return Outcome("rejected_payload_schema_mismatch", event_type=event_type,
                        missing_fields=missing, extra_fields=extra)

@@ -29,7 +29,7 @@ def test_adapter_returns_declared_schema():
     """run_pocol_stage2 returns the declared round/block/energy schema (S2B-6 labels)."""
     out = run_pocol_stage2({"num_miners": 8, "horizon_T": 300.0, "nonce_domain_size": 1200,
                             "reserve_fraction": 0.25})
-    assert out["schema_version"] == RESULT_SCHEMA_VERSION == "stage3a.1"   # S3A: schema bump
+    assert out["schema_version"] == RESULT_SCHEMA_VERSION == "stage4.1"   # S3A: schema bump
     assert out["algorithm"] == "PoCol"
     assert out["mechanism"] == "idle policy within PoCol"
     assert out["success_model"] == SUCCESS_MODEL == "TARGET_COUPLED_SHA256_DIGEST_LEQ_TARGET"

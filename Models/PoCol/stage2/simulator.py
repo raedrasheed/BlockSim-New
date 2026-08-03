@@ -27,12 +27,18 @@ from .driver import (SeatNextRoundBootstrap, SeatPendingDriverRequests, SeatMine
                      scope_admits)
 from .search import make_template, partition_domain, MinerSearchState, sha256_int
 from .security import (SecurityFloorObservation, ReserveActivationDecision,
-                       ReserveActivationRequest, ReserveMinerRecord,
+                       ReserveActivationRequest, ReserveMinerRecord, RangeSlice,
                        compute_h_effective, partition_primary_and_reserve,
                        select_reserves_to_cover, PRIMARY_ASSIGNMENT,
                        ACTIVATED_RESERVE_ASSIGNMENT, TERMINAL_RESERVE_STATUSES,
                        TERMINAL_REQUEST_STATUSES, FULL_DOMAIN_EXHAUSTED_NO_BLOCK,
                        ROUND_CLOSED_WITH_UNUSED_RESERVE_DOMAIN)
+from .leases import (RangeLease, RangeProgress, RangeReassignmentDecision,
+                     RangeReassignmentRequest, ReassignmentCandidate,
+                     lease_id as _mk_lease_id, reassignment_request_id as _mk_reassign_id,
+                     select_reassignment_candidate, TERMINAL_LEASE_STATUSES,
+                     TERMINAL_REASSIGN_REQUEST_STATUSES, REASSIGNED_PRIMARY_WORK,
+                     REASSIGNED_RESERVE_WORK)
 
 _TERMINAL_ROUND = ("ROUND_ACCEPTED", "ROUND_ABORTED")
 
@@ -280,6 +286,16 @@ def _handle_prepare_participants(run_ctx: RunContext, payload: Dict[str, Any],
             run_ctx.reserve_records[(rc.RoundID, mid)] = rr
     else:
         ranges = partition_domain(cfg.nonce_domain_size, participants)
+        # S4-10: when the range-lease layer is engaged (floor off), the whole domain still
+        # goes to the primaries, but bare reserve records are registered so an AVAILABLE
+        # reserve can be selected as a reassignee (via the accepted Stage-3 wake, Path B).
+        if cfg.range_lease.enabled and reserve_ids:
+            for j, mid in enumerate(reserve_ids):
+                if (rc.RoundID, mid) not in run_ctx.reserve_records:
+                    run_ctx.reserve_records[(rc.RoundID, mid)] = ReserveMinerRecord(
+                        MinerID=mid, RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed,
+                        hash_rate=cfg.hash_rate_for(len(participants) + j),
+                        reserve_status="AVAILABLE", activation_priority=j)
     rc.search_states = {}
     for idx, mid in enumerate(sorted(participants)):
         start, end = ranges[mid]
@@ -294,6 +310,12 @@ def _handle_prepare_participants(run_ctx: RunContext, payload: Dict[str, Any],
                                "RoundID": rc.RoundID, "TemplateID": rc.TemplateID_committed,
                                "coverage_state": "OPEN"}
         run_ctx.search_assignment_kind[(rc.RoundID, mid)] = PRIMARY_ASSIGNMENT
+        # S4-1/S4-3: give every primary assignment a RangeSlice + authoritative RangeProgress
+        # + one ACTIVE RangeLease over its exact range.
+        if run_ctx.config.range_lease.enabled:
+            slice_id = f"PS-{rc.RoundID}-{mid}"
+            _create_range_progress_and_lease(run_ctx, rc, mid, aid, version, slice_id,
+                                             start, end, PRIMARY_ASSIGNMENT, t)
         run_ctx.apply_miner_state_transition(mid, "WAKING", t)
         _start_wake(run_ctx, rc, mid, aid, version)
         # S2B-7 (SCI-3): an EXPECTED first-batch completion time, so a participant whose
@@ -313,6 +335,17 @@ def _handle_prepare_participants(run_ctx: RunContext, payload: Dict[str, Any],
     if pol.enabled:
         # measure-only at round start (no seat/abort until time advances past the ramp).
         EvaluateSecurityFloor(run_ctx, rc, t, "participants_prepared", decide=False)
+    # S4-4: seat any injected lease-fault (miner failure) events for this round (test-only;
+    # empty in confirmatory runs).  Each seats a MinerFailureEvent at its declared fail_time.
+    if cfg.range_lease.enabled:
+        _eq = run_ctx.event_queue
+        for fault in cfg.injected_lease_faults:
+            f_round_seq, f_mid, f_time, f_reason = fault
+            if f_round_seq == run_ctx.round_seq and f_mid in rc.search_states:
+                ScheduleEvent(_eq, rc, "MinerFailureEvent", f_time, "MINER_FAILURE",
+                              {"MinerID": f_mid, "RoundID_at_seat": rc.RoundID,
+                               "TemplateID_at_seat": rc.TemplateID_committed,
+                               "fault_reason": f_reason}, ordinary_dispatch_origin(_eq))
     return Outcome("participant_set_prepared", participants=len(participants),
                    nonce_domain_size=cfg.nonce_domain_size,
                    reserve_slices=len(run_ctx.reserve_slices.get(rc.RoundID, [])))
@@ -388,6 +421,13 @@ def _seat_hash_work(run_ctx: RunContext, rc: RoundContext, st: Any,
                "AssignmentID": st.AssignmentID, "assignment_version": st.assignment_version,
                "MinerID": st.MinerID, "cursor_start": cursor_start, "cursor_end": cursor_end,
                "expected_search_generation": st.search_generation}
+    # S4-3: when the range-lease layer is enabled, EVERY HashWorkEvent carries the current
+    # LeaseID + lease generation so a stale event from a superseded lease is stale-safe.
+    if run_ctx.config.range_lease.enabled:
+        lease = _current_lease_for_miner(run_ctx, rc, st.MinerID)
+        if lease is not None:
+            payload["LeaseID"] = lease.LeaseID
+            payload["lease_generation"] = lease.lease_generation
     return ScheduleEvent(eq, rc, "HashWorkEvent", completion_time, "HASH_WORK", payload,
                          ordinary_dispatch_origin(eq))
 
@@ -432,6 +472,12 @@ def _handle_hash_work(run_ctx: RunContext, payload: Dict[str, Any],
     guard = _verify_hash_identity(rc, st, payload)          # S2B-3: replay/superseded guard
     if guard.kind != "hash_identity_ok":
         return Outcome("hash_work_no_effect", reason=guard, MinerID=mid)
+    # S4-3: verify the current lease BEFORE any mutation; a stale event from a superseded
+    # (revoked / reassigned) lease performs NO effect (S4-09).
+    lguard = _verify_hash_lease(run_ctx, rc, st, mid, payload)
+    if lguard.kind != "hash_lease_ok":
+        run_ctx.lease_stats["stale_old_lease_events"] += 1
+        return Outcome("hash_work_no_effect", reason=lguard, MinerID=mid)
     cfg = run_ctx.config
     tpl = rc.template
     cursor_start = payload["cursor_start"]
@@ -454,13 +500,32 @@ def _handle_hash_work(run_ctx: RunContext, payload: Dict[str, Any],
     # S2B-4 / S3-7: append the executable evaluation-ledger record, tagged PRIMARY vs
     # ACTIVATED_RESERVE so the ledger tests can prove zero duplicate evaluation across both.
     kind = run_ctx.search_assignment_kind.get((rc.RoundID, mid), PRIMARY_ASSIGNMENT)
+    # S4-2/S4-3: advance the authoritative committed_frontier (monotonic, causal — planning
+    # advanced nothing) and tag the ledger record with the lease provenance.
+    slice_id = lease_gen = prog_gen = pred_lease = lease_ref = None
+    if cfg.range_lease.enabled:
+        slice_id = run_ctx.slice_of_miner.get((rc.RoundID, mid))
+        prog = run_ctx.range_progress.get(slice_id) if slice_id else None
+        if prog is not None:
+            assert commit_end >= prog.committed_frontier, "committed_frontier decreased"
+            assert commit_end <= prog.range_end, "committed_frontier exceeds range_end"
+            prog.committed_frontier = commit_end
+            lease_ref = run_ctx.range_leases.get(prog.current_lease_id)
+            if lease_ref is not None:
+                lease_ref.committed_cursor = commit_end
+                lease_gen = lease_ref.lease_generation
+                pred_lease = lease_ref.predecessor_lease_id
+            prog_gen = prog.progress_generation
     run_ctx.evaluation_ledger.append(EvaluationRecord(
         RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed, MinerID=mid,
         AssignmentID=st.AssignmentID, assignment_version=st.assignment_version,
         interval_start=cursor_start, interval_end=commit_end, completion_time=now,
         contained_solution=(winner_nonce is not None), winning_nonce=winner_nonce,
-        event_ref=er, assignment_kind=kind))
-    if kind == ACTIVATED_RESERVE_ASSIGNMENT:
+        event_ref=er, assignment_kind=kind, RangeSliceID=slice_id,
+        LeaseID=(lease_ref.LeaseID if lease_ref is not None else None),
+        lease_generation=lease_gen or 0, progress_generation=prog_gen or 0,
+        predecessor_lease_id=pred_lease))
+    if kind in (ACTIVATED_RESERVE_ASSIGNMENT, REASSIGNED_RESERVE_WORK):
         run_ctx.security_stats["activated_reserve_evaluation_count"] += committed
     run_ctx.final_searched[(rc.RoundID, mid)] = st.searched_count
     if winner_nonce is not None:                           # first valid solution in sim time
@@ -487,6 +552,11 @@ def _seat_range_exhaust(run_ctx: RunContext, rc: RoundContext, st: Any,
                "RoundID_at_seat": rc.RoundID, "TemplateID_at_seat": rc.TemplateID_committed,
                "assignment_version": st.assignment_version,
                "expected_search_generation": st.search_generation}
+    if run_ctx.config.range_lease.enabled:                  # S4-3: carry the current lease
+        lease = _current_lease_for_miner(run_ctx, rc, st.MinerID)
+        if lease is not None:
+            payload["LeaseID"] = lease.LeaseID
+            payload["lease_generation"] = lease.lease_generation
     return ScheduleEvent(eq, rc, "RangeExhaustEvent", at_time, "RANGE_EXHAUST_ADJUDICATE",
                          payload, ordinary_dispatch_origin(eq))
 
@@ -510,6 +580,10 @@ def _handle_range_exhaust(run_ctx: RunContext, payload: Dict[str, Any],
     t = run_ctx.event_queue.current_event_time
     if m is not None and m.state == "ACTIVE_HASHING":
         run_ctx.apply_miner_state_transition(mid, "LOW_POWER_LISTEN", t)   # idle policy
+    # S4-2: a range searched to the end COMPLETES its lease and closes its RangeProgress at
+    # the frontier (== range_end) — no reassignment for a completed lease.
+    if run_ctx.config.range_lease.enabled:
+        _complete_lease_at_exhaustion(run_ctx, rc, mid, t)
     # S3-4: a primary exhaustion drops H_effective -> re-evaluate the security floor (it may
     # seat a reserve activation to restore capacity before declaring the round exhausted).
     if run_ctx.config.security_floor.enabled:
@@ -550,6 +624,32 @@ def _maybe_terminate_no_block(run_ctx: RunContext, rc: RoundContext) -> Optional
     for (rid, _mid), rr in run_ctx.reserve_records.items():
         if rid == rc.RoundID and rr.reserve_status in ("ACTIVATION_PENDING", "WAKING"):
             return None                                   # reserve capacity still incoming
+    # S4-12/S4-17/S4-18: with the range-lease layer engaged, RangeProgress is authoritative.
+    # A reassignment still in flight means work is incoming (do not terminate); any lease
+    # suffix left unfinished (or an unclaimed reserve-domain slice) forbids a full-domain
+    # exhaustion claim — the round closes with an explicit unassigned/unused disposition.
+    if run_ctx.config.range_lease.enabled:
+        if _reassignment_in_flight(run_ctx, rc):
+            return None
+        progs = [p for p in run_ctx.range_progress.values() if p.RoundID == rc.RoundID]
+        unfinished = [p for p in progs if p.committed_frontier < p.range_end]
+        unclaimed_reserve = [sl for sl in run_ctx.reserve_slices.get(rc.RoundID, [])
+                             if sl.status == "UNCLAIMED"]
+        if unfinished or unclaimed_reserve:
+            for p in unfinished:
+                if p.terminal_status == "OPEN":
+                    p.terminal_status = "UNASSIGNED_AT_ROUND_CLOSE"
+            run_ctx.lease_stats["uncovered_range_count"] += len(unfinished)
+            run_ctx.lease_stats["uncovered_nonce_count"] += sum(p.uncovered()
+                                                                for p in unfinished)
+            if unclaimed_reserve:
+                run_ctx.security_stats["unused_reserve_domain_count"] += 1
+                return RoundAbort(run_ctx, rc, reason=ROUND_CLOSED_WITH_UNUSED_RESERVE_DOMAIN,
+                                  envelope={})
+            return RoundAbort(run_ctx, rc, reason="round_closed_with_unassigned_range",
+                              envelope={})
+        run_ctx.security_stats["full_domain_exhausted_count"] += 1
+        return RoundAbort(run_ctx, rc, reason=FULL_DOMAIN_EXHAUSTED_NO_BLOCK, envelope={})
     slices = run_ctx.reserve_slices.get(rc.RoundID, [])
     unclaimed = [sl for sl in slices if sl.status == "UNCLAIMED"]
     if unclaimed:
@@ -565,6 +665,667 @@ def _maybe_terminate_no_block(run_ctx: RunContext, rc: RoundContext) -> Optional
         run_ctx.security_stats["full_domain_exhausted_count"] += 1
         return RoundAbort(run_ctx, rc, reason=FULL_DOMAIN_EXHAUSTED_NO_BLOCK, envelope={})
     return RoundAbort(run_ctx, rc, reason="round_exhausted_no_block", envelope={})
+
+
+# ============================================================ Stage-4 range leases
+def _create_range_progress_and_lease(run_ctx: RunContext, rc: RoundContext, mid: Any,
+                                     aid: Any, version: int, slice_id: str, start: int,
+                                     end: int, kind: str, t: float) -> Any:
+    """S4-1/S4-2: mint the authoritative RangeProgress + one ACTIVE RangeLease for a slice."""
+    run_ctx.slice_of_miner[(rc.RoundID, mid)] = slice_id
+    run_ctx.lease_generation_of_slice[slice_id] = 1
+    lid = _mk_lease_id(rc.RoundID, rc.TemplateID_committed, slice_id, 1)
+    run_ctx.range_progress[slice_id] = RangeProgress(
+        RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed, RangeSliceID=slice_id,
+        range_start=start, range_end=end, committed_frontier=start, current_lease_id=lid,
+        progress_generation=0, terminal_status="OPEN", assignment_kind=kind)
+    lease = RangeLease(
+        LeaseID=lid, RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed,
+        RangeSliceID=slice_id, lease_generation=1, AssignmentID=aid,
+        assignment_version=version, MinerID=mid, assignment_kind=kind,
+        lease_start_nonce=start, lease_end_nonce=end, committed_cursor=start,
+        lease_start_time=t, lease_expiry_time=t + run_ctx.config.range_lease.lease_duration,
+        lease_status="ACTIVE")
+    run_ctx.range_leases[lid] = lease
+    run_ctx.lease_stats["leases_created"] += 1
+    return lease
+
+
+def _current_lease_for_miner(run_ctx: RunContext, rc: RoundContext, mid: Any) -> Any:
+    slice_id = run_ctx.slice_of_miner.get((rc.RoundID, mid))
+    if slice_id is None:
+        return None
+    prog = run_ctx.range_progress.get(slice_id)
+    if prog is None or prog.current_lease_id is None:
+        return None
+    lease = run_ctx.range_leases.get(prog.current_lease_id)
+    if lease is not None and lease.MinerID == mid and lease.lease_status == "ACTIVE":
+        return lease
+    return None
+
+
+def _verify_hash_lease(run_ctx: RunContext, rc: RoundContext, st: Any, mid: Any,
+                       payload: Dict[str, Any]) -> Outcome:
+    """S4-3: verify the current lease BEFORE any search-state mutation."""
+    if not run_ctx.config.range_lease.enabled:
+        return Outcome("hash_lease_ok")
+    lid = payload.get("LeaseID")
+    if lid is None:
+        return Outcome("hash_lease_missing")
+    lease = run_ctx.range_leases.get(lid)
+    if lease is None:
+        return Outcome("hash_lease_unknown")
+    if lease.lease_status != "ACTIVE":
+        return Outcome("hash_lease_not_active", actual=lease.lease_status)
+    if lease.RoundID != rc.RoundID or lease.TemplateID != rc.TemplateID_committed:
+        return Outcome("hash_lease_round_mismatch")
+    if lease.MinerID != mid:
+        return Outcome("hash_lease_owner_mismatch")
+    if lease.AssignmentID != payload["AssignmentID"] \
+            or lease.assignment_version != payload["assignment_version"]:
+        return Outcome("hash_lease_assignment_mismatch")
+    if lease.lease_generation != payload.get("lease_generation"):
+        return Outcome("hash_lease_generation_mismatch")
+    prog = run_ctx.range_progress.get(lease.RangeSliceID)
+    if prog is None:
+        return Outcome("hash_lease_no_progress")
+    if prog.current_lease_id != lid:                       # S4-09 superseded lease
+        return Outcome("hash_lease_superseded")
+    if payload["cursor_start"] != prog.committed_frontier:
+        return Outcome("hash_lease_frontier_mismatch", expected=prog.committed_frontier,
+                       got=payload["cursor_start"])
+    now = run_ctx.event_queue.current_event_time
+    if now is not None and now > lease.lease_expiry_time + run_ctx.config.range_lease.lease_tolerance:
+        return Outcome("hash_lease_expired")
+    return Outcome("hash_lease_ok")
+
+
+def _complete_lease_at_exhaustion(run_ctx: RunContext, rc: RoundContext, mid: Any,
+                                  t: float) -> None:
+    slice_id = run_ctx.slice_of_miner.get((rc.RoundID, mid))
+    prog = run_ctx.range_progress.get(slice_id) if slice_id else None
+    if prog is None:
+        return
+    lease = run_ctx.range_leases.get(prog.current_lease_id)
+    if lease is not None and lease.lease_status == "ACTIVE" \
+            and prog.committed_frontier >= prog.range_end:
+        lease.lease_status = "COMPLETED"
+        lease.disposition = Outcome("lease_completed_at_exhaustion")
+        prog.terminal_status = "COMPLETED"
+        run_ctx.lease_stats["leases_completed"] += 1
+
+
+def _reassignment_in_flight(run_ctx: RunContext, rc: RoundContext) -> bool:
+    for req in run_ctx.reassignment_requests.values():
+        if req.RoundID == rc.RoundID and req.status in ("SEATED", "STARTED"):
+            return True
+    for (rid, _m), rr in run_ctx.reserve_records.items():   # Path-B reserve wake in flight
+        if rid == rc.RoundID and rr.reserve_status in ("ACTIVATION_PENDING", "WAKING") \
+                and str(rr.assigned_reserve_slice_id or "").startswith("RRS-"):
+            return True
+    return False
+
+
+def _cancel_queued_hash_events(run_ctx: RunContext, mid: Any) -> None:
+    eq = run_ctx.event_queue
+    for ref in list(eq.queued_event_registry.keys()):
+        rec = eq.queued_event_registry[ref]
+        if rec.queue_status == "QUEUED" \
+                and rec.event_type in ("HashWorkEvent", "RangeExhaustEvent") \
+                and rec.immutable_payload.get("MinerID") == mid:
+            CancelQueuedEvent(eq, run_ctx, ref, cancellation_reason="lease_revoked")
+
+
+def _record_reassignment_decision(run_ctx: RunContext, rc: RoundContext, lease: Any,
+                                  chosen: Any, result: str, new_gen: Any = None,
+                                  projected_start: Any = None) -> Any:
+    run_ctx.reassignment_decision_seq += 1
+    prog = run_ctx.range_progress.get(lease.RangeSliceID)
+    frontier = prog.committed_frontier if prog else lease.committed_cursor
+    dec = RangeReassignmentDecision(
+        DecisionID=(run_ctx.RunID, "RDEC", run_ctx.reassignment_decision_seq),
+        RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed, RangeSliceID=lease.RangeSliceID,
+        predecessor_lease_id=lease.LeaseID, predecessor_committed_frontier=frontier,
+        selected_miner_id=(chosen.MinerID if chosen else None), new_lease_generation=new_gen,
+        projected_start_time=projected_start,
+        projected_hash_rate=(chosen.hash_rate if chosen else 0.0),
+        residual_unassigned_work=(prog.uncovered() if prog else 0), policy_result=result)
+    run_ctx.reassignment_decisions.append(dec)
+    run_ctx.lease_stats["reassignment_decisions"] += 1
+    return dec
+
+
+def _eligible_reassignment_candidates(run_ctx: RunContext, rc: RoundContext, slice_id: str,
+                                      revoked_owner: Any, frontier: int,
+                                      obs_time: float) -> List[Any]:
+    """S4-6: build the deterministic eligible-reassignee candidate list (one-lease-per-miner)."""
+    cfg = run_ctx.config
+    pol = cfg.range_lease
+    prog = run_ctx.range_progress.get(slice_id)
+    suffix = max(0, (prog.range_end - frontier) if prog else 0)
+    cands: List[Any] = []
+    # categories 0/1: alive miners (primary / activated-reserve) that finished their own lease.
+    for mid, st in rc.search_states.items():
+        if mid == revoked_owner or not st.completed:
+            continue
+        m = run_ctx.miners.get(mid)
+        if m is None or m.state in ("OFFLINE", "DISQUALIFIED"):
+            continue
+        okind = run_ctx.search_assignment_kind.get((rc.RoundID, mid), PRIMARY_ASSIGNMENT)
+        cat = 1 if okind in (ACTIVATED_RESERVE_ASSIGNMENT, REASSIGNED_RESERVE_WORK) else 0
+        rate = st.hash_rate
+        proj = obs_time + pol.reassignment_wake_latency + (suffix / rate if rate > 0 else 0.0)
+        cands.append(ReassignmentCandidate(mid, cat, proj, 0, False, rate))
+    # category 2: AVAILABLE reserves (never activated) requiring the accepted Stage-3 wake.
+    for (rid, mid), rr in run_ctx.reserve_records.items():
+        if rid != rc.RoundID or mid == revoked_owner or rr.reserve_status != "AVAILABLE":
+            continue
+        m = run_ctx.miners.get(mid)
+        if m is not None and m.state in ("OFFLINE", "DISQUALIFIED"):
+            continue
+        rate = rr.hash_rate
+        proj = obs_time + cfg.security_floor.activation_wake_latency \
+            + (suffix / rate if rate > 0 else 0.0)
+        cands.append(ReassignmentCandidate(mid, 2, proj, rr.activation_priority, True, rate,
+                                           reserve_record=rr))
+    return cands
+
+
+def EvaluateRangeLease(run_ctx: RunContext, rc: RoundContext, lease_id_val: Any,
+                       observation_time: float, observation_reason: str,
+                       triggering_event_ref: Any = None) -> Optional[Outcome]:
+    """S4-5: the ONE authoritative lease observation + reassignment decision (idempotent)."""
+    pol = run_ctx.config.range_lease
+    if not pol.enabled:
+        return None
+    lease = run_ctx.range_leases.get(lease_id_val)
+    if lease is None:
+        return None
+    trig = triggering_event_ref if triggering_event_ref is not None \
+        else getattr(run_ctx.event_queue, "current_event_ref", None)
+    key = _lease_observation_key(run_ctx, rc, lease, trig)
+    if key in run_ctx.lease_observation_by_key:
+        run_ctx.lease_stats["lease_observation_replay_count"] += 1
+        return None
+    run_ctx.lease_observation_by_key[key] = observation_reason
+    if rc.round_state in _TERMINAL_ROUND:
+        _record_reassignment_decision(run_ctx, rc, lease, None, "ROUND_ALREADY_TERMINAL")
+        return None
+    prog = run_ctx.range_progress.get(lease.RangeSliceID)
+    if prog is None or lease.lease_status in TERMINAL_LEASE_STATUSES:
+        return None
+    frontier = prog.committed_frontier
+    if frontier >= prog.range_end:
+        lease.lease_status = "COMPLETED"
+        prog.terminal_status = "COMPLETED"
+        run_ctx.lease_stats["leases_completed"] += 1
+        _record_reassignment_decision(run_ctx, rc, lease, None, "SLICE_ALREADY_COMPLETED")
+        return None
+    # a reassignment-triggering observation: revoke the lease + try to reassign the suffix.
+    RevokeRangeLeaseTransaction(run_ctx, rc, lease, observation_reason)
+    if not pol.reassignment_enabled:
+        _record_reassignment_decision(run_ctx, rc, lease, None, "REASSIGNMENT_NOT_ALLOWED")
+        return _apply_no_eligible_policy(run_ctx, rc, prog)
+    if run_ctx.reassignments_per_slice.get(lease.RangeSliceID, 0) \
+            >= pol.maximum_reassignments_per_slice:
+        _record_reassignment_decision(run_ctx, rc, lease, None, "REASSIGNMENT_LIMIT_REACHED")
+        return _apply_no_eligible_policy(run_ctx, rc, prog)
+    cands = _eligible_reassignment_candidates(run_ctx, rc, lease.RangeSliceID, lease.MinerID,
+                                              frontier, observation_time)
+    chosen = select_reassignment_candidate(cands)
+    if chosen is None:
+        _record_reassignment_decision(run_ctx, rc, lease, None, "NO_ELIGIBLE_MINER")
+        return _apply_no_eligible_policy(run_ctx, rc, prog)
+    return SeatRangeReassignmentTransaction(run_ctx, rc, prog, lease, chosen,
+                                            observation_time, observation_reason)
+
+
+def _lease_observation_key(run_ctx: RunContext, rc: RoundContext, lease: Any,
+                           trigger: Any) -> Any:
+    prog = run_ctx.range_progress.get(lease.RangeSliceID)
+    pg = prog.progress_generation if prog else -1
+    return (rc.RoundID, rc.TemplateID_committed, lease.LeaseID, trigger,
+            lease.lease_generation, pg, rc.state_version)
+
+
+def RevokeRangeLeaseTransaction(run_ctx: RunContext, rc: RoundContext, lease: Any,
+                                reason: str) -> Outcome:
+    """S4-9: terminalise a lease + cancel its queued hash events + bump progress (all-or-none)."""
+    prog = run_ctx.range_progress.get(lease.RangeSliceID)
+    lease.lease_status = "REVOKED"
+    lease.reassignment_reason = reason
+    lease.disposition = Outcome("lease_revoked", reason=reason)
+    run_ctx.lease_stats["leases_revoked"] += 1
+    _cancel_queued_hash_events(run_ctx, lease.MinerID)
+    st = rc.search_states.get(lease.MinerID)
+    if st is not None and not st.completed:
+        st.completed = True
+        st.completion_kind = "REVOKED"
+    if prog is not None:
+        prog.current_lease_id = None
+        prog.progress_generation += 1
+    return Outcome("lease_revoked", LeaseID=lease.LeaseID)
+
+
+def _reassign_payload(run_ctx: RunContext, rc: RoundContext, req: Any, predecessor_lease: Any,
+                      chosen: Any) -> Dict[str, Any]:
+    prog = run_ctx.range_progress.get(req.RangeSliceID)
+    return {"RangeReassignmentRequestID": req.RangeReassignmentRequestID,
+            "DecisionID": req.DecisionID, "predecessor_lease_id": predecessor_lease.LeaseID,
+            "new_lease_id": req.new_lease_id, "RoundID_at_seat": rc.RoundID,
+            "TemplateID_at_seat": rc.TemplateID_committed, "RangeSliceID": req.RangeSliceID,
+            "old_MinerID": predecessor_lease.MinerID, "new_MinerID": chosen.MinerID,
+            "predecessor_committed_frontier": req.predecessor_committed_frontier,
+            "new_lease_generation": req.new_lease_generation,
+            "expected_old_lease_status": "REASSIGNED", "expected_new_request_status": "SEATED",
+            "expected_progress_generation": prog.progress_generation if prog else -1,
+            "expected_round_state_version": rc.state_version}
+
+
+def SeatRangeReassignmentTransaction(run_ctx: RunContext, rc: RoundContext, prog: Any,
+                                     predecessor_lease: Any, chosen: Any,
+                                     observation_time: float, reason: str) -> Optional[Outcome]:
+    """S4-9: seat a reassignment ALL-OR-NONE (request + event + counters), rollback on failure."""
+    cfg = run_ctx.config
+    eq = run_ctx.event_queue
+    now = eq.current_event_time
+    slice_id = prog.RangeSliceID
+    frontier = prog.committed_frontier
+    new_gen = run_ctx.lease_generation_of_slice.get(slice_id,
+                                                    predecessor_lease.lease_generation) + 1
+    new_lease_id = _mk_lease_id(rc.RoundID, rc.TemplateID_committed, slice_id, new_gen)
+    req_id = _mk_reassign_id(rc.RoundID, rc.TemplateID_committed, slice_id,
+                             predecessor_lease.LeaseID, frontier, chosen.MinerID, new_gen)
+    if req_id in run_ctx.reassignment_requests:              # S4-10 exact replay: no 2nd effect
+        return None
+    result = "REASSIGNMENT_PENDING_WAKE" if chosen.needs_stage3_wake else "REASSIGNMENT_SEATED"
+    projected_start = now + (cfg.security_floor.activation_wake_latency
+                             if chosen.needs_stage3_wake else cfg.range_lease.reassignment_wake_latency)
+    dec = _record_reassignment_decision(run_ctx, rc, predecessor_lease, chosen, result,
+                                        new_gen=new_gen, projected_start=projected_start)
+    req = RangeReassignmentRequest(
+        RangeReassignmentRequestID=req_id, DecisionID=dec.DecisionID, RoundID=rc.RoundID,
+        TemplateID=rc.TemplateID_committed, RangeSliceID=slice_id,
+        predecessor_lease_id=predecessor_lease.LeaseID, predecessor_committed_frontier=frontier,
+        new_MinerID=chosen.MinerID, new_lease_generation=new_gen, new_lease_id=new_lease_id,
+        needs_stage3_wake=chosen.needs_stage3_wake, status="SEATED", seated_at=now)
+    def _rollback_seat(reason: Any) -> Optional[Outcome]:
+        # S4-9: a failed seat leaves a coherent state — the (revoked) predecessor is NOT
+        # promoted to REASSIGNED, the FAILED request is registered for audit, the slice is
+        # marked UNASSIGNED_PENDING_RETRY, and the slice generation is advanced so a later
+        # retry mints a fresh request identity.
+        run_ctx.lease_stats["reassignment_seat_rollback_count"] += 1
+        run_ctx.lease_stats["reassignment_requests_failed"] += 1
+        req.status = "FAILED"
+        req.disposition = Outcome("reassignment_seat_failed", reason=reason)
+        prog.terminal_status = "UNASSIGNED_PENDING_RETRY"
+        run_ctx.reassignment_requests[req_id] = req
+        run_ctx.lease_generation_of_slice[slice_id] = new_gen
+        return _apply_no_eligible_policy(run_ctx, rc, prog)
+
+    if chosen.needs_stage3_wake:
+        ok = _seat_reserve_reassignment_wake(run_ctx, rc, prog, req, chosen)
+        if not ok:
+            return _rollback_seat("reserve_wake_failed")
+    else:
+        payload = _reassign_payload(run_ctx, rc, req, predecessor_lease, chosen)
+        if getattr(run_ctx, "force_reassignment_seat_failure", False):   # S4-15 injection
+            r = Outcome("rejected_forced_reassignment_seat_failure")
+        else:
+            r = ScheduleEvent(eq, rc, "RangeReassignmentStartEvent", now,
+                              "RANGE_REASSIGNMENT_START", payload, ordinary_dispatch_origin(eq))
+        if r.kind != "scheduled":
+            return _rollback_seat(r)
+        req.start_event_ref = r.event_ref
+    # COMMIT.
+    predecessor_lease.lease_status = "REASSIGNED"
+    run_ctx.lease_stats["leases_reassigned"] += 1
+    run_ctx.reassignment_requests[req_id] = req
+    run_ctx.reassignments_per_slice[slice_id] = \
+        run_ctx.reassignments_per_slice.get(slice_id, 0) + 1
+    run_ctx.lease_generation_of_slice[slice_id] = new_gen
+    run_ctx.lease_stats["reassignment_requests_seated"] += 1
+    return None
+
+
+def _seat_reserve_reassignment_wake(run_ctx: RunContext, rc: RoundContext, prog: Any,
+                                    req: Any, chosen: Any) -> bool:
+    """S4-10 Path B: wake a reserve reassignee via the ACCEPTED Stage-3 activation lifecycle.
+
+    Creates a reassignment-suffix RangeSlice + a (synthetic-provenance) floor observation /
+    decision so the accepted ``SeatReserveActivationTransaction`` (and its Start/Complete
+    events) can wake the reserve — NO second reserve-wake implementation.  The reassignment
+    request references the resulting activation request.
+    """
+    slice_id = prog.RangeSliceID
+    frontier = prog.committed_frontier
+    suffix_slice_id = f"RRS-{slice_id}-{req.new_lease_generation}"
+    suffix = RangeSlice(RangeSliceID=suffix_slice_id, kind=REASSIGNED_RESERVE_WORK,
+                        range_start=frontier, range_end=prog.range_end, status="UNCLAIMED")
+    run_ctx.reserve_slice_by_id[suffix_slice_id] = suffix
+    run_ctx.reserve_slices.setdefault(rc.RoundID, []).append(suffix)
+    rr = run_ctx.reserve_records.get((rc.RoundID, chosen.MinerID))
+    if rr is None:
+        return False
+    run_ctx.observation_seq += 1
+    obs = SecurityFloorObservation(
+        ObservationID=(run_ctx.RunID, "ROBS", run_ctx.observation_seq), RoundID=rc.RoundID,
+        TemplateID=rc.TemplateID_committed,
+        observation_time=run_ctx.event_queue.current_event_time,
+        observation_reason="range_reassignment_reserve_wake", effective_active_hash_rate=0.0,
+        active_miner_count=0, minimum_required_hash_rate=0.0, minimum_required_miner_count=None,
+        hash_rate_deficit=0.0, miner_count_deficit=0, breached=False)
+    run_ctx.security_observations.append(obs)
+    s3dec = ReserveActivationDecision(
+        DecisionID=(run_ctx.RunID, "RDEC3", run_ctx.observation_seq),
+        ObservationID=obs.ObservationID, selected_miners=[chosen.MinerID],
+        selected_slices=[suffix_slice_id], projected_hash_rate_after_wake=chosen.hash_rate,
+        residual_deficit=0.0, policy_result="ACTIVATION_SEATED")
+    run_ctx.activation_decisions.append(s3dec)
+    obs.activation_decision_id = s3dec.DecisionID
+    act_req = SeatReserveActivationTransaction(run_ctx, rc, rr, suffix, obs, s3dec.DecisionID)
+    if not isinstance(act_req, ReserveActivationRequest):
+        return False
+    req.reserve_activation_request_id = act_req.ReserveActivationRequestID
+    run_ctx.reassign_by_suffix_slice[suffix_slice_id] = (req.RangeReassignmentRequestID, slice_id)
+    return True
+
+
+def _verify_reassignment_identity(run_ctx: RunContext, rc: RoundContext,
+                                  payload: Dict[str, Any], lifecycle: str) -> Any:
+    """S4-8: verify the complete predecessor/successor identity BEFORE any domain mutation."""
+    if rc is None or rc.round_state in _TERMINAL_ROUND:
+        return Outcome("reassign_no_effect", reason="round_terminal")
+    if payload["RoundID_at_seat"] != rc.RoundID:
+        return Outcome("reassign_no_effect", reason="round_mismatch")
+    if payload["TemplateID_at_seat"] != rc.TemplateID_committed:
+        return Outcome("reassign_no_effect", reason="template_mismatch")
+    req = run_ctx.reassignment_requests.get(payload["RangeReassignmentRequestID"])
+    if req is None:
+        return Outcome("reassign_no_effect", reason="unknown_request")
+    if req.status != payload["expected_new_request_status"]:
+        return Outcome("reassign_no_effect", reason="request_lifecycle_mismatch",
+                       actual=req.status)
+    if req.RangeSliceID != payload["RangeSliceID"] or req.new_MinerID != payload["new_MinerID"] \
+            or req.new_lease_generation != payload["new_lease_generation"] \
+            or req.predecessor_lease_id != payload["predecessor_lease_id"] \
+            or req.DecisionID != payload["DecisionID"]:
+        return Outcome("reassign_no_effect", reason="request_identity_mismatch")
+    pred = run_ctx.range_leases.get(payload["predecessor_lease_id"])
+    if pred is None or pred.lease_status not in TERMINAL_LEASE_STATUSES:
+        return Outcome("reassign_no_effect", reason="predecessor_not_terminal")
+    if pred.lease_status != payload["expected_old_lease_status"]:
+        return Outcome("reassign_no_effect", reason="old_lease_status_mismatch")
+    prog = run_ctx.range_progress.get(payload["RangeSliceID"])
+    if prog is None:
+        return Outcome("reassign_no_effect", reason="no_progress")
+    if prog.progress_generation != payload["expected_progress_generation"]:
+        return Outcome("reassign_no_effect", reason="progress_generation_mismatch")
+    if prog.committed_frontier != payload["predecessor_committed_frontier"]:
+        return Outcome("reassign_no_effect", reason="frontier_changed")
+    if payload["expected_round_state_version"] != rc.state_version:
+        return Outcome("reassign_no_effect", reason="round_state_version_mismatch")
+    cur = getattr(run_ctx.event_queue, "current_event_ref", None)
+    recorded = req.start_event_ref if lifecycle == "START" else req.complete_event_ref
+    if recorded is not None and cur is not None and cur != recorded:
+        return Outcome("reassign_no_effect", reason="event_ref_mismatch")
+    return Outcome("reassign_identity_ok", request=req, predecessor=pred, progress=prog)
+
+
+def _handle_range_reassignment_start(run_ctx: RunContext, payload: Dict[str, Any],
+                                     envelope: Dict[str, Any]) -> Outcome:
+    rc = run_ctx.current_round_context
+    guard = _verify_reassignment_identity(run_ctx, rc, payload, "START")
+    if guard.kind != "reassign_identity_ok":
+        return Outcome("range_reassignment_start_no_effect", reason=guard)
+    req = guard.request
+    prog = guard.progress
+    mid = payload["new_MinerID"]
+    eq = run_ctx.event_queue
+    t = eq.current_event_time
+    run_ctx.apply_miner_state_transition(mid, "WAKING", t)
+    req.status = "STARTED"
+    req.started_at = t
+    complete_time = t + run_ctx.config.range_lease.reassignment_wake_latency
+    cpayload = dict(payload)
+    cpayload["expected_new_request_status"] = "STARTED"
+    cpayload["expected_round_state_version"] = rc.state_version
+    cpayload["expected_progress_generation"] = prog.progress_generation
+    if getattr(run_ctx, "force_reassignment_complete_seat_failure", False):   # S4-15 injection
+        r = Outcome("rejected_forced_reassignment_complete_seat_failure")
+    else:
+        r = ScheduleEvent(eq, rc, "RangeReassignmentCompleteEvent", complete_time,
+                          "RANGE_REASSIGNMENT_COMPLETE", cpayload, ordinary_dispatch_origin(eq))
+    if r.kind != "scheduled":
+        # S4-9: never strand the reassignee WAKING without a controller.
+        run_ctx.apply_miner_state_transition(mid, "LOW_POWER_LISTEN", t)
+        req.status = "FAILED"
+        req.disposition = Outcome("reassignment_complete_seat_failed", reason=r)
+        prog.terminal_status = "UNASSIGNED_PENDING_RETRY"
+        run_ctx.lease_stats["reassignment_requests_failed"] += 1
+        dec = _apply_no_eligible_policy(run_ctx, rc, prog)
+        if isinstance(dec, Outcome):
+            return dec
+        return Outcome("range_reassignment_start_complete_seat_failed", MinerID=mid, reason=r)
+    req.complete_event_ref = r.event_ref
+    return Outcome("range_reassignment_started", MinerID=mid, complete_event_ref=r.event_ref)
+
+
+def _handle_range_reassignment_complete(run_ctx: RunContext, payload: Dict[str, Any],
+                                        envelope: Dict[str, Any]) -> Outcome:
+    rc = run_ctx.current_round_context
+    guard = _verify_reassignment_identity(run_ctx, rc, payload, "COMPLETE")
+    if guard.kind != "reassign_identity_ok":
+        return Outcome("range_reassignment_complete_no_effect", reason=guard)
+    req = guard.request
+    prog = guard.progress
+    mid = payload["new_MinerID"]
+    cfg = run_ctx.config
+    t = run_ctx.event_queue.current_event_time
+    old_st = rc.search_states.get(mid)
+    rate = old_st.hash_rate if old_st is not None else cfg.base_hash_rate
+    okind = run_ctx.search_assignment_kind.get((rc.RoundID, mid), PRIMARY_ASSIGNMENT)
+    kind = REASSIGNED_RESERVE_WORK if okind in (ACTIVATED_RESERVE_ASSIGNMENT,
+                                                REASSIGNED_RESERVE_WORK) else REASSIGNED_PRIMARY_WORK
+    run_ctx.apply_miner_state_transition(mid, "ACTIVE_HASHING", t)
+    _bind_reassigned_lease(run_ctx, rc, mid, prog, req.new_lease_id, req.new_lease_generation,
+                           f"RA-{req.RangeSliceID}-{req.new_lease_generation}",
+                           req.predecessor_lease_id, kind, rate, t)
+    req.status = "COMPLETED"
+    req.completed_at = t
+    req.disposition = Outcome("reassignment_completed")
+    run_ctx.lease_stats["reassignment_requests_completed"] += 1
+    lat = t - req.seated_at
+    run_ctx.lease_stats["total_reassignment_latency"] += lat
+    if lat > run_ctx.lease_stats["maximum_reassignment_latency"]:
+        run_ctx.lease_stats["maximum_reassignment_latency"] = lat
+    return Outcome("range_reassignment_completed", MinerID=mid, ReassignedSlice=req.RangeSliceID)
+
+
+def _bind_reassigned_lease(run_ctx: RunContext, rc: RoundContext, mid: Any, prog: Any,
+                           new_lid: Any, new_gen: int, aid: str, pred_lease_id: Any,
+                           kind: str, rate: float, t: float) -> None:
+    cfg = run_ctx.config
+    version = 1
+    st = MinerSearchState(MinerID=mid, AssignmentID=aid, assignment_version=version,
+                          hash_rate=rate, range_start=prog.committed_frontier,
+                          range_end=prog.range_end, active_power=cfg.P_hash,
+                          idle_power=cfg.P_listen)
+    st.active_start = t
+    rc.search_states[mid] = st
+    rc.assignments[aid] = {"MinerID": mid, "AssignmentID": aid, "assignment_version": version,
+                           "range": (prog.committed_frontier, prog.range_end),
+                           "RoundID": rc.RoundID, "TemplateID": rc.TemplateID_committed,
+                           "coverage_state": "OPEN"}
+    run_ctx.search_assignment_kind[(rc.RoundID, mid)] = kind
+    run_ctx.slice_of_miner[(rc.RoundID, mid)] = prog.RangeSliceID
+    lease = RangeLease(
+        LeaseID=new_lid, RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed,
+        RangeSliceID=prog.RangeSliceID, lease_generation=new_gen, AssignmentID=aid,
+        assignment_version=version, MinerID=mid, assignment_kind=kind,
+        lease_start_nonce=prog.committed_frontier, lease_end_nonce=prog.range_end,
+        committed_cursor=prog.committed_frontier, lease_start_time=t,
+        lease_expiry_time=t + cfg.range_lease.lease_duration, lease_status="ACTIVE",
+        predecessor_lease_id=pred_lease_id)
+    run_ctx.range_leases[new_lid] = lease
+    prog.current_lease_id = new_lid
+    prog.progress_generation += 1
+    prog.terminal_status = "OPEN"
+    run_ctx.lease_stats["leases_created"] += 1
+    r = _seat_hash_work(run_ctx, rc, st, at_time=t)
+    if r.kind == "scheduled":
+        run_ctx.round_first_completion[(rc.RoundID, mid)] = r.event_ref.event_time
+
+
+def _bind_reserve_reassignment_if_any(run_ctx: RunContext, rc: RoundContext, mid: Any,
+                                      sl: Any, t: float) -> None:
+    """S4-10 Path B: when an activated reserve slice is a reassignment suffix, bind the
+    reassigned lease on the ORIGINAL slice and complete the reassignment request."""
+    link = run_ctx.reassign_by_suffix_slice.get(sl.RangeSliceID)
+    if link is None:
+        return
+    req_id, orig_slice_id = link
+    req = run_ctx.reassignment_requests.get(req_id)
+    prog = run_ctx.range_progress.get(orig_slice_id)
+    if req is None or prog is None:
+        return
+    new_lid = req.new_lease_id
+    lease = RangeLease(
+        LeaseID=new_lid, RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed,
+        RangeSliceID=orig_slice_id, lease_generation=req.new_lease_generation,
+        AssignmentID=f"AR-{rc.RoundID}-{mid}", assignment_version=1, MinerID=mid,
+        assignment_kind=REASSIGNED_RESERVE_WORK, lease_start_nonce=prog.committed_frontier,
+        lease_end_nonce=prog.range_end, committed_cursor=prog.committed_frontier,
+        lease_start_time=t, lease_expiry_time=t + run_ctx.config.range_lease.lease_duration,
+        lease_status="ACTIVE", predecessor_lease_id=req.predecessor_lease_id,
+        reserve_activation_request_id=req.reserve_activation_request_id)
+    run_ctx.range_leases[new_lid] = lease
+    prog.current_lease_id = new_lid
+    prog.progress_generation += 1
+    prog.terminal_status = "OPEN"
+    run_ctx.slice_of_miner[(rc.RoundID, mid)] = orig_slice_id
+    run_ctx.search_assignment_kind[(rc.RoundID, mid)] = REASSIGNED_RESERVE_WORK
+    run_ctx.lease_stats["leases_created"] += 1
+    req.status = "COMPLETED"
+    req.completed_at = t
+    req.complete_event_ref = getattr(run_ctx.event_queue, "current_event_ref", None)
+    req.disposition = Outcome("reassignment_completed_via_reserve_wake")
+    run_ctx.lease_stats["reassignment_requests_completed"] += 1
+    lat = t - req.seated_at
+    run_ctx.lease_stats["total_reassignment_latency"] += lat
+    if lat > run_ctx.lease_stats["maximum_reassignment_latency"]:
+        run_ctx.lease_stats["maximum_reassignment_latency"] = lat
+
+
+def _handle_range_reassignment_retry(run_ctx: RunContext, payload: Dict[str, Any],
+                                     envelope: Dict[str, Any]) -> Outcome:
+    """S4-11 WAIT_FOR_ELIGIBLE_MINER: one bounded, idempotent retry (never spins in place)."""
+    rc = run_ctx.current_round_context
+    if rc is None or rc.round_state in _TERMINAL_ROUND:
+        return Outcome("range_reassignment_retry_no_effect", reason="round_terminal")
+    if payload["RoundID_at_seat"] != rc.RoundID:
+        return Outcome("range_reassignment_retry_no_effect", reason="round_mismatch")
+    slice_id = payload["RangeSliceID"]
+    prog = run_ctx.range_progress.get(slice_id)
+    if prog is None or prog.current_lease_id is not None \
+            or prog.committed_frontier >= prog.range_end:
+        return Outcome("range_reassignment_retry_no_effect", reason="nothing_to_retry")
+    pred = run_ctx.range_leases.get(payload["predecessor_lease_id"])
+    if pred is None:
+        return Outcome("range_reassignment_retry_no_effect", reason="unknown_predecessor")
+    t = run_ctx.event_queue.current_event_time
+    cands = _eligible_reassignment_candidates(run_ctx, rc, slice_id, pred.MinerID,
+                                              prog.committed_frontier, t)
+    chosen = select_reassignment_candidate(cands)
+    if chosen is None:
+        return _apply_no_eligible_policy(run_ctx, rc, prog, retrying=True)
+    return SeatRangeReassignmentTransaction(run_ctx, rc, prog, pred, chosen, t, "retry")
+
+
+def _apply_no_eligible_policy(run_ctx: RunContext, rc: RoundContext, prog: Any,
+                              retrying: bool = False) -> Optional[Outcome]:
+    """S4-11: the configured no-eligible-miner / seat-failure policy for an unfinished suffix."""
+    policy = run_ctx.config.range_lease.no_eligible_miner_policy
+    if policy == "ABORT_ROUND":
+        return RoundAbort(run_ctx, rc, reason="range_reassignment_unavailable", envelope={})
+    if policy == "WAIT_FOR_ELIGIBLE_MINER" and not retrying:
+        eq = run_ctx.event_queue
+        slice_id = prog.RangeSliceID
+        n = run_ctx.reassignment_retry_seq.get(slice_id, 0) + 1
+        run_ctx.reassignment_retry_seq[slice_id] = n
+        if n <= 3:                                          # bounded retry (never spins)
+            target = next_representable_simulation_time(
+                eq.current_event_time + run_ctx.config.range_lease.reassignment_wake_latency)
+            pred_id = run_ctx.range_leases and None
+            # find the predecessor lease id from the last decision for this slice.
+            pred_id = next((d.predecessor_lease_id for d in reversed(run_ctx.reassignment_decisions)
+                            if d.RangeSliceID == slice_id), None)
+            if target <= run_ctx.run_horizon_T and pred_id is not None:
+                ScheduleEvent(eq, rc, "RangeReassignmentRetryEvent", target,
+                              "RANGE_REASSIGNMENT_RETRY",
+                              {"RangeSliceID": slice_id, "RoundID_at_seat": rc.RoundID,
+                               "TemplateID_at_seat": rc.TemplateID_committed,
+                               "predecessor_lease_id": pred_id, "retry_seq": n},
+                              ordinary_dispatch_origin(eq))
+                return None
+    # CONTINUE_WITH_UNASSIGNED_RANGE: preserve the exact frontier; the uncovered suffix is
+    # reported at round closure (it is NEVER labelled full-domain exhaustion).
+    return None
+
+
+def _handle_miner_failure(run_ctx: RunContext, payload: Dict[str, Any],
+                          envelope: Dict[str, Any]) -> Outcome:
+    """S4-4: an injected miner failure revokes the current lease and triggers reassignment."""
+    rc = run_ctx.current_round_context
+    mid = payload["MinerID"]
+    if rc is None or rc.round_state in _TERMINAL_ROUND:
+        return Outcome("miner_failure_no_effect", reason="round_terminal", MinerID=mid)
+    if payload["RoundID_at_seat"] != rc.RoundID \
+            or payload["TemplateID_at_seat"] != rc.TemplateID_committed:
+        return Outcome("miner_failure_no_effect", reason="stale", MinerID=mid)
+    lease = _current_lease_for_miner(run_ctx, rc, mid)
+    if lease is None:
+        return Outcome("miner_failure_no_effect", reason="no_active_lease", MinerID=mid)
+    t = run_ctx.event_queue.current_event_time
+    if run_ctx.miners.get(mid) is not None:                 # MINER_FAILED -> OFFLINE
+        run_ctx.apply_miner_state_transition(mid, "OFFLINE", t)
+    dec = EvaluateRangeLease(run_ctx, rc, lease.LeaseID, t, payload["fault_reason"],
+                             triggering_event_ref=run_ctx.event_queue.current_event_ref)
+    if isinstance(dec, Outcome):
+        return dec
+    return Outcome("miner_failed_lease_revoked", MinerID=mid, LeaseID=lease.LeaseID)
+
+
+def _close_lease_state(run_ctx: RunContext, rc: RoundContext, t: float) -> None:
+    """S4-12: terminalise every lease + reassignment request; report unfinished suffixes."""
+    for lease in run_ctx.range_leases.values():
+        if lease.RoundID != rc.RoundID:
+            continue
+        if lease.lease_status not in TERMINAL_LEASE_STATUSES:
+            prog = run_ctx.range_progress.get(lease.RangeSliceID)
+            if prog is not None and prog.committed_frontier >= prog.range_end:
+                lease.lease_status = "COMPLETED"
+                run_ctx.lease_stats["leases_completed"] += 1
+            else:
+                lease.lease_status = "CANCELLED"
+            lease.disposition = Outcome("lease_terminalised_at_round_close")
+    for req in run_ctx.reassignment_requests.values():
+        if req.RoundID == rc.RoundID and req.status not in TERMINAL_REASSIGN_REQUEST_STATUSES:
+            req.status = "CANCELLED"
+            req.disposition = Outcome("reassignment_cancelled_at_round_close")
+    for prog in run_ctx.range_progress.values():
+        if prog.RoundID != rc.RoundID:
+            continue
+        if prog.current_lease_id is not None:
+            lease = run_ctx.range_leases.get(prog.current_lease_id)
+            if lease is None or lease.lease_status in TERMINAL_LEASE_STATUSES:
+                prog.current_lease_id = None                # S4-9: no live current_lease_id
+        if prog.committed_frontier >= prog.range_end:
+            prog.terminal_status = "COMPLETED"
+        elif prog.terminal_status == "OPEN":
+            prog.terminal_status = "UNASSIGNED_AT_ROUND_CLOSE"
+            run_ctx.lease_stats["uncovered_range_count"] += 1
+            run_ctx.lease_stats["uncovered_nonce_count"] += prog.uncovered()
 
 
 # ============================================================ Stage-3 security floor
@@ -998,6 +1759,16 @@ def _handle_reserve_activation_complete(run_ctx: RunContext, payload: Dict[str, 
                            "coverage_state": "OPEN"}
     run_ctx.search_assignment_kind[(rc.RoundID, mid)] = ACTIVATED_RESERVE_ASSIGNMENT
     run_ctx.security_stats["activations_completed"] += 1
+    # S4-2/S4-10: with the range-lease layer engaged, give this activated reserve a lease.
+    # A reassignment-suffix slice (Path B) binds the reassigned lease on the ORIGINAL slice;
+    # a normal reserve-domain activation gets its own RangeProgress + ACTIVE lease.
+    if cfg.range_lease.enabled:
+        if sl.RangeSliceID in run_ctx.reassign_by_suffix_slice:
+            _bind_reserve_reassignment_if_any(run_ctx, rc, mid, sl, t)
+        else:
+            _create_range_progress_and_lease(run_ctx, rc, mid, aid, version, sl.RangeSliceID,
+                                             sl.range_start, sl.range_end,
+                                             ACTIVATED_RESERVE_ASSIGNMENT, t)
     r = _seat_hash_work(run_ctx, rc, st, at_time=t)
     if r.kind == "scheduled":
         run_ctx.round_first_completion[(rc.RoundID, mid)] = r.event_ref.event_time
@@ -1158,6 +1929,9 @@ def _close_and_publish(run_ctx: RunContext, rc: RoundContext, disposition: str,
     # S3-10: reserve/slice cleanup + security-floor metric snapshot (activation events were
     # cancelled above via the QUEUED-event loop since they carry RoundID_at_seat).
     _close_security_state(run_ctx, rc, t)
+    # S4-12: terminalise every lease + reassignment request; report unfinished suffixes.
+    if run_ctx.config.range_lease.enabled:
+        _close_lease_state(run_ctx, rc, t)
     pub = _publish_terminal_and_seat_next(run_ctx, rc, disposition, envelope, t)
     run_ctx.terminal_publication_result = pub
     if pub.kind == "terminal_round_published_seat_failed":
@@ -1218,6 +1992,10 @@ _HANDLERS = {
     "AcceptanceEvent": _handle_acceptance,
     "ReserveActivationStartEvent": _handle_reserve_activation_start,
     "ReserveActivationCompleteEvent": _handle_reserve_activation_complete,
+    "MinerFailureEvent": _handle_miner_failure,
+    "RangeReassignmentStartEvent": _handle_range_reassignment_start,
+    "RangeReassignmentCompleteEvent": _handle_range_reassignment_complete,
+    "RangeReassignmentRetryEvent": _handle_range_reassignment_retry,
 }
 
 
