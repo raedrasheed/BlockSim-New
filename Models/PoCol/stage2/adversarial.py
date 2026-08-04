@@ -519,6 +519,9 @@ def default_adversarial_stats() -> Dict[str, Any]:
         # incentive accounting (both accounting views computed in parallel, S5-8).
         "naive_identity_reward_total": 0.0,
         "deduplicated_entity_reward_total": 0.0,
+        # --- S5C-1 amplification ratios DERIVED from executed records, never requested counts ---
+        "assignment_split_amplification_ratio": 1.0,
+        "identity_multiplication_amplification_ratio": 1.0,
         "work_reward_total": 0.0, "availability_reward_total": 0.0,
         "winner_reward_total": 0.0, "reserve_activation_reward_total": 0.0,
         "reassignment_reward_total": 0.0,

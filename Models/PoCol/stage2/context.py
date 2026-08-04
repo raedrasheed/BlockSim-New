@@ -334,6 +334,12 @@ class RunContext:
         # S5B-5: replay-safe action-budget accounting — an action identity already charged is
         # never charged twice.
         self.adv_action_budget_charged: set = set()
+        # S5C-3: identities already REFUSED over the limit, so the rejection diagnostic counts one
+        # refusal per immutable identity rather than one per re-offer.
+        self.adv_action_rejected: set = set()
+        # S5C-3: false-exhaustion action identity -> its stored result.  An exact replay returns
+        # this and mutates nothing, for BOTH the detected and the accepted disposition.
+        self.false_exhaustion_results: Dict[Any, Any] = {}
         self.availability_snapshot: Dict[Any, float] = {}    # (RoundID, mid) -> residency at start
         self.adversarial_stats: Dict[str, Any] = default_adversarial_stats()
         self.q_adv_state: Dict[str, Any] = default_q_adv_state()

@@ -132,9 +132,16 @@ def test_s5b_01_unique_suffix_work_belongs_to_the_reassignee_predecessor_keeps_i
     assert sum(r["duplicate_reward_prevented_count"] for r in rows) == 40
     owners = {r["reward_owner"] for r in rows if r["reward_owner"] is not None}
     assert owners == {M0, M1}
-    # the later evaluator of an already-covered interval is recorded and rewarded nothing.
+    # S5C-4: the row carrying the duplicate is now the EXACT re-evaluated segment [40,80), not
+    # the whole raw interval [40,100).  Its first evaluator still owns and is still paid for it,
+    # and the later evaluator earns nothing extra — the stronger, interval-exact statement of the
+    # same invariant (a raw-interval duplicate row could not say which part was newly covered).
     dup = [r for r in rows if r["duplicate_reward_prevented_count"] > 0]
-    assert dup and all(r["rewarded_count"] == 0 and r["later_evaluators"] == [M1] for r in dup)
+    assert len(dup) == 1
+    assert dup[0]["nonce_interval"] == [40, 80]
+    assert dup[0]["first_evaluator"] == dup[0]["reward_owner"] == M0
+    assert dup[0]["later_evaluators"] == [M1]
+    assert dup[0]["rewarded_count"] == 40 and dup[0]["duplicate_reward_prevented_count"] == 40
 
 
 def test_s5b_01b_both_accounting_views_use_the_same_ownership_map():
@@ -705,7 +712,7 @@ def test_s5b_12_adapter_exposes_the_range_end_flag_and_reconciles_the_physical_c
     res = run_pocol_stage2(dict(b, horizon_T=20.0), run_id="s5b-12-adapter")
     assert res["false_exhaustion_claim_offset"] == 10
     assert res["false_exhaustion_claims_range_end"] is False
-    assert res["schema_version"] == RESULT_SCHEMA_VERSION == "stage5b.1"
+    assert res["schema_version"] == RESULT_SCHEMA_VERSION == "stage5c.1"
 
     # --- the physical evaluation count reconciles with the ledger, leases ON and OFF ---
     for leases in (False, True):

@@ -27,10 +27,10 @@ from .adversarial import (AdversarialPolicy, IncentivePolicy, ACTOR_CLASSES, BEH
 from . import adversarial_runtime as _adv
 
 # Declared result schema keys (stable contract for BlockSim consumers).
-# stage5b.1 ADDS the Stage-5B executable-correction block on top of stage5a.1.  Every Stage-4C,
+# stage5c.1 ADDS the Stage-5C record-derived-accounting block on top of stage5b.1.  Every earlier
 # Stage-5 and Stage-5A key is retained unchanged, and every Stage-5/5A/5B field is inert (zero, or
 # NA for q_adv) when the Stage-5 model is disabled — which is the default.
-RESULT_SCHEMA_VERSION = "stage5b.1"
+RESULT_SCHEMA_VERSION = "stage5c.1"
 
 
 def _range_lease_from_blocksim(b: Dict[str, Any]) -> Optional[RangeLeasePolicy]:
@@ -443,9 +443,17 @@ def _adversarial_incentive_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str,
             cfg.adversarial.false_exhaustion_claims_range_end),
         "false_exhaustion_claim_offset": int(cfg.adversarial.false_exhaustion_claim_offset),
         "evaluation_ledger_nonce_total": _evaluation_ledger_nonce_total(run_ctx),
+        # S5C-2: the residual is ALWAYS the real absolute difference between the independently
+        # accumulated physical counter and the immutable evaluation ledger.  It is never forced
+        # to zero because the Stage-5 model happens to be disabled — that exemption hid a
+        # counter which really did read zero beside a non-empty ledger.
         "physical_evaluation_ledger_residual": abs(
-            s["physical_evaluation_count"] - _evaluation_ledger_nonce_total(run_ctx))
-            if cfg.adversarial.enabled else 0,
+            s["physical_evaluation_count"] - _evaluation_ledger_nonce_total(run_ctx)),
+        # --- S5C-1 record-derived amplification (requested counts can never override records) ---
+        "entity_reconciliation": _adv.entity_reconciliation(run_ctx),
+        "assignment_split_amplification_ratio": s["assignment_split_amplification_ratio"],
+        "identity_multiplication_amplification_ratio":
+            s["identity_multiplication_amplification_ratio"],
         # --- explicit scope statement carried in the results themselves ---
         "stage5_claim_scope": (
             "Stage 5 MODELS bounded adversarial behaviours and MEASURES outcomes under the "

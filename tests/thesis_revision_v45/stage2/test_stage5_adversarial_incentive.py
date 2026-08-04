@@ -91,7 +91,15 @@ def test_s5_01_every_stage5_feature_is_disabled_by_default():
     assert run.behaviour_profiles == {} and run.adversarial_entities == {}
     assert run.withheld_solutions == {} and run.invalid_actions == {}
     assert run.progress_claims == [] and run.incentive_ledger == []
-    assert all(v in (0, 0.0, 1.0) for v in run.adversarial_stats.values())
+    # S5C-2: `physical_evaluation_count` is a GLOBAL report of work the search core really did,
+    # not a Stage-5 effect, so it is excluded from the all-zero sweep and asserted STRONGLY
+    # instead: the disabled honest control must report its REAL count, reconciling exactly with
+    # the immutable evaluation ledger.  Every other Stage-5 statistic stays inert.
+    _global = {"physical_evaluation_count"}
+    assert all(v in (0, 0.0, 1.0) for k, v in run.adversarial_stats.items() if k not in _global)
+    ledger_total = sum(r.interval_end - r.interval_start for r in run.evaluation_ledger)
+    assert ledger_total > 0                                     # the control really searched
+    assert run.adversarial_stats["physical_evaluation_count"] == ledger_total
     assert adv.q_adv_summary(run)["maximum_q_adv"] is None      # never observed => NA
     # the honest run still reaches its ordinary Stage-4C disposition.
     assert run.round_seq > 0 and terminal_reasons(run)
@@ -682,9 +690,9 @@ def test_s5_26_no_stage5_parameter_changes_the_fixed_target_and_the_schema_is_pr
     assert pair["attacked"]["solution_withholding_count"] > 0
     assert "NOT evidence of incentive" in pair["interpretation_scope"]
 
-    # the declared schema is stage5b.1 and every Stage-4C key survives.
+    # the declared schema is stage5c.1 and every Stage-4C key survives.
     res = pair["baseline"]
-    assert res["schema_version"] == RESULT_SCHEMA_VERSION == "stage5b.1"
+    assert res["schema_version"] == RESULT_SCHEMA_VERSION == "stage5c.1"
     for retained in ("algorithm", "mechanism", "success_model", "energy_kwh",
                      "continuous_all_active_control_kwh", "residency_reconciles",
                      "evaluation_ledger_entries", "security_floor_enabled",

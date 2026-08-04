@@ -117,29 +117,117 @@ def _ownership_by_lineage(run_ctx: Any, rc: Any) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     unique_positions = 0
     for lineage in sorted(per_lineage, key=str):
-        covered: List[Tuple[int, int]] = []
-        for _t, _seq, rec in sorted(per_lineage[lineage], key=lambda x: (x[0], x[1])):
-            iv = (rec.interval_start, rec.interval_end)
-            fresh = _interval_subtract(iv, covered)
-            fresh_n = sum(hi - lo for lo, hi in fresh)
-            dup = (iv[1] - iv[0]) - fresh_n
-            if fresh:
-                key = (lineage, rec.MinerID)
-                owned[key] = interval_union(owned.get(key, []) + fresh)
-                unique_positions += fresh_n
-                covered = interval_union(covered + fresh)
-            for lo, hi in fresh:
-                rows.append({"lineage": str(lineage), "nonce_interval": [lo, hi],
-                             "first_evaluator": rec.MinerID, "reward_owner": rec.MinerID,
-                             "later_evaluators": [], "rewarded_count": hi - lo,
-                             "duplicate_reward_prevented_count": 0})
-            if dup > 0:
-                rows.append({"lineage": str(lineage), "nonce_interval": list(iv),
-                             "first_evaluator": None, "reward_owner": None,
-                             "later_evaluators": [rec.MinerID], "rewarded_count": 0,
-                             "duplicate_reward_prevented_count": dup})
+        ordered = sorted(per_lineage[lineage], key=lambda x: (x[0], x[1]))
+        # S5C-4: the reconciliation is INTERVAL-EXACT.  Every evaluation interval is cut at the
+        # boundaries of every other interval in its lineage, so each reported row is an ATOMIC
+        # segment over which the evaluator set is constant.  Reporting a whole raw interval as a
+        # single "duplicate" row — the pre-Stage-5C representation — hid the part of that interval
+        # that was in fact newly covered: [40,100) is not one duplicate segment, it is [40,80)
+        # duplicate PLUS [80,100) newly covered and rewarded.
+        cuts = sorted({p for _t, _s, r in ordered
+                       for p in (r.interval_start, r.interval_end)})
+        for a, b in zip(cuts, cuts[1:]):
+            if b <= a:
+                continue
+            covering = [r for _t, _s, r in ordered
+                        if r.interval_start <= a and r.interval_end >= b]
+            if not covering:
+                continue                                 # a hole between disjoint intervals
+            first = covering[0]                          # causally first physical evaluator
+            later = [r.MinerID for r in covering[1:]]
+            key = (lineage, first.MinerID)
+            owned[key] = interval_union(owned.get(key, []) + [(a, b)])
+            unique_positions += (b - a)
+            rows.append({"lineage": str(lineage), "nonce_interval": [a, b],
+                         "first_evaluator": first.MinerID, "reward_owner": first.MinerID,
+                         "later_evaluators": later, "rewarded_count": b - a,
+                         "duplicate_reward_prevented_count": len(later) * (b - a)})
     return {"owned": owned, "rows": rows, "physical_positions": physical_positions,
             "unique_positions": unique_positions}
+
+
+def entity_record_accounting(run_ctx: Any, rc: Any,
+                             entity_work: Dict[Any, float]) -> Dict[str, Any]:
+    """S5C-1: identity and split amplification DERIVED FROM EXECUTED RECORDS.
+
+    The requested configuration (``assignment_split_count``, ``sybil_identity_count``) is a
+    REQUEST, not an outcome.  Splitting a 3-nonce range 8 ways creates 3 subassignments, not 8,
+    and a request can never override what the executable records say happened.  The accounting
+    authority is therefore:
+
+    * ``actual_split_units``  — the number of ``SubAssignmentRecord``s the entity actually holds
+      in one range lineage (the widest lineage, since that is the largest split really executed);
+    * ``real_identity_count`` — the number of real ``MinerID``s the entity controls;
+    * ``virtual_identity_count`` — the number of ``VirtualIdentityRecord``s it actually holds;
+    * ``total_identity_count`` = real + virtual.
+
+    One real miner plus three virtual-identity records is FOUR represented identities, not three:
+    the real miner is itself an identity.  The naive view multiplies the entity's unique
+    first-evaluator physical work by both record-derived factors; the deduplicated view keeps
+    that unique physical work exactly once.
+
+    This is an exploratory SENSITIVITY model of how a naive accounting scheme could be inflated.
+    It is NOT a Sybil-resistance result and is never presented as one.
+    """
+    rows: List[Dict[str, Any]] = []
+    naive_total = 0.0
+    dedup_total = 0.0
+    worst_split = 1.0
+    worst_identity = 1.0
+    for eid in sorted(entity_work, key=str):
+        amt = entity_work[eid]
+        dedup_total += amt
+        ent = run_ctx.adversarial_entities.get(eid)
+        # --- split units: count the REAL SubAssignmentRecords, grouped by range lineage ---
+        per_lineage: Dict[Any, int] = {}
+        sub_count = 0
+        for s in run_ctx.subassignments:
+            if s.RoundID != rc.RoundID or s.EntityID != eid:
+                continue
+            sub_count += 1
+            key = s.lineage_id if s.lineage_id is not None else s.ParentAssignmentID
+            per_lineage[key] = per_lineage.get(key, 0) + 1
+        actual_split_units = max([1] + list(per_lineage.values()))
+        # --- identities: real controlled miners + REAL VirtualIdentityRecords ---
+        real_identity_count = len(ent.controlled_miner_ids) if ent is not None else 1
+        virtual_identity_count = sum(
+            1 for v in run_ctx.virtual_identities
+            if v.RoundID == rc.RoundID and v.EntityID == eid)
+        total_identity_count = real_identity_count + virtual_identity_count
+        split_ratio = float(max(1, actual_split_units))
+        identity_ratio = float(max(1, total_identity_count))
+        naive = amt * split_ratio * identity_ratio
+        naive_total += naive
+        if amt > 0:
+            worst_split = max(worst_split, split_ratio)
+            worst_identity = max(worst_identity, identity_ratio)
+        rows.append({
+            "EntityID": eid,
+            "real_miner_count": real_identity_count,
+            "virtual_identity_record_count": virtual_identity_count,
+            "total_identity_count": total_identity_count,
+            "subassignment_record_count": sub_count,
+            "actual_split_units": actual_split_units,
+            "unique_physical_work_reward": amt,
+            "naive_identity_reward": naive,
+            "deduplicated_entity_reward": amt,
+            "split_amplification_ratio": split_ratio,
+            "identity_amplification_ratio": identity_ratio,
+        })
+    return {"rows": rows,
+            "naive_identity_reward_total": naive_total,
+            "deduplicated_entity_reward_total": dedup_total,
+            "assignment_split_amplification_ratio": worst_split,
+            "identity_multiplication_amplification_ratio": worst_identity}
+
+
+def entity_reconciliation(run_ctx: Any) -> List[Dict[str, Any]]:
+    """S5C-1: the auditable per-entity record-derived accounting table across finalised rounds."""
+    rows: List[Dict[str, Any]] = []
+    for rid in sorted(run_ctx.round_incentive_result, key=str):
+        for row in run_ctx.round_incentive_result[rid].get("entity_reconciliation_rows", []):
+            rows.append({"RoundID": rid, **row})
+    return rows
 
 
 _COMPONENT_STAT = {
@@ -178,6 +266,12 @@ def refresh_incentive_aggregates(run_ctx: Any) -> None:
     st["work_reward_union_residual"] = max(
         [0.0] + [r.get("work_reward_union_residual", 0.0)
                  for r in run_ctx.round_incentive_result.values()])
+    # S5C-1: the record-derived amplification ratios are run-level MAXIMA, assigned (never
+    # accumulated) so repeating finalisation leaves them unchanged (S5B-2).
+    for key in ("assignment_split_amplification_ratio",
+                "identity_multiplication_amplification_ratio"):
+        st[key] = max([1.0] + [r.get(key, 1.0)
+                               for r in run_ctx.round_incentive_result.values()])
 
 
 def ownership_reconciliation(run_ctx: Any) -> List[Dict[str, Any]]:
@@ -208,7 +302,12 @@ def charge_action_budget(run_ctx: Any, rc: Any, kind: str, action_id: Any = None
     limit = run_ctx.config.adversarial.maximum_actions_per_round
     used = run_ctx.adv_actions_this_round.get(rc.RoundID, 0)
     if used >= limit:
-        run_ctx.adversarial_stats["actions_rejected_over_limit"] += 1
+        # S5C-3: the rejection DIAGNOSTIC is itself replay-safe — re-offering the SAME immutable
+        # action identity after it was refused counts once, not once per attempt.
+        if action_id is None or action_id not in run_ctx.adv_action_rejected:
+            run_ctx.adversarial_stats["actions_rejected_over_limit"] += 1
+            if action_id is not None:
+                run_ctx.adv_action_rejected.add(action_id)
         return False
     run_ctx.adv_actions_this_round[rc.RoundID] = used + 1
     if action_id is not None:
@@ -481,12 +580,17 @@ def note_physical_evaluation(run_ctx: Any, rc: Any, st: Any, lo: int, hi: int,
     how physical work is ATTRIBUTED; the search core still evaluates the same nonces at the same
     effective rate, so splitting never adds throughput.
     """
-    if not adversarial_enabled(run_ctx):
-        return
     n = max(0, hi - lo)
     if n <= 0:
         return
+    # S5C-2: the physical evaluation count is GLOBAL.  It describes work the search core really
+    # performed, so it is counted whether the Stage-5 model is enabled or disabled — an honest
+    # disabled control must report its real physical evaluations rather than a hard zero beside a
+    # non-empty evaluation ledger.  Counting executed work is a REPORT, not a protocol effect: it
+    # creates no adversarial action, claim, reward or penalty, so baseline preservation holds.
     run_ctx.adversarial_stats["physical_evaluation_count"] += n
+    if not adversarial_enabled(run_ctx):
+        return                                           # no Stage-5 records exist to map onto
     subs = run_ctx.subassignments_by_parent.get((rc.RoundID, st.AssignmentID))
     if not subs:
         return                                           # unsplit: the assignment IS the unit
@@ -926,7 +1030,17 @@ def maybe_false_exhaustion(run_ctx: Any, rc: Any, st: Any, now: float) -> Option
     if not adversarial_enabled(run_ctx):
         return None
     prof = _profile(run_ctx, rc, st.MinerID)
-    if prof is None or prof.exhaustion_claim_policy != "FALSE" or st.completed:
+    if prof is None or prof.exhaustion_claim_policy != "FALSE":
+        return None
+    # S5C-3: the IMMUTABLE action identity is resolved FIRST — before every state guard, every
+    # counter and every mutation — and an exact replay returns the STORED result and changes
+    # nothing at all.  This must come before the ``st.completed`` guard: an ACCEPTED claim sets
+    # ``st.completed``, so a guard-first ordering made the replay of an accepted claim fall
+    # through and answer ``None`` instead of the outcome it originally produced.
+    fe_id = (rc.RoundID, rc.TemplateID_committed, st.MinerID, st.AssignmentID, st.cursor)
+    if fe_id in run_ctx.false_exhaustion_results:
+        return run_ctx.false_exhaustion_results[fe_id]
+    if st.completed:
         return None
     if st.cursor >= st.range_end:                        # genuinely exhausted — nothing false
         return None
@@ -955,7 +1069,6 @@ def maybe_false_exhaustion(run_ctx: Any, rc: Any, st: Any, now: float) -> Option
         reported = st.cursor                             # honest report: not a false claim
     if reported <= st.cursor:                            # a truthful claim is not a false claim
         return None
-    fe_id = (rc.RoundID, rc.TemplateID_committed, st.MinerID, st.AssignmentID, st.cursor)
     if not charge_action_budget(run_ctx, rc, "FALSE_EXHAUSTION", fe_id):
         return None                                      # S5A-7: declared per-round action limit
     run_ctx.adversarial_stats["false_exhaustion_attempted"] += 1
@@ -964,6 +1077,9 @@ def maybe_false_exhaustion(run_ctx: Any, rc: Any, st: Any, now: float) -> Option
     if claim.detected:
         run_ctx.adversarial_stats["false_exhaustion_detected"] += 1
         # rejected: retain the real lease/progress state; the miner continues honestly.
+        # S5C-3: the DETECTED disposition is stored under the action identity too, so replaying
+        # it returns the same "no effect" result instead of re-running the whole claim.
+        run_ctx.false_exhaustion_results[fe_id] = None
         return None
     # accepted false exhaustion: preserve actual ground truth, record the coverage gap.
     # S5B-7: the coverage gap is the ACTUAL unsearched suffix (range_end - actual frontier),
@@ -983,8 +1099,10 @@ def maybe_false_exhaustion(run_ctx: Any, rc: Any, st: Any, now: float) -> Option
     m = run_ctx.miners.get(st.MinerID)
     if m is not None and m.state == "ACTIVE_HASHING":
         run_ctx.apply_miner_state_transition(st.MinerID, "LOW_POWER_LISTEN", now)
-    return Outcome("false_exhaustion_accepted", MinerID=st.MinerID,
-                   coverage_gap_nonce_count=gap)
+    out = Outcome("false_exhaustion_accepted", MinerID=st.MinerID,
+                  coverage_gap_nonce_count=gap)
+    run_ctx.false_exhaustion_results[fe_id] = out         # S5C-3: replay returns THIS result
+    return out
 
 
 def round_has_coverage_gap(run_ctx: Any, rc: Any) -> bool:
@@ -1288,31 +1406,15 @@ def finalise_incentives(run_ctx: Any, rc: Any, t: float) -> None:
                   dedup_key=("WORK", rc.RoundID, rc.TemplateID_committed, lineage, lo, hi))
             rewarded_positions += (hi - lo)
 
-    # ---- naive vs deduplicated entity accounting (S5-8), on the SAME ownership map ----
+    # ---- S5C-1: naive vs deduplicated entity accounting DERIVED FROM EXECUTED RECORDS ----
     entity_work: Dict[Any, float] = {}
     for (lineage, mid), intervals in own["owned"].items():
         eid = _entity_for(run_ctx, mid)
         credit = ip.r_work * sum(hi - lo for lo, hi in intervals)
         entity_work[eid] = entity_work.get(eid, 0.0) + credit
-    naive_total = 0.0
-    dedup_entity_total = 0.0
-    for eid, amt in entity_work.items():
-        dedup_entity_total += amt
-        ent = run_ctx.adversarial_entities.get(eid)
-        if ent is None or not adversarial_enabled(run_ctx):
-            # an undeclared single-identity miner multiplies nothing.
-            naive_total += amt
-            continue
-        # amplification factor for THIS entity = its widest per-round assignment split x the
-        # number of identities it actually controls (at least its declared Sybil count).
-        split = 1
-        for m in ent.controlled_miner_ids:
-            pr = run_ctx.behaviour_profiles.get((rc.RoundID, m))
-            if pr is not None:
-                split = max(split, pr.assignment_split_count)
-        identities = max(len(ent.controlled_miner_ids),
-                         run_ctx.config.adversarial.sybil_identity_count)
-        naive_total += amt * max(1, split) * max(1, identities)
+    acct = entity_record_accounting(run_ctx, rc, entity_work)
+    naive_total = acct["naive_identity_reward_total"]
+    dedup_entity_total = acct["deduplicated_entity_reward_total"]
 
     # ---- S5B-2: store this round's result, then RECOMPUTE every run-level aggregate from the
     # stored per-round results.  Repeating finalisation therefore overwrites identical values
@@ -1324,6 +1426,10 @@ def finalise_incentives(run_ctx: Any, rc: Any, t: float) -> None:
         "work_reward_union_residual": abs(float(rewarded_positions) - float(unique_positions)),
         "naive_identity_reward_total": naive_total,
         "deduplicated_entity_reward_total": dedup_entity_total,
+        "assignment_split_amplification_ratio": acct["assignment_split_amplification_ratio"],
+        "identity_multiplication_amplification_ratio":
+            acct["identity_multiplication_amplification_ratio"],
+        "entity_reconciliation_rows": acct["rows"],
         "ownership_rows": own["rows"],
     })
 
