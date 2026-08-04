@@ -1,6 +1,8 @@
 # Stage 7 — Portable Frozen-Execution Bundle
 
-Self-contained, resumable execution of the **660 frozen confirmatory run identities** on a
+Self-contained, resumable, CONCURRENT execution of the **660 frozen logical rows**,
+realised as **630 unique physical executions** (A05 and B01 share a configuration —
+see STAGE_07A_PREREGISTRATION_AMENDMENT.md) on a
 persistent external host. Nothing here regenerates a run identity, a seed, a scenario or a
 configuration: the bundle consumes the Stage-6 frozen artefacts and executes them.
 
@@ -72,8 +74,9 @@ python run_stage7.py --preflight host.json --dry-run  # 4. inspect the schedule
 python run_stage7.py --preflight host.json            # 5. execute (refuses unless PASS)
 python resume_stage7.py --preflight host.json         # 6. after any interruption
 
-python build_run_level_dataset.py                     # 7. one row per physical run
-python verify_stage7_archive.py                       # 8. round-trip verify the archive
+python build_physical_registry.py                     # 7. 630 physical / 660 logical
+python build_run_level_dataset.py                     # 8. one row per LOGICAL run
+python verify_stage7_archive.py                       # 9. round-trip verify the archive
 ```
 
 Every field in `host.json` must come from direct observation of the host. A field filled from a
@@ -122,3 +125,39 @@ archived and the successful attempt is the inferential record.
 
 The algorithm is **PoCol**. The energy-saving mechanism is **the idle policy within PoCol**.
 Nonce-domain partitioning alone is not an energy-saving mechanism.
+
+
+## 7. Concurrency (S7A-1)
+
+Workers run as genuinely concurrent non-blocking subprocesses. `Pool` keeps **separate active
+counts per cost class**, a **total process cap** that charges compressors against the same
+budget, and never exceeds the preflight-approved limits. Admission order is deterministic
+(priority band, scenario, seed index); completion order is not, and a run's identity never
+depends on when it finished. `C06` is unbenchmarked and is admitted against the **slowest
+measured class's** budget, not the lightweight one.
+
+A `FAILED_MODEL` result stops **new admissions** immediately; already-running workers are
+allowed to close safely, and the engine is not modified.
+
+## 8. Durable paths (S7A-2)
+
+Nothing is hard-coded to the repository. `ExecutionPaths` derives the registry, raw, logs,
+failed_attempts, chunks, archive, manifests and run_level locations from the host record's
+`durable_output_path` and `archive_path`. The preflight verifies those paths **on the real
+filesystem**: creatable, writable, measured free space *at the path*, `os.replace` atomicity on
+the registry filesystem, and a compress/decompress/digest round-trip on the archive filesystem.
+A record whose numbers look fine but whose paths do not work is **rejected**.
+
+## 9. Result provenance after reclaim (S7A-5)
+
+The raw file is deleted once its compressed copy verifies, so the registry never records a
+dangling `result_file`. It records `raw_reclaimed=true`, the original `raw_sha256`, the
+existing `compressed_file` and `compressed_sha256`, and `archive_verified`. The dataset builder
+reads only the verified existing archive member.
+
+## 10. `chunk_size`
+
+Removed from the execution interface. It was never an executable checkpoint boundary — the
+checkpoint is the atomic registry update after **every** completed run — so carrying a
+parameter that did nothing would have been misleading. Chunking remains a *reporting* concept
+in the archive plan only.

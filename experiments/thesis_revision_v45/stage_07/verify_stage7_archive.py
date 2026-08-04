@@ -12,30 +12,39 @@ import hashlib
 import lzma
 import pathlib
 
-from _common import ARCHIVE, MANIFESTS, Registry, TERMINAL_SUCCESS, _atomic_write  # noqa: E402
+from _common import ExecutionPaths, Registry, TERMINAL_SUCCESS, _atomic_write      # noqa: E402
 
 
-def verify_all() -> dict:
-    reg = [r for r in Registry().read() if r["run_status"] in TERMINAL_SUCCESS]
+def verify_all(paths=None) -> dict:
+    paths = paths or ExecutionPaths()
+    reg = [r for r in Registry(paths.registry).read()
+           if r["run_status"] in TERMINAL_SUCCESS]
+    # one archive member per PHYSICAL execution; alias rows share it by design
+    seen = set()
     ok, bad, missing, lines = 0, [], [], []
     for r in reg:
-        x = ARCHIVE / f"{r['run_id']}.json.xz"
+        pid = r.get("physical_execution_id") or r["run_id"]
+        if pid in seen:
+            ok += 1
+            continue
+        seen.add(pid)
+        x = paths.archive / f"{pid}.json.xz"
         if not x.exists():
-            missing.append(r["run_id"])
+            missing.append(pid)
             continue
         h = hashlib.sha256()
         d = lzma.LZMADecompressor()
         with open(x, "rb") as fh:
             for block in iter(lambda: fh.read(1 << 20), b""):
                 h.update(d.decompress(block))
-        if h.hexdigest() == r["result_sha256"]:
+        if h.hexdigest() == (r.get("raw_sha256") or r.get("result_sha256")):
             ok += 1
-            lines.append(f"{hashlib.sha256(x.read_bytes()).hexdigest()}  "
-                         f"{x.relative_to(ARCHIVE.parents[3])}")
+            lines.append(f"{hashlib.sha256(x.read_bytes()).hexdigest()}  {x.name}")
         else:
-            bad.append(r["run_id"])
+            bad.append(pid)
     if lines:
-        _atomic_write(MANIFESTS / "stage07_archive.sha256", "\n".join(sorted(lines)) + "\n")
+        _atomic_write(paths.manifests / "stage07_archive.sha256",
+                      "\n".join(sorted(lines)) + "\n")
     return {"verified": ok, "digest_mismatch": bad, "missing": missing,
             "expected": len(reg)}
 

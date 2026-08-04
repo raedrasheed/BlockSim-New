@@ -189,10 +189,12 @@ def test_s7_12_scheduler_priority_order_is_slowest_first():
     import scenarios as S                                        # noqa: PLC0415
     assert R.PRIORITY == ("SECURITY_FLOOR", "REASSIGNMENT", "C06", "LIGHTWEIGHT")
     srows = {r["scenario_id"]: r for r in S.confirmatory_rows()}
-    ordered = sorted(C.frozen_rows(), key=lambda r: R.priority_key(r, srows))
-    first = C.cost_class(srows[ordered[0]["scenario_id"]])
+    # S7A-1/S7A-4: admission is over PHYSICAL executions, not logical rows
+    m = C.build_physical_map()
+    order = R.admission_order(m["logical"], srows, m["physical"])
+    first = R.band(order[0][1], srows, m["logical"])
     assert first == "SECURITY_FLOOR", f"first scheduled run is {first}, not the slowest class"
-    bands = [R.priority_key(r, srows)[0] for r in ordered]
+    bands = [R.PRIORITY.index(R.band(ex, srows, m["logical"])) for _pid, ex in order]
     assert bands == sorted(bands), "the schedule is not in non-decreasing priority order"
 
 

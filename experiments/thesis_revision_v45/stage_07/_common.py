@@ -28,12 +28,53 @@ FROZEN_REGISTRY = STAGE6 / "confirmatory" / "confirmatory_run_registry.csv"
 FROZEN_CONFIGS = STAGE6 / "confirmatory" / "frozen_configs"
 BASELINE_COMMIT = "026483496ffb434243f45e174c63b43b77b3b43a"
 
-DATA = REPO_ROOT / "data" / "thesis_revision_v45" / "stage_07"
-REGISTRY = DATA / "run_registry.csv"
-RAW, LOGS, CHUNKS, ARCHIVE, MANIFESTS = (DATA / n for n in
-                                         ("raw", "logs", "chunks", "archive", "manifests"))
-FAILED = DATA / "failed_attempts"
-RUN_LEVEL = DATA / "run_level"
+#: Fallback root, used ONLY when no host record is supplied (dry-runs and tests).  Real
+#: execution resolves every path from the VERIFIED host record — see ExecutionPaths.
+DEFAULT_DATA = REPO_ROOT / "data" / "thesis_revision_v45" / "stage_07"
+
+
+class ExecutionPaths:
+    """Every Stage-7 path, derived from the verified host record's durable locations.
+
+    Nothing is hard-coded to the repository. `durable_output_path` and `archive_path` come
+    from the host record, are checked by the preflight against the real filesystem, and are
+    threaded through every tool so the scheduler, the worker, the archiver, the dataset
+    builder and the verifier all agree on one layout.
+    """
+
+    def __init__(self, durable_output_path=None, archive_path=None):
+        self.root = pathlib.Path(durable_output_path or DEFAULT_DATA)
+        self.archive = pathlib.Path(archive_path) if archive_path else (self.root / "archive")
+        self.registry = self.root / "run_registry.csv"
+        self.physical_registry = self.root / "physical_execution_registry.csv"
+        self.alias_map = self.root / "logical_to_physical_alias.csv"
+        self.raw = self.root / "raw"
+        self.logs = self.root / "logs"
+        self.failed_attempts = self.root / "failed_attempts"
+        self.chunks = self.root / "chunks"
+        self.manifests = self.root / "manifests"
+        self.run_level = self.root / "run_level"
+
+    @classmethod
+    def from_record(cls, record: dict):
+        return cls(record.get("durable_output_path"), record.get("archive_path"))
+
+    @classmethod
+    def from_record_file(cls, path):
+        return cls.from_record(json.loads(pathlib.Path(path).read_text()))
+
+    def mkdirs(self):
+        for d in (self.root, self.archive, self.raw, self.logs, self.failed_attempts,
+                  self.chunks, self.manifests, self.run_level):
+            d.mkdir(parents=True, exist_ok=True)
+        return self
+
+    def as_dict(self):
+        return {k: str(v) for k, v in sorted(vars(self).items())}
+
+
+#: Default instance for dry-runs and tests only.
+PATHS = ExecutionPaths()
 
 #: The complete status lifecycle.  A run is always in exactly one of these.
 PENDING = "PENDING"
@@ -52,7 +93,9 @@ REGISTRY_FIELDS = [
     "run_id", "scenario_id", "block_id", "master_seed", "seed_index", "pair_id",
     "cost_class", "config_sha256", "engine_commit_sha", "attempt",
     "start_timestamp", "end_timestamp", "wall_clock_seconds", "run_status",
-    "result_file", "result_sha256", "compressed_file", "compressed_sha256",
+    "physical_execution_id", "shared_physical_execution", "alias_group_id",
+    "materialised_from_run_id", "raw_reclaimed", "raw_sha256",
+    "compressed_file", "compressed_sha256", "archive_verified",
     "execution_log", "exception_type", "exception_detail",
 ]
 
@@ -105,11 +148,11 @@ class Registry:
     to a sibling temp file and swapped in with os.replace.
     """
 
-    def __init__(self, path: pathlib.Path = REGISTRY):
-        self.path = path
+    def __init__(self, path: pathlib.Path = None):
+        self.path = pathlib.Path(path) if path else PATHS.registry
         self.lock_path = path.with_suffix(".lock")
 
-    def initialise(self, scenario_rows: dict) -> int:
+    def initialise(self, scenario_rows: dict, logical: dict = None) -> int:
         if self.path.exists():
             return len(self.read())
         rows = []
@@ -121,6 +164,12 @@ class Registry:
                 "seed_index": r["seed_index"], "pair_id": r["pair_id"],
                 "cost_class": cost_class(srow), "engine_commit_sha": BASELINE_COMMIT,
                 "attempt": "0", "run_status": PENDING,
+                "physical_execution_id": (logical or {}).get(r["run_id"], {}).get(
+                    "physical_execution_id", ""),
+                "shared_physical_execution": str((logical or {}).get(
+                    r["run_id"], {}).get("shared_physical_execution", False)).lower(),
+                "alias_group_id": (logical or {}).get(r["run_id"], {}).get(
+                    "alias_group_id", ""),
             })
         self.write(rows)
         return len(rows)
@@ -164,3 +213,53 @@ class Registry:
         for r in self.read():
             out.setdefault(r["run_status"], []).append(r["run_id"])
         return out
+
+
+# ---------------------------------------------------------------- S7A-4 physical identity
+def physical_execution_id(config_digest: str, master_seed, engine_commit: str) -> str:
+    """Deterministic identity of one PHYSICAL execution.
+
+    A physical execution is fully determined by the executable configuration, the master seed
+    and the accepted engine commit.  Two logical scenario-seed rows whose configurations are
+    byte-identical under the same master seed denote ONE physical execution, and must be
+    executed once, not twice.
+    """
+    return "P-" + hashlib.sha256(
+        f"{config_digest}|{master_seed}|{engine_commit}".encode()).hexdigest()[:24]
+
+
+def build_physical_map() -> dict:
+    """Map every logical run_id to its physical execution, and group aliases.
+
+    Returns {"logical": {run_id: {...}}, "physical": {pid: [run_id, ...]}}.
+    """
+    import scenarios as S                                            # noqa: PLC0415
+    srows = {r["scenario_id"]: r for r in S.confirmatory_rows()}
+    logical, physical = {}, {}
+    for r in frozen_rows():
+        cfg = S.build_config(srows[r["scenario_id"]], int(r["master_seed"]), S.TIER2)
+        digest = config_sha256(cfg)
+        pid = physical_execution_id(digest, r["master_seed"], BASELINE_COMMIT)
+        logical[r["run_id"]] = {
+            "run_id": r["run_id"], "scenario_id": r["scenario_id"],
+            "master_seed": r["master_seed"], "seed_index": r["seed_index"],
+            "pair_id": r["pair_id"], "config_sha256": digest,
+            "physical_execution_id": pid, "cost_class": cost_class(srows[r["scenario_id"]]),
+        }
+        physical.setdefault(pid, []).append(r["run_id"])
+    for pid, members in physical.items():
+        shared = len(members) > 1
+        gid = ("ALIAS-" + "+".join(sorted({m.split("-")[0] for m in members}))) if shared else ""
+        for rid in members:
+            logical[rid]["shared_physical_execution"] = shared
+            logical[rid]["alias_group_id"] = gid
+    return {"logical": logical, "physical": physical}
+
+
+def executor_run_id(members: list) -> str:
+    """The single logical run_id whose execution materialises a shared physical execution.
+
+    Deterministic: the lexicographically first member.  Every other member is materialised
+    from that same verified output and checksum, never re-executed.
+    """
+    return sorted(members)[0]

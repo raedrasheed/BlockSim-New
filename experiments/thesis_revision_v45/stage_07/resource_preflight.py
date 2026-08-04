@@ -91,10 +91,14 @@ def projected_duration_days(limits: dict) -> float:
     from _common import frozen_rows, cost_class                      # noqa: PLC0415
     import scenarios as S                                            # noqa: PLC0415
     srows = {r["scenario_id"]: r for r in S.confirmatory_rows()}
+    from _common import build_physical_map, executor_run_id                # noqa: PLC0415
+    m = build_physical_map()
     counts = {}
-    for r in frozen_rows():
-        counts[cost_class(srows[r["scenario_id"]])] = counts.get(
-            cost_class(srows[r["scenario_id"]]), 0) + 1
+    for _pid, members in m["physical"].items():
+        ex = executor_run_id(members)
+        c = cost_class(srows[m["logical"][ex]["scenario_id"]])
+        counts[c] = counts.get(c, 0) + 1
+    # counts are PHYSICAL executions (630), not logical rows (660)
     worst = 0.0
     for c, n in counts.items():
         k = max(1, int(limits.get(c, 1)))
@@ -105,7 +109,71 @@ def projected_duration_days(limits: dict) -> float:
     return max(worst, heavy) / 86400.0
 
 
-def evaluate(rec: dict) -> dict:
+def verify_filesystem(rec: dict) -> list:
+    """S7A-2: verify the DECLARED PATHS on the real filesystem, not the typed numbers.
+
+    A record whose paths cannot be created, written, atomically replaced or checksummed is
+    rejected however plausible its JSON looks.
+    """
+    import hashlib as _h, lzma as _l, os as _os, shutil as _sh, tempfile as _tf
+    checks = []
+    for label, key in (("durable_output_path", "durable_output_path"),
+                       ("archive_path", "archive_path")):
+        raw = rec.get(key)
+        if not raw:
+            checks.append({"id": f"V2a_{label}_declared", "pass": False,
+                           "detail": "not declared"})
+            continue
+        d = pathlib.Path(raw)
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            probe = d / ".stage7_write_probe"
+            probe.write_bytes(b"probe")
+            probe.unlink()
+            ok, detail = True, f"{d} exists and is writable"
+        except Exception as exc:
+            ok, detail = False, f"{d}: {exc}"
+        checks.append({"id": f"V2a_{label}_writable", "pass": ok, "detail": detail})
+        if ok:
+            free = _sh.disk_usage(str(d)).free
+            checks.append({"id": f"V2b_{label}_free_space", "pass": bool(free >= 2 * 1024**3),
+                           "measured_free_bytes": free,
+                           "detail": f"{free / 2**30:.2f} GiB measured AT THE PATH"})
+
+    root = rec.get("durable_output_path")
+    if root and pathlib.Path(root).is_dir():
+        d = pathlib.Path(root)
+        try:                                   # atomic os.replace on the registry filesystem
+            fd, tmp = _tf.mkstemp(dir=str(d), prefix=".atomic-probe-")
+            with _os.fdopen(fd, "w") as fh:
+                fh.write("x")
+            target = d / ".atomic-probe-target"
+            _os.replace(tmp, target)
+            ok = target.read_text() == "x"
+            target.unlink()
+            checks.append({"id": "V2c_atomic_replace", "pass": ok,
+                           "detail": "os.replace works on the registry filesystem"})
+        except Exception as exc:
+            checks.append({"id": "V2c_atomic_replace", "pass": False, "detail": str(exc)})
+
+    arch = rec.get("archive_path")
+    if arch and pathlib.Path(arch).is_dir():
+        try:                                   # checksum round-trip on the archive filesystem
+            d = pathlib.Path(arch)
+            payload = b"stage7 archive round-trip probe" * 64
+            blob = d / ".xz-probe.xz"
+            blob.write_bytes(_l.compress(payload, preset=1))
+            ok = _h.sha256(_l.decompress(blob.read_bytes())).hexdigest() == \
+                _h.sha256(payload).hexdigest()
+            blob.unlink()
+            checks.append({"id": "V2d_archive_roundtrip", "pass": ok,
+                           "detail": "compress + decompress + digest verified at archive_path"})
+        except Exception as exc:
+            checks.append({"id": "V2d_archive_roundtrip", "pass": False, "detail": str(exc)})
+    return checks
+
+
+def evaluate(rec: dict, check_filesystem: bool = True) -> dict:
     missing = [f for f in REQUIRED_FIELDS if f not in rec or rec[f] in (None, "", {})]
     unfilled = [f for f in REQUIRED_FIELDS
                 if isinstance(rec.get(f), dict)
@@ -136,6 +204,9 @@ def evaluate(rec: dict) -> dict:
                    "required_bytes": disk_need, "available_bytes": float(rec["free_disk_bytes"]),
                    "detail": "compress-on-write path; raw-first would need ~16.3 GB"})
 
+    if check_filesystem:
+        checks.extend(verify_filesystem(rec))
+
     days = projected_duration_days(limits)
     guarantee = float(rec["persistent_lifetime_guarantee"]["days"])
     checks.append({"id": "V3_lifetime", "pass": bool(guarantee >= RAM_SAFETY_MARGIN * days),
@@ -157,6 +228,7 @@ def gate_or_die(record_path: pathlib.Path) -> dict:
     rec = json.loads(record_path.read_text())
     res = evaluate(rec)
     if res["verdict"] != "PASS" or rec.get("verdict") != "PASS":
+        # a numerically-plausible record whose paths do not work is still a refusal
         raise SystemExit(
             f"STAGE_7_REFUSED: preflight verdict is {res['verdict']} "
             f"(binding failure: {res['binding_failure']}). No confirmatory run may begin.")

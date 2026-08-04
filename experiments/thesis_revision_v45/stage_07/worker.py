@@ -13,6 +13,7 @@ Exit codes:  0 COMPLETED   3 FAILED_MODEL   4 FAILED_INFRASTRUCTURE
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import pathlib
@@ -26,6 +27,66 @@ from _common import (FROZEN_CONFIGS, config_sha256, cost_class, frozen_rows,  # 
 import scenarios as S                                                          # noqa: E402
 from Models.PoCol.stage2.simulator import run_simulation                       # noqa: E402
 from Models.PoCol.stage2.adapter import results_schema                         # noqa: E402
+
+# The derived run-level outcomes use the ACCEPTED Stage-5D / Stage-6 definitions verbatim,
+# imported rather than reimplemented so the two can never drift.  The engine is not modified:
+# these are computed in the worker from the returned RunContext, before serialisation.
+from run_pilot import (post_round_audit, residency_and_energy_identity,        # noqa: E402
+                       round_durations, nonterminal_activation_request_count,
+                       ENERGY_IDENTITY_TOLERANCE_J, RESIDENCY_PARTITION_TOLERANCE_S)
+
+#: Every preregistered run-level outcome that results_schema does NOT emit.  Absence of any of
+#: these in a produced payload is a MODEL failure, never a silently-missing field.
+DERIVED_REQUIRED = (
+    "round_duration_values", "median_round_duration",
+    "post_round_evaluation_record_count", "post_round_evaluation_nonce_count",
+    "evaluation_missing_terminal_time_count", "nonterminal_activation_request_count",
+    "maximum_energy_identity_residual_j", "maximum_residency_partition_residual_s",
+)
+
+
+def derived_outcomes(run, cfg) -> dict:
+    """Compute every preregistered run-level outcome not emitted by the accepted adapter.
+
+    Also returns a compact AUDIT summary — exact counts and a digest of the inputs — so the
+    derived values can be independently re-checked without retaining the whole RunContext.
+    """
+    durs, monotonic = round_durations(run, cfg)
+    ident = residency_and_energy_identity(run, cfg)
+    audit = post_round_audit(run)
+    med = (sorted(durs)[len(durs) // 2] if durs else None)
+    out = {
+        "round_duration_values": [float(d) for d in durs],
+        "median_round_duration": (float(med) if med is not None else None),
+        "round_terminal_times_strictly_increasing": bool(monotonic),
+        "nonterminal_activation_request_count": nonterminal_activation_request_count(run),
+        "maximum_energy_identity_residual_j": ident["maximum_energy_identity_residual_j"],
+        "maximum_residency_partition_residual_s":
+            ident["maximum_residency_partition_residual_s"],
+        "residency_by_state_s": ident["residency_by_state_s"],
+        "waking_residency_s": ident["waking_residency_s"],
+        "offline_or_disqualified_residency_s": ident["offline_or_disqualified_residency_s"],
+    }
+    out.update(audit)
+    # auditable provenance for the derived values
+    terminal = sorted(run.round_terminal_times.items(), key=lambda kv: kv[1])
+    out["derived_audit"] = {
+        "round_count": len(durs),
+        "evaluation_ledger_entries": len(run.evaluation_ledger),
+        "miner_count": len(run.miners),
+        "run_start_time": float(cfg.run_start_time),
+        "run_end_time": float(run.run_end_time),
+        "round_terminal_times_sha256": hashlib.sha256(
+            json.dumps([[k, float(v)] for k, v in terminal], sort_keys=True).encode()
+        ).hexdigest(),
+        "energy_identity_tolerance_j": ENERGY_IDENTITY_TOLERANCE_J,
+        "residency_partition_tolerance_s": RESIDENCY_PARTITION_TOLERANCE_S,
+        "definitions": "accepted Stage-5D audit / Stage-6 outcome dictionary, imported verbatim",
+    }
+    missing = [k for k in DERIVED_REQUIRED if out.get(k) is None]
+    if missing:
+        raise RuntimeError(f"derived run-level outcomes missing: {missing}")
+    return out
 
 
 def build(run_id: str):
@@ -44,6 +105,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--log-dir", required=True)
     ap.add_argument("--attempt", type=int, default=1)
+    ap.add_argument("--physical-execution-id", default=None)
     args = ap.parse_args(argv)
 
     out_dir, log_dir = pathlib.Path(args.out_dir), pathlib.Path(args.log_dir)
@@ -79,6 +141,7 @@ def main(argv=None) -> int:
     try:
         run = run_simulation(cfg, run_id=args.run_id)
         res = results_schema(run, cfg)
+        derived = derived_outcomes(run, cfg)      # BEFORE the RunContext is discarded
     except MemoryError:
         note("FAILED_INFRASTRUCTURE MemoryError\n" + traceback.format_exc())
         return 4
@@ -96,7 +159,9 @@ def main(argv=None) -> int:
         "peak_rss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0,
         "rounds_executed": len(run.round_terminal_times),
         "log_event_count": len(run.log),
+        "physical_execution_id": args.physical_execution_id or "",
         "results": res,
+        "derived": derived,
     }
     dest = out_dir / f"{args.run_id}.json"
     dest.write_text(json.dumps(payload, indent=1, sort_keys=True, default=str) + "\n")
