@@ -1,0 +1,17 @@
+{
+ "final_sample": {
+  "cpu_seconds": 21757.26,
+  "stime_s": 26.34,
+  "utime_s": 21730.92,
+  "vm_hwm_kb": 2610784,
+  "vm_rss_kb": 2610784,
+  "wall_seconds": 22459.33
+ },
+ "note": "the pilot process was launched before CPU time was a required field, so CPU time is measured externally from /proc rather than estimated; the harness checkpoint is never modified",
+ "pid": 12496,
+ "purpose": "FEASIBILITY ONLY \u2014 runtime and memory; no scientific quantity",
+ "sample_interval_s": 30.0,
+ "samples_taken": 191,
+ "scenario_id": "B02",
+ "source": "external /proc sampler (sample_run_resources.py)"
+}

@@ -1,0 +1,226 @@
+name: Stage 6 PoCol preregistration
+
+# Stage 6 is a PILOT + PREREGISTRATION stage.  It changes NO accepted executable module.
+# This workflow implements the twelve required Stage-6 checks.  It never executes a
+# confirmatory master seed and never performs confirmatory statistical analysis.
+
+on:
+  push:
+    branches:
+      - "thesis-v45-pocol-stage6-pilot-preregistration"
+  pull_request:
+    paths:
+      - "Models/PoCol/stage2/**"
+      - "tests/thesis_revision_v45/**"
+      - "experiments/thesis_revision_v45/stage_06/**"
+      - "docs/thesis_revision_v45/stage_06/**"
+      - ".github/workflows/stage6-pocol-preregistration.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: stage6-pocol-preregistration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stage6-preregistration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # full history: the DOCX/PDF and protected-artifact scope check diffs against the
+          # accepted Stage-5D baseline commit, which a shallow clone does not contain
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pytest
+        run: python -m pip install --upgrade pip pytest
+
+      # ---------------------------------------------------------------- check 1
+      - name: "1 — run all 195 accepted tests"
+        run: |
+          python -m pytest tests/thesis_revision_v45/stage2/ -v --durations=0 \
+            -p no:cacheprovider --junitxml=stage6_accepted.junit.xml | tee stage6_accepted.log
+          python - <<'PY'
+          import xml.etree.ElementTree as ET, sys
+          r = ET.parse("stage6_accepted.junit.xml").getroot()
+          s = r if r.tag == "testsuite" else r.find("testsuite")
+          n = int(s.get("tests")); bad = int(s.get("failures")) + int(s.get("errors"))
+          skipped = int(s.get("skipped", 0))
+          print(f"tests={n} failures+errors={bad} skipped={skipped}")
+          if n != 195 or bad or skipped:
+              sys.exit(f"expected exactly 195 passing accepted tests, got {n} with {bad} bad "
+                       f"and {skipped} skipped")
+          print("OK: all 195 accepted tests pass, none skipped")
+          PY
+
+      # ---------------------------------------------------------------- check 2
+      - name: "2 — accepted executable modules byte-identical to the Stage-5D baseline"
+        run: |
+          python - <<'PY'
+          import hashlib, pathlib, sys
+          EXPECTED = {
+              "Models/PoCol/stage2/adapter.py":
+                  "888639e802a02406553fec1a86a2f0bf283629bad2d7f32548d1505f8db7e5a8",
+              "Models/PoCol/stage2/adversarial.py":
+                  "d7b63b8fe3b331344b899e52bfe893bd9726423d8e58b9125841aca83529c4c6",
+              "Models/PoCol/stage2/adversarial_runtime.py":
+                  "1274bbd3c6b49152b7bd0ac75934227a43a685890c3b4c5a214a3a16b46e6819",
+              "Models/PoCol/stage2/context.py":
+                  "9c3b9c10f29165c40f3fe0978e50c1a5f9e11f36bbf2249248df65ba50088e33",
+              "Models/PoCol/stage2/leases.py":
+                  "2dfffde8d9ead0666b9e375e27c3b24ef83ff77175256af2473c123182768aea",
+              "Models/PoCol/stage2/search.py":
+                  "17367b4c15eaabd664a496412bc3d1685bfcd9cf8749f71aea01aef70b094140",
+              "Models/PoCol/stage2/security.py":
+                  "0a8f5c5df194ba2b8935bb933041c71985cd3090fe840f48f85bba952c2daea6",
+              "Models/PoCol/stage2/simulator.py":
+                  "93160001b5ce5f4a7cabc5647b899447482601bf5486eee22851ed5c36e9bf9a",
+          }
+          bad = []
+          for path, expected in sorted(EXPECTED.items()):
+              digest = hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+              print(f"{digest}  {path}")
+              if digest != expected:
+                  bad.append(f"{path}: expected {expected}, got {digest}")
+          if bad:
+              sys.exit("Stage 6 changed accepted executable code:\n  " + "\n  ".join(bad))
+          print("OK: every accepted executable module is byte-identical")
+          PY
+
+      # ---------------------------------------------------------------- check 3
+      - name: "3 — regenerate the seed registry"
+        run: python experiments/thesis_revision_v45/stage_06/generate_seed_registry.py --check
+
+      # ---------------------------------------------------------------- check 4
+      - name: "4 — regenerate the confirmatory and exploratory matrices"
+        run: |
+          python experiments/thesis_revision_v45/stage_06/generate_confirmatory_matrix.py --check
+          python experiments/thesis_revision_v45/stage_06/generate_outcome_dictionary.py --check
+          python experiments/thesis_revision_v45/stage_06/generate_pilot_report.py --check
+          python experiments/thesis_revision_v45/stage_06/generate_completion_report.py --check
+
+      # ---------------------------------------------------------------- check 5
+      - name: "5 — generated files are byte-identical to the committed files"
+        run: |
+          git diff --exit-code -- \
+            docs/thesis_revision_v45/stage_06/STAGE_06_SEED_REGISTRY.csv \
+            docs/thesis_revision_v45/stage_06/STAGE_06_CONFIRMATORY_MATRIX.csv \
+            docs/thesis_revision_v45/stage_06/STAGE_06_EXPLORATORY_MATRIX.csv \
+            docs/thesis_revision_v45/stage_06/STAGE_06_OUTCOME_DICTIONARY.csv \
+            docs/thesis_revision_v45/stage_06/STAGE_06_IP_HYPOTHESES.json \
+            docs/thesis_revision_v45/stage_06/STAGE_06_IP_HYPOTHESES.md \
+            docs/thesis_revision_v45/stage_06/STAGE_06_PILOT_REPORT.md \
+            docs/thesis_revision_v45/stage_06/STAGE_06_RUNTIME_AND_ARCHIVE_PLAN.md \
+            docs/thesis_revision_v45/stage_06/STAGE_06_COMPLETION_REPORT.md \
+            experiments/thesis_revision_v45/stage_06/confirmatory/
+          echo "OK: regeneration left the working tree clean"
+
+      - name: "Deterministic regeneration of EVERY Stage-6 artefact"
+        run: |
+          python experiments/thesis_revision_v45/stage_06/regenerate_all.py --check
+          echo "OK: every generated artefact is byte-identical to its regeneration, and every"
+          echo "    authored deliverable is present"
+
+      # ---------------------------------------------------------------- checks 6-14
+      - name: "6-14 — preregistration validation (seeds, ids, pairing, difficulty, outputs, fields, manifest, D04 freeze, Tier-2)"
+        run: python experiments/thesis_revision_v45/stage_06/validate_preregistration.py
+
+      - name: "Stage-6 validation test suite"
+        run: |
+          python -m pytest tests/thesis_revision_v45/stage_06/ -v -p no:cacheprovider \
+            --junitxml=stage6_validation.junit.xml | tee stage6_validation.log
+
+      - name: "Claim-scope validator (with its own positive controls)"
+        run: |
+          python -m pytest tests/thesis_revision_v45/stage_06/ -v -p no:cacheprovider \
+            -k "claim_scope or not_vacuous"
+          echo "OK: no prohibited claim appears without a governing negation, and the check is"
+          echo "    proven sensitive by positive controls that it must REJECT"
+
+      - name: "IP-H10d feasibility signals on every pilot seed"
+        run: |
+          python -m pytest tests/thesis_revision_v45/stage_06/ -v -p no:cacheprovider \
+            -k "ip_h10d or power_null or injection_period or all_eight_pilot_seeds"
+
+      - name: "The D04 fault schedule is frozen (arm-identical, seed-independent, outcome-blind)"
+        run: |
+          python -m pytest tests/thesis_revision_v45/stage_06/ -v -p no:cacheprovider \
+            -k "frozen_fault_schedule or primary_lease or byte_identical_schedules \
+                or reads_no_outcome_field or not_generated_per_master_seed"
+          echo "OK: schedule proven byte-identical across arms, invariant across all eight pilot"
+          echo "    seeds, and computed without reading any outcome quantity"
+
+      - name: "Verify the freeze-candidate manifest"
+        run: |
+          sha256sum -c docs/thesis_revision_v45/stage_06/STAGE_06_FREEZE_CANDIDATE_MANIFEST.sha256
+          echo "OK: every manifest entry verifies"
+
+      - name: "Stage 7 has not begun"
+        run: |
+          python - <<'PY'
+          import pathlib, sys
+          conf = pathlib.Path("experiments/thesis_revision_v45/stage_06/confirmatory")
+          allowed = {"README_DO_NOT_RUN_IN_STAGE6.md", "confirmatory_run_registry.csv"}
+          stray = [str(p) for p in conf.rglob("*") if p.is_file()
+                   and not (p.name in allowed or (p.parent.name == "frozen_configs"
+                                                  and p.suffix == ".json"))]
+          if stray:
+              sys.exit("confirmatory run output present in Stage 6:\n  " + "\n  ".join(stray))
+          s7 = pathlib.Path("experiments/thesis_revision_v45/stage_07")
+          if s7.exists() and any(s7.rglob("*.json")):
+              sys.exit("a Stage-7 output directory already holds data")
+          print("OK: no confirmatory output exists; Stage 7 has not begun")
+          PY
+
+      - name: "No DOCX or PDF was modified"
+        run: |
+          python - <<'PY'
+          import subprocess, sys
+          base = subprocess.run(
+              ["git", "rev-parse", "--verify",
+               "fb8a34d63d9369336d5c1e7aeecdfcf8263920b2^{commit}"],
+              capture_output=True, text=True)
+          if base.returncode != 0:
+              # A shallow checkout would silently skip this gate.  The workflow requests full
+              # history, so an absent baseline is a real failure, not a reason to skip.
+              sys.exit("baseline commit fb8a34d6 is not present in this checkout; the scope "
+                       "check cannot run and must not be skipped")
+          out = subprocess.run(
+              ["git", "diff", "--name-only",
+               "fb8a34d63d9369336d5c1e7aeecdfcf8263920b2", "HEAD"],
+              capture_output=True, text=True, check=True).stdout.split()
+          bad = [f for f in out if f.lower().endswith((".docx", ".pdf"))]
+          if bad:
+              sys.exit("a DOCX or PDF was modified:\n  " + "\n  ".join(bad))
+          protected = tuple(f"docs/thesis_revision_v45/stage_{s}/" for s in
+                            ("01", "02", "03", "03a", "04", "04a", "04b", "04c",
+                             "05", "05a", "05b", "05c", "05d"))
+          touched = [f for f in out if f.startswith(protected)]
+          if touched:
+              sys.exit("a protected historical artifact was modified:\n  "
+                       + "\n  ".join(touched))
+          if any(f.startswith("Models/PoCol/stage2/") for f in out):
+              sys.exit("Models/PoCol/stage2/ was modified")
+          print(f"OK: {len(out)} changed files, none DOCX/PDF, none protected, "
+                f"none under Models/PoCol/stage2/")
+          PY
+
+      - name: Upload Stage-6 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage6-preregistration-evidence
+          path: |
+            stage6_accepted.log
+            stage6_accepted.junit.xml
+            stage6_validation.log
+            stage6_validation.junit.xml
+            docs/thesis_revision_v45/stage_06/STAGE_06_CONFIRMATORY_MATRIX.csv
+            docs/thesis_revision_v45/stage_06/STAGE_06_SEED_REGISTRY.csv
+            experiments/thesis_revision_v45/stage_06/pilot/pilot_results.json

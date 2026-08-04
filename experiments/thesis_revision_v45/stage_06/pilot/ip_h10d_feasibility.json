@@ -1,0 +1,86 @@
+{
+ "gates": {
+  "accepted_frontier_below_actual_in_treatment": false,
+  "control_shows_no_withholding": true,
+  "duplicate_prevented_ge_reevaluated": true,
+  "physical_frontier_rewind_zero": true,
+  "reevaluation_positive_in_treatment": false
+ },
+ "population": {
+  "batch_size": 50,
+  "horizon_T": 400.0,
+  "nonce_domain_size": 4000,
+  "num_miners": 141
+ },
+ "purpose": "IP-H10d feasibility verification (pilot seeds only)",
+ "runs": [
+  {
+   "accepted_below_actual_count": 0,
+   "accepted_frontier_record_count": 0,
+   "adversarial_reevaluation_count": 0,
+   "batch_size": 25,
+   "duplicate_nonce_count": 0,
+   "duplicate_work_reward_prevented_count": 0,
+   "master_seed": 17024034099160922174,
+   "nonces_per_primary": 35.39823008849557,
+   "physical_frontier_rewind_count": 0,
+   "progress_withholding_count": 0,
+   "progress_withholding_reachable": true,
+   "rounds_executed": 384,
+   "scenario_id": "D04C",
+   "seed_index": 0,
+   "work_reward_union_residual": 0.0
+  },
+  {
+   "accepted_below_actual_count": 0,
+   "accepted_frontier_record_count": 0,
+   "adversarial_reevaluation_count": 0,
+   "batch_size": 25,
+   "duplicate_nonce_count": 0,
+   "duplicate_work_reward_prevented_count": 0,
+   "master_seed": 11768030410170855390,
+   "nonces_per_primary": 35.39823008849557,
+   "physical_frontier_rewind_count": 0,
+   "progress_withholding_count": 0,
+   "progress_withholding_reachable": true,
+   "rounds_executed": 383,
+   "scenario_id": "D04C",
+   "seed_index": 1,
+   "work_reward_union_residual": 0.0
+  },
+  {
+   "accepted_below_actual_count": 0,
+   "accepted_frontier_record_count": 0,
+   "adversarial_reevaluation_count": 0,
+   "batch_size": 25,
+   "duplicate_nonce_count": 0,
+   "duplicate_work_reward_prevented_count": 0,
+   "master_seed": 17024034099160922174,
+   "nonces_per_primary": 35.39823008849557,
+   "physical_frontier_rewind_count": 0,
+   "progress_withholding_count": 0,
+   "progress_withholding_reachable": true,
+   "rounds_executed": 384,
+   "scenario_id": "D04",
+   "seed_index": 0,
+   "work_reward_union_residual": 0.0
+  },
+  {
+   "accepted_below_actual_count": 0,
+   "accepted_frontier_record_count": 0,
+   "adversarial_reevaluation_count": 0,
+   "batch_size": 25,
+   "duplicate_nonce_count": 0,
+   "duplicate_work_reward_prevented_count": 0,
+   "master_seed": 11768030410170855390,
+   "nonces_per_primary": 35.39823008849557,
+   "physical_frontier_rewind_count": 0,
+   "progress_withholding_count": 0,
+   "progress_withholding_reachable": true,
+   "rounds_executed": 383,
+   "scenario_id": "D04",
+   "seed_index": 1,
+   "work_reward_union_residual": 0.0
+  }
+ ]
+}

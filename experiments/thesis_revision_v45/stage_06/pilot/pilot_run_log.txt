@@ -1,0 +1,48 @@
+Stage-6 pilot harness — PILOT SEEDS ONLY.  No confirmatory seed is executed.
+pilot seeds available: 8
+
+=== Tier 1 — reduced-scale semantic pilot {'num_miners': 12, 'horizon_T': 200.0, 'nonce_domain_size': 400, 'batch_size': 25, 'nominal_round_period': 1.2987} ===
+  A01  seed[0] COMPLETED           0.44s rounds=151 accepted=50
+  A01  seed[1] COMPLETED           0.46s rounds=150 accepted=47
+  A02  seed[0] COMPLETED           0.49s rounds=151 accepted=50
+  A02  seed[1] COMPLETED           0.44s rounds=150 accepted=47
+  A03  seed[0] COMPLETED           0.51s rounds=154 accepted=50
+  A03  seed[1] COMPLETED           0.48s rounds=154 accepted=48
+  A04  seed[0] COMPLETED           0.49s rounds=154 accepted=50
+  A04  seed[1] COMPLETED           0.45s rounds=154 accepted=48
+  A05  seed[0] COMPLETED           0.44s rounds=154 accepted=50
+  A05  seed[1] COMPLETED           0.44s rounds=154 accepted=48
+  A06  seed[0] COMPLETED           0.44s rounds=154 accepted=50
+  A06  seed[1] COMPLETED           0.44s rounds=154 accepted=48
+  B01  seed[0] COMPLETED           0.44s rounds=154 accepted=50
+  B01  seed[1] COMPLETED           0.45s rounds=154 accepted=48
+  B02  seed[0] COMPLETED           0.47s rounds=108 accepted=40
+  B02  seed[1] COMPLETED           0.48s rounds=105 accepted=35
+  B03  seed[0] COMPLETED           0.50s rounds=109 accepted=40
+  B03  seed[1] COMPLETED           0.50s rounds=107 accepted=37
+  B04  seed[0] COMPLETED           0.54s rounds=112 accepted=41
+  B04  seed[1] COMPLETED           0.54s rounds=110 accepted=38
+  C01  seed[0] COMPLETED           0.70s rounds=154 accepted=50
+  C01  seed[1] COMPLETED           0.73s rounds=154 accepted=48
+  C02  seed[0] COMPLETED           0.66s rounds=154 accepted=50
+  C02  seed[1] COMPLETED           0.60s rounds=154 accepted=48
+  C03  seed[0] COMPLETED           1.25s rounds=154 accepted=35
+  C03  seed[1] COMPLETED           0.93s rounds=158 accepted=46
+  C04  seed[0] COMPLETED           1.40s rounds=154 accepted=47
+  C04  seed[1] COMPLETED           1.39s rounds=154 accepted=48
+  C05  seed[0] COMPLETED           0.85s rounds=160 accepted=53
+  C05  seed[1] COMPLETED           0.04s rounds=1 accepted=0
+  C06  seed[0] COMPLETED           0.66s rounds=143 accepted=0
+  C06  seed[1] COMPLETED           0.72s rounds=143 accepted=0
+  D00  seed[0] COMPLETED           1.52s rounds=154 accepted=47
+  D00  seed[1] COMPLETED           1.53s rounds=154 accepted=48
+  D01  seed[0] COMPLETED           0.48s rounds=99 accepted=36
+  D01  seed[1] COMPLETED           0.45s rounds=99 accepted=32
+  D02  seed[0] COMPLETED           1.47s rounds=154 accepted=42
+  D02  seed[1] COMPLETED           1.47s rounds=154 accepted=40
+  D03  seed[0] COMPLETED           1.45s rounds=154 accepted=45
+  D03  seed[1] COMPLETED           1.45s rounds=154 accepted=42
+  D04C seed[0] COMPLETED           0.93s rounds=152 accepted=50
+  D04C seed[1] COMPLETED           0.79s rounds=152 accepted=47
+  D04  seed[0] COMPLETED           0.96s rounds=152 accepted=50
+  D04  seed[1] COMPLETED           0.80s rounds=152 accepted=47

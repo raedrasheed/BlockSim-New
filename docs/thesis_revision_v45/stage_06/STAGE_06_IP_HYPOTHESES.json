@@ -1,0 +1,284 @@
+{
+ "engine_commit_sha": "fb8a34d63d9369336d5c1e7aeecdfcf8263920b2",
+ "hypotheses": [
+  {
+   "analysis_method": "deterministic validation gate \u2014 no p-value, no confidence interval",
+   "condition_A": "every confirmatory scenario at the reference population and horizon",
+   "condition_B": "the declared analytical constant 8.420833333 kWh",
+   "decision_rule": "PASS iff absolute error <= 1e-9 kWh in every run",
+   "direction": "equality",
+   "estimand": "absolute error |computed - 8.420833333| kWh",
+   "failure_condition": "any run exceeds 1e-9 kWh",
+   "hypothesis_id": "IP-H1",
+   "inferential_unit": "one physical run under one master seed",
+   "interpretation_limit": "an ACCOUNTING validation of the reference, not an energy claim and not a matched control simulation",
+   "multiplicity_family": "NONE (validation gate)",
+   "primary_outcome": "continuous_all_active_control_kwh",
+   "scientific_question": "Does the A1 continuous full-participation accounting reference reproduce exactly under the frozen reference configuration?",
+   "secondary_outcomes": []
+  },
+  {
+   "analysis_method": "deterministic validation gate \u2014 no p-value, no confidence interval",
+   "condition_A": "every confirmatory run",
+   "condition_B": "the analytic identity E_i = P_hash*t_hash + P_listen*t_listen + P_reserve*t_reserve + P_wake*t_wake + P_offline*t_offline",
+   "decision_rule": "PASS iff energy residual <= 1e-8 J AND residency-partition residual <= 1e-9 s in every run",
+   "direction": "equality",
+   "estimand": "maximum absolute residual over miners within a run",
+   "failure_condition": "any run exceeds either tolerance",
+   "hypothesis_id": "IP-H2",
+   "inferential_unit": "one physical run under one master seed",
+   "interpretation_limit": "an accounting identity; it says nothing about whether the idle policy saves energy",
+   "multiplicity_family": "NONE (validation gate)",
+   "primary_outcome": "maximum_energy_identity_residual_j",
+   "scientific_question": "Is per-miner energy exactly the state-complete sum of residency times per-state power, over a complete residency partition?",
+   "secondary_outcomes": [
+    "maximum_residency_partition_residual_s"
+   ]
+  },
+  {
+   "analysis_method": "one-sided paired sign-permutation over master seeds (10 000 permutations when exact enumeration is unavailable) plus a 95 % paired cluster bootstrap over master seeds (10 000 resamples), both driven by the frozen analysis seed",
+   "condition_A": "A02 \u2014 homogeneous rates, idle-power ratio 0.10",
+   "condition_B": "A01 \u2014 homogeneous rates, idle-power ratio 1.00 (idle policy off)",
+   "decision_rule": "EQUIVALENT iff the COMPLETE 95 % paired bootstrap CI lies inside +/- 0.0084208333 kWh (0.10 % of 8.420833333 kWh)",
+   "direction": "equivalence (two-sided) within +/- 0.10 % of A1",
+   "estimand": "mean paired difference in total_energy_kwh (A02 - A01) over master seeds",
+   "failure_condition": "any part of the CI falls outside the margin",
+   "hypothesis_id": "IP-H3",
+   "inferential_unit": "one physical run under one master seed",
+   "interpretation_limit": "a homogeneous-population NULL; failing to reject is NEVER evidence of equivalence outside the stated margin",
+   "multiplicity_family": "Family 1 (IP-H3, IP-H4, IP-H6 adjacent contrasts), Holm",
+   "primary_outcome": "total_energy_kwh",
+   "scientific_question": "Under HOMOGENEOUS hash rates, does lowering the idle-power ratio change total energy by more than a negligible margin?",
+   "secondary_outcomes": [
+    "relative_energy_reduction_percent",
+    "accepted_blocks"
+   ]
+  },
+  {
+   "analysis_method": "one-sided paired sign-permutation over master seeds (10 000 permutations when exact enumeration is unavailable) plus a 95 % paired cluster bootstrap over master seeds (10 000 resamples), both driven by the frozen analysis seed",
+   "condition_A": "A05 \u2014 heterogeneous 1x-4x rates, idle-power ratio 0.10",
+   "condition_B": "A03 \u2014 heterogeneous 1x-4x rates, idle-power ratio 1.00",
+   "decision_rule": "SUCCESS iff Holm-adjusted p < 0.05 AND the lower 95 % CI bound of the paired difference > 0 AND the mean relative reduction >= 5 % (a PREREGISTERED minimum, not pilot-estimated)",
+   "direction": "one-sided: A05 strictly lower than A03",
+   "estimand": "mean paired difference (A03 - A05) and mean paired RELATIVE reduction",
+   "failure_condition": "any of the three conditions fails",
+   "hypothesis_id": "IP-H4",
+   "inferential_unit": "one physical run under one master seed",
+   "interpretation_limit": "a CONDITIONAL reduction under heterogeneous rates in THIS configuration; never an unconditional PoCol energy-reduction claim. An energy success may be claimed ONLY if IP-H7 and IP-H8 both pass.",
+   "multiplicity_family": "Family 1, Holm",
+   "primary_outcome": "total_energy_kwh",
+   "scientific_question": "Under HETEROGENEOUS hash rates, does the PoCol idle policy reduce total energy relative to the matched idle-policy-off control?",
+   "secondary_outcomes": [
+    "relative_energy_reduction_percent",
+    "accepted_blocks",
+    "median_round_duration"
+   ]
+  },
+  {
+   "analysis_method": "deterministic validation gate \u2014 no p-value, no confidence interval",
+   "condition_A": "A01 and A03 \u2014 every non-hashing non-offline state draws P_hash",
+   "condition_B": "the A1 continuous full-participation reference",
+   "decision_rule": "PASS iff the residual is <= 1e-9 kWh for EVERY master seed",
+   "direction": "equality (zero saving)",
+   "estimand": "|total_energy_kwh - continuous_all_active_control_kwh| per run",
+   "failure_condition": "any master seed exceeds 1e-9 kWh",
+   "hypothesis_id": "IP-H5",
+   "inferential_unit": "one physical run under one master seed",
+   "interpretation_limit": "a NEGATIVE CONTROL. Its precondition \u2014 zero OFFLINE and zero DISQUALIFIED residency \u2014 is verified per run and never assumed.",
+   "multiplicity_family": "NONE (negative control)",
+   "primary_outcome": "total_energy_kwh",
+   "scientific_question": "With the idle policy switched off, is the saving exactly zero?",
+   "secondary_outcomes": [
+    "continuous_all_active_control_kwh"
+   ]
+  },
+  {
+   "analysis_method": "one-sided paired sign-permutation over master seeds (10 000 permutations when exact enumeration is unavailable) plus a 95 % paired cluster bootstrap over master seeds (10 000 resamples), both driven by the frozen analysis seed",
+   "condition_A": "A06 (0.00), A05 (0.10), A04 (0.25)",
+   "condition_B": "the adjacent higher-ratio row: A05, A04, A03 (1.00) respectively",
+   "decision_rule": "each adjacent contrast SUCCEEDS iff its Holm-adjusted p < 0.05 within IP-H6 and its 95 % CI excludes 0 in the predicted direction",
+   "direction": "one-sided, ordering E(0.00) <= E(0.10) <= E(0.25) <= E(1.00)",
+   "estimand": "mean paired difference for each ADJACENT contrast",
+   "failure_condition": "any adjacent contrast reverses the predicted ordering",
+   "hypothesis_id": "IP-H6",
+   "inferential_unit": "one physical run under one master seed",
+   "interpretation_limit": "monotonicity only. NO linearity is claimed unless the data support it, and the 0.25 -> 1.00 contrast additionally raises the transient wake power, because that is what switching the idle policy off means.",
+   "multiplicity_family": "Family 1; Holm applied WITHIN IP-H6 across its three adjacent contrasts",
+   "primary_outcome": "total_energy_kwh",
+   "scientific_question": "Is total energy monotone in the idle-power ratio?",
+   "secondary_outcomes": [
+    "relative_energy_reduction_percent"
+   ]
+  },
+  {
+   "analysis_method": "exact per-run criteria plus one-sided paired sign-permutation over master seeds (10 000 permutations when exact enumeration is unavailable) plus a 95 % paired cluster bootstrap over master seeds (10 000 resamples), both driven by the frozen analysis seed for the paired contrast",
+   "condition_A": "B02 / B03 \u2014 floor enabled, minimum_active_hash_rate = 0.80 x initial active-primary ACTUAL hash rate, MINIMUM_CARDINALITY reserve selection, ON_CAPACITY_CHANGE, activation_wake_latency 1.0, floor_tolerance 0.0, CONTINUE_DEGRADED",
+   "condition_B": "B01 \u2014 floor disabled, otherwise identical",
+   "decision_rule": "SUCCESS in honest conditions iff floor_unattainable_count == 0 AND nonterminal_activation_request_count == 0 AND total_duration_below_floor <= 0.01 * horizon_T",
+   "direction": "bounded",
+   "estimand": "per-run total_duration_below_floor and the two exact counts",
+   "failure_condition": "any of the three criteria fails",
+   "hypothesis_id": "IP-H7",
+   "inferential_unit": "one physical run under one master seed",
+   "interpretation_limit": "an OPERATIONAL ACTIVE-CAPACITY criterion only. It is not consensus security, not common-prefix security, not chain quality, and not Bitcoin/PoW-equivalent security. B04 is a DIAGNOSTIC row and is excluded from this criterion.",
+   "multiplicity_family": "Family 2 (IP-H7, IP-H8), Holm",
+   "primary_outcome": "total_duration_below_floor",
+   "scientific_question": "Does the operational active-capacity floor hold in honest conditions?",
+   "secondary_outcomes": [
+    "floor_unattainable_count",
+    "breach_count",
+    "maximum_hash_rate_deficit",
+    "reserve_activations_completed",
+    "nonterminal_activation_request_count"
+   ]
+  },
+  {
+   "analysis_method": "one-sided paired sign-permutation over master seeds (10 000 permutations when exact enumeration is unavailable) plus a 95 % paired cluster bootstrap over master seeds (10 000 resamples), both driven by the frozen analysis seed",
+   "condition_A": "each treatment row",
+   "condition_B": "its matched control under the same master seed",
+   "decision_rule": "NON-INFERIOR iff the accepted_blocks_per_horizon ratio >= 0.95 AND the median_round_duration ratio <= 1.05 AND the absolute increase in zero_block_rate <= 0.05",
+   "direction": "non-inferiority",
+   "estimand": "paired ratio of accepted_blocks_per_horizon; paired ratio of median_round_duration; absolute difference in zero_block_rate",
+   "failure_condition": "any of the three margins is violated",
+   "hypothesis_id": "IP-H8",
+   "inferential_unit": "one physical run under one master seed",
+   "interpretation_limit": "Zero-block runs are RETAINED; per-block quantities are NA, never imputed as zero and never dropped. An ENERGY success may be claimed ONLY when IP-H7 and IP-H8 both pass.",
+   "multiplicity_family": "Family 2, Holm",
+   "primary_outcome": "accepted_blocks_per_horizon",
+   "scientific_question": "Is service non-inferior under the conditions where an energy claim would be made?",
+   "secondary_outcomes": [
+    "median_round_duration",
+    "zero_block_rate",
+    "accepted_blocks"
+   ]
+  },
+  {
+   "analysis_method": "deterministic validation gate \u2014 no p-value, no confidence interval",
+   "condition_A": "C01 (no fault), C02 (leases disabled), C03 (Path A), C04 (genuine Path-B reserve wake), C05 (no eligible miner), C06 (full-domain exhaustion), D00 (honest control)",
+   "condition_B": "the exact invariant values below",
+   "decision_rule": "PASS iff duplicate_nonce_count == 0 in every honest condition AND post_round_evaluation_record_count == 0 AND post_round_evaluation_nonce_count == 0 AND evaluation_missing_terminal_time_count == 0 AND nonterminal_lease_count == 0 AND nonterminal_reassignment_request_count == 0 AND nonterminal_activation_request_count == 0 AND physical_frontier_rewind_count == 0 AND work_reward_union_residual == 0 AND full-domain exhaustion is reported only when every suffix is covered; each gate is evaluated only over runs with a NON-EMPTY evaluation ledger, so a zero is evidence rather than absence of activity",
+   "direction": "equality with zero",
+   "estimand": "the exact per-run counts",
+   "failure_condition": "any invariant is non-zero, or any gate is evaluated over an empty ledger",
+   "hypothesis_id": "IP-H9",
+   "inferential_unit": "one physical run under one master seed",
+   "interpretation_limit": "internal consistency of the accepted model; establishes no security property",
+   "multiplicity_family": "NONE (deterministic gates)",
+   "primary_outcome": "duplicate_nonce_count",
+   "scientific_question": "Do the lease, reassignment and evaluation integrity invariants hold exactly under every matched robustness condition?",
+   "secondary_outcomes": [
+    "post_round_evaluation_record_count",
+    "post_round_evaluation_nonce_count",
+    "evaluation_missing_terminal_time_count",
+    "nonterminal_lease_count",
+    "nonterminal_reassignment_request_count",
+    "nonterminal_activation_request_count",
+    "physical_frontier_rewind_count",
+    "work_reward_union_residual",
+    "evaluation_ledger_nonce_total"
+   ]
+  },
+  {
+   "analysis_method": "one-sided paired sign-permutation over master seeds (10 000 permutations when exact enumeration is unavailable) plus a 95 % paired cluster bootstrap over master seeds (10 000 resamples), both driven by the frozen analysis seed",
+   "condition_A": "D01 \u2014 DELAYED_WAKE on the fixed adversarial entity set",
+   "condition_B": "D00 \u2014 identical configuration, entity set declared with NO behaviour",
+   "decision_rule": "report the effect and its 95 % CI; Holm-adjusted within IP-H10",
+   "direction": "two-sided",
+   "estimand": "mean paired difference vs D00 over master seeds",
+   "failure_condition": "the behaviour does not occur (count == 0), making the contrast vacuous",
+   "hypothesis_id": "IP-H10a",
+   "inferential_unit": "one physical run under one master seed",
+   "interpretation_limit": "a BOUNDED EXPERIMENTAL EFFECT of a modeled behaviour. It is NOT evidence of attack resistance, incentive compatibility, coalition resistance or Sybil resistance.",
+   "multiplicity_family": "Family 3 (IP-H10a/b/c/d), Holm",
+   "primary_outcome": "delayed_wake_count",
+   "scientific_question": "What bounded effect does modeled DELAYED WAKE have relative to the matched honest control?",
+   "secondary_outcomes": [
+    "total_energy_kwh",
+    "accepted_blocks",
+    "total_duration_below_floor",
+    "maximum_q_adv"
+   ]
+  },
+  {
+   "analysis_method": "one-sided paired sign-permutation over master seeds (10 000 permutations when exact enumeration is unavailable) plus a 95 % paired cluster bootstrap over master seeds (10 000 resamples), both driven by the frozen analysis seed",
+   "condition_A": "D02 \u2014 SOLUTION_WITHHOLDER, NEVER_RELEASE",
+   "condition_B": "D00",
+   "decision_rule": "report the effect and its 95 % CI; Holm-adjusted within IP-H10",
+   "direction": "two-sided",
+   "estimand": "mean paired difference vs D00 over master seeds",
+   "failure_condition": "no solution is ever withheld",
+   "hypothesis_id": "IP-H10b",
+   "inferential_unit": "one physical run under one master seed",
+   "interpretation_limit": "a bounded modeled effect; NOT a selfish-mining-resistance or chain-quality claim",
+   "multiplicity_family": "Family 3, Holm",
+   "primary_outcome": "solution_withholding_count",
+   "scientific_question": "What bounded effect does modeled SOLUTION WITHHOLDING have?",
+   "secondary_outcomes": [
+    "accepted_blocks",
+    "accepted_blocks_per_horizon",
+    "total_energy_kwh",
+    "maximum_q_adv"
+   ]
+  },
+  {
+   "analysis_method": "one-sided paired sign-permutation over master seeds (10 000 permutations when exact enumeration is unavailable) plus a 95 % paired cluster bootstrap over master seeds (10 000 resamples), both driven by the frozen analysis seed",
+   "condition_A": "D03 \u2014 FALSE_EXHAUSTION_CLAIMER with audit_detection_probability 0.0",
+   "condition_B": "D00",
+   "decision_rule": "report the effect and its 95 % CI; Holm-adjusted within IP-H10",
+   "direction": "two-sided",
+   "estimand": "mean paired difference vs D00 over master seeds",
+   "failure_condition": "no false-exhaustion claim is accepted",
+   "hypothesis_id": "IP-H10c",
+   "inferential_unit": "one physical run under one master seed",
+   "interpretation_limit": "the progress-verification layer is a MODELED ABSTRACTION, not a complete cryptographic proof; this is not a security claim",
+   "multiplicity_family": "Family 3, Holm",
+   "primary_outcome": "false_exhaustion_accepted",
+   "scientific_question": "What bounded effect does an ACCEPTED FALSE EXHAUSTION claim have?",
+   "secondary_outcomes": [
+    "coverage_gap_nonce_count",
+    "accepted_blocks",
+    "total_energy_kwh"
+   ]
+  },
+  {
+   "analysis_method": "one-sided paired sign-permutation over master seeds (10 000 permutations when exact enumeration is unavailable) plus a 95 % paired cluster bootstrap over master seeds (10 000 resamples), both driven by the frozen analysis seed",
+   "condition_A": "D04 (D04_PROGRESS_WITHHOLDING) \u2014 PROGRESS_WITHHOLDER, withholding fraction 0.5, audit_detection_probability 0.0, batch_size 25",
+   "condition_B": "D04C (D04C_PROGRESS_CONTROL) \u2014 the SAME adversarial entity set declared with NO behaviour, batch_size 25; a dedicated control, NOT the batch-50 D00 control",
+   "decision_rule": "SUCCESS iff adversarial_reevaluation_count > 0 AND physical_frontier_rewind_count == 0 AND duplicate_work_reward_prevented_count >= adversarial_reevaluation_count",
+   "direction": "one-sided: strictly positive re-evaluation count",
+   "estimand": "mean paired difference vs D00 over master seeds",
+   "failure_condition": "adversarial_reevaluation_count == 0 (vacuous), or the physical frontier rewinds, or duplicate reward is not prevented",
+   "hypothesis_id": "IP-H10d",
+   "inferential_unit": "one physical run under one master seed",
+   "interpretation_limit": "a BOUNDED EXPERIMENTAL EFFECT of a modeled behaviour; NOT evidence of attack resistance, incentive compatibility, coalition resistance or Sybil resistance. The pair carries batch_size 25 on BOTH arms because progress withholding under-reports the COMMITTED frontier, which requires a batch boundary strictly inside a primary range (4000/113 = 35.4 > 25; at the reference batch size 50 no intermediate committed frontier can exist). Chosen from that structural inequality, never from an observed effect.",
+   "multiplicity_family": "Family 3, Holm",
+   "primary_outcome": "adversarial_reevaluation_count",
+   "scientific_question": "Under modeled PROGRESS WITHHOLDING, does re-evaluation occur while the physical frontier never rewinds and duplicate reward is prevented?",
+   "secondary_outcomes": [
+    "physical_frontier_rewind_count",
+    "duplicate_work_reward_prevented_count",
+    "work_reward_union_residual",
+    "total_energy_kwh"
+   ]
+  }
+ ],
+ "hypothesis_fields": [
+  "hypothesis_id",
+  "scientific_question",
+  "condition_A",
+  "condition_B",
+  "primary_outcome",
+  "secondary_outcomes",
+  "estimand",
+  "direction",
+  "inferential_unit",
+  "analysis_method",
+  "decision_rule",
+  "multiplicity_family",
+  "failure_condition",
+  "interpretation_limit"
+ ],
+ "inferential_unit": "one physical run under one master seed",
+ "result_schema_version": "stage5c.1",
+ "stage": "STAGE_06"
+}

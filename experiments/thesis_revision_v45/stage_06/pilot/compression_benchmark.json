@@ -1,0 +1,83 @@
+{
+ "cpu_count": 4,
+ "harness": "benchmark_compression.py",
+ "horizon_T": 1200.0,
+ "master_seed": 16366577634683644678,
+ "note": "measured on a REDUCED-HORIZON payload; the ratio is not claimed to be universal and the archive plan applies a declared safety factor to it",
+ "payload_generation_wall_seconds": 232.6458761692047,
+ "purpose": "FEASIBILITY ONLY \u2014 archive cost; no scientific quantity",
+ "results": [
+  {
+   "codec": "gzip -9",
+   "compressed_bytes": 115540,
+   "cpu_seconds": 0.11061200000003168,
+   "mode": "one_shot",
+   "peak_over_payload": 0.1325900506268472,
+   "peak_traced_bytes": 629364,
+   "ratio": 41.08266401246322,
+   "raw_bytes": 4746691,
+   "wall_seconds": 0.1106255054473877
+  },
+  {
+   "codec": "xz -9",
+   "compressed_bytes": 55436,
+   "cpu_seconds": 2.0058530000000303,
+   "mode": "one_shot",
+   "peak_over_payload": 148.71073554187538,
+   "peak_traced_bytes": 705883910,
+   "ratio": 85.6247023594776,
+   "raw_bytes": 4746691,
+   "wall_seconds": 2.0059163570404053
+  },
+  {
+   "bytes_written": 55436,
+   "chunk_bytes": 1048576,
+   "codec": "xz -9",
+   "compressed_bytes": 55436,
+   "cpu_seconds": 0.5320790000000102,
+   "mode": "streaming_incremental",
+   "peak_over_payload": 148.9213133949524,
+   "peak_traced_bytes": 706883458,
+   "ratio": 85.6247023594776,
+   "raw_bytes": 4746691,
+   "wall_seconds": 0.5320944786071777
+  }
+ ],
+ "rounds": 1149,
+ "scenario": "C04",
+ "seed_index": 7,
+ "streaming_verdict": {
+  "criterion": "d(peak memory)/d(payload bytes) < 0.25 measured across payload sizes \u2014 an ABSOLUTE threshold is invalid for LZMA because its peak is dominated by a fixed match-finder dictionary, not by buffering",
+  "gzip_peak_slope": 0.07363809013378861,
+  "memory_scaling_samples": [
+   {
+    "fraction": 0.25,
+    "gzip_peak_bytes": 366638,
+    "payload_bytes": 1186672,
+    "xz_stream_peak_bytes": 706850257,
+    "xz_stream_rss_peak_kb": 776580
+   },
+   {
+    "fraction": 0.5,
+    "gzip_peak_bytes": 366614,
+    "payload_bytes": 2373345,
+    "xz_stream_peak_bytes": 706850401,
+    "xz_stream_rss_peak_kb": 776580
+   },
+   {
+    "fraction": 1.0,
+    "gzip_peak_bytes": 628791,
+    "payload_bytes": 4746691,
+    "xz_stream_peak_bytes": 706883434,
+    "xz_stream_rss_peak_kb": 776584
+   }
+  ],
+  "scheduling_note": "the xz fixed encoder cost is per-compressing-process and MUST be added to the memory equation if compression runs alongside simulation workers; gzip's cost is negligible by comparison",
+  "temporary_disk_bytes": 55436,
+  "temporary_disk_note": "the streaming path writes only the compressed stream; the raw payload never needs to exist as a file",
+  "truly_streaming": true,
+  "xz_fixed_encoder_cost_bytes": 706839198.0093193,
+  "xz_fixed_encoder_cost_mb": 706.8391980093193,
+  "xz_stream_peak_slope": 0.009319332284462526
+ }
+}
