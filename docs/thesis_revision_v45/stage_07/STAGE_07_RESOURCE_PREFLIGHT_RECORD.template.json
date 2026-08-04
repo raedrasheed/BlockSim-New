@@ -1,0 +1,32 @@
+{
+ "host_identifier": null,
+ "provider_or_institution": null,
+ "persistent_lifetime_guarantee": {
+  "days": null,
+  "evidence": null
+ },
+ "cpu_count": null,
+ "usable_ram_bytes": null,
+ "free_disk_bytes": null,
+ "durable_output_path": null,
+ "archive_path": null,
+ "worker_limits_by_class": {
+  "LIGHTWEIGHT": null,
+  "SECURITY_FLOOR": null,
+  "REASSIGNMENT": null
+ },
+ "compressor_count": null,
+ "per_run_timeout": {
+  "hours": 24
+ },
+ "heartbeat_interval": {
+  "seconds": 30
+ },
+ "checkpoint_interval": {
+  "policy": "after every completed run"
+ },
+ "same_seed_rerun_policy": "retry the identical (scenario_id, master_seed) pair with the identical frozen configuration; NEVER draw a replacement seed",
+ "verified_at": null,
+ "verdict": "NOT_EVALUATED",
+ "_instructions": "Fill every field from DIRECT OBSERVATION of the host. A field filled from a quotation, a marketing figure or an intention to provision is a preflight failure. Then run: python resource_preflight.py --record <this file>"
+}

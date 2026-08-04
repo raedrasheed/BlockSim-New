@@ -1,0 +1,5 @@
+python==3.11.15
+pytest==9.1.1
+# stdlib only: csv, json, lzma, hashlib, fcntl, subprocess, resource
+# NO third-party runtime dependency. zstandard is NOT used: it is absent from the locked
+# environment, so the archive path uses stdlib lzma with a MEASURED ratio.

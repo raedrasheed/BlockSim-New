@@ -81,3 +81,39 @@ Two things would each unblock this independently:
 
 The frozen scientific content is untouched and remains exactly as accepted at
 `026483496ffb434243f45e174c63b43b77b3b43a`.
+
+---
+
+## 6. Finding during packaging: A05 and B01 are the same executable configuration
+
+Building all 660 frozen configurations yields **630 distinct configuration digests, not 660**.
+The 30-run shortfall is a single scenario pair:
+
+| | A05 | B01 |
+|---|---|---|
+| `Stage2Config` | **byte-identical** | **byte-identical** |
+| `block_id` | A | B |
+| `hypothesis_ids` | IP-H1;IP-H2;IP-H4;IP-H6 | IP-H1;IP-H2;IP-H7;IP-H8 |
+| `paired_control_id` | A03 | SELF |
+| role | idle-policy level | matched control for the security-floor contrasts |
+
+They differ **only** in metadata. Every executable field is equal, so under the same master
+seed the engine — which is deterministic given the configuration and the derived child seeds —
+will produce **identical results** for `A05-Snn` and `B01-Snn`.
+
+Two consequences, both recorded rather than acted on, because the matrix is frozen:
+
+1. **Stage 7 will execute 30 redundant runs** (~8.3 h of LIGHTWEIGHT compute). The bundle
+   executes all 660 frozen identities as specified; it does not deduplicate, because
+   deduplicating would change the frozen execution plan.
+2. **Stage 8 must not treat A05 and B01 as independent observations.** They are one physical
+   realisation appearing under two scenario labels. Pooling them, or counting them as separate
+   evidence within or across families, would double-count the same 30 runs.
+
+This is reused-condition design, which is legitimate — a single physical condition can serve as
+a level in one contrast and a control in another. What would not be legitimate is silently
+treating the two labels as two independent samples. It is flagged here so that the Stage-8
+analysis handles it explicitly.
+
+`test_s7_17` pins this: it asserts the configurations are identical, the scenario roles are
+distinct, and that this document records the finding.
