@@ -1,0 +1,13 @@
+hypothesis,criterion,value,pass
+H-M1,mean relative reduction >= 5 %,0.538683,True
+H-M1,paired-bootstrap 95 % lower bound of mean(d) > 0,0.019258045 kWh,True
+H-M1,exact one-sided sign-permutation p < 0.05,0.000977,True
+H-M1,DECISION,PASS,True
+H-M2,DESCRIPTIVE_ONLY (no pass/fail preregistered),mean rel 0.445601,
+H-M3,accepted_blocks ratio mean >= 0.90,0.824165 (per-seed min 0.778443),False
+H-M3,median_round_duration ratio mean <= 1.10,1.000845 (per-seed max 1.035011),True
+H-M3,total_duration_below_floor <= 15 s (every run),"max 275.740833 s, mean 274.822167 s",False
+H-M3,nonterminal_activation_request_count == 0,0,True
+H-M3,floor_unattainable_count (reported honestly),"total 10362 across 10 runs; per-seed [1092, 1097, 1098, 1159, 1032, 951, 960, 951, 1003, 1019]",
+H-M3,DECISION,LIMITS_EXCEEDED,False
+ENERGY CLAIM,H-M1 PASS AND H-M3 within limits,NOT LICENSED,False
