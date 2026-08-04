@@ -1,0 +1,237 @@
+{
+ "all_structural_gates_pass": true,
+ "gates": [
+  {
+   "gate": "all 8 pilot runs complete (all modes execute)",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R00_NO_FLOOR-p0: integrity gates calculable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R00_NO_FLOOR-p0: wall <= 600s",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R00_NO_FLOOR-p0: peak RSS <= 4096 MB",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R00_NO_FLOOR-p1: integrity gates calculable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R00_NO_FLOOR-p1: wall <= 600s",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R00_NO_FLOOR-p1: peak RSS <= 4096 MB",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R01_LEGACY_FLOOR-p0: integrity gates calculable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R01_LEGACY_FLOOR-p0: wall <= 600s",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R01_LEGACY_FLOOR-p0: peak RSS <= 4096 MB",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R01_LEGACY_FLOOR-p1: integrity gates calculable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R01_LEGACY_FLOOR-p1: wall <= 600s",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R01_LEGACY_FLOOR-p1: peak RSS <= 4096 MB",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R02_REVISED_CONTROLLER-p0: integrity gates calculable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R02_REVISED_CONTROLLER-p0: wall <= 600s",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R02_REVISED_CONTROLLER-p0: peak RSS <= 4096 MB",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R02_REVISED_CONTROLLER-p1: integrity gates calculable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R02_REVISED_CONTROLLER-p1: wall <= 600s",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R02_REVISED_CONTROLLER-p1: peak RSS <= 4096 MB",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R03_REVISED_PLUS_REASSIGNMENT-p0: integrity gates calculable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R03_REVISED_PLUS_REASSIGNMENT-p0: wall <= 600s",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R03_REVISED_PLUS_REASSIGNMENT-p0: peak RSS <= 4096 MB",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R03_REVISED_PLUS_REASSIGNMENT-p1: integrity gates calculable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R03_REVISED_PLUS_REASSIGNMENT-p1: wall <= 600s",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R03_REVISED_PLUS_REASSIGNMENT-p1: peak RSS <= 4096 MB",
+   "pass": true
+  },
+  {
+   "gate": "predictive activation fires in every predictive-mode pilot run",
+   "pass": true
+  },
+  {
+   "gate": "hysteresis prevents duplicate batches (counter > 0, no live state leaks)",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R00_NO_FLOOR-p0: required fields exist",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R00_NO_FLOOR-p1: required fields exist",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R01_LEGACY_FLOOR-p0: required fields exist",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R01_LEGACY_FLOOR-p1: required fields exist",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R02_REVISED_CONTROLLER-p0: required fields exist",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R02_REVISED_CONTROLLER-p1: required fields exist",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R03_REVISED_PLUS_REASSIGNMENT-p0: required fields exist",
+   "pass": true
+  },
+  {
+   "gate": "8r-pilot-R03_REVISED_PLUS_REASSIGNMENT-p1: required fields exist",
+   "pass": true
+  }
+ ],
+ "harness": "run_stage8r.py pilot",
+ "purpose": "STRUCTURE AND FEASIBILITY ONLY.  No effect magnitude here may change 0.78/0.80/0.82, the lookahead, the cooldown or the 25-nonce chunk (frozen before this pilot ran).",
+ "runs": [
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_activation_batch_prevented_count": 0,
+   "peak_rss_mb": 54.79296875,
+   "prediction_decision_count": 0,
+   "rounds_executed": 223,
+   "run_id": "8r-pilot-R00_NO_FLOOR-p0",
+   "run_status": "COMPLETED",
+   "scenario_id": "R00_NO_FLOOR",
+   "wall_clock_seconds": 1.171663761138916
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_activation_batch_prevented_count": 0,
+   "peak_rss_mb": 54.9296875,
+   "prediction_decision_count": 0,
+   "rounds_executed": 223,
+   "run_id": "8r-pilot-R00_NO_FLOOR-p1",
+   "run_status": "COMPLETED",
+   "scenario_id": "R00_NO_FLOOR",
+   "wall_clock_seconds": 1.1883578300476074
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_activation_batch_prevented_count": 0,
+   "peak_rss_mb": 56.21875,
+   "prediction_decision_count": 0,
+   "rounds_executed": 185,
+   "run_id": "8r-pilot-R01_LEGACY_FLOOR-p0",
+   "run_status": "COMPLETED",
+   "scenario_id": "R01_LEGACY_FLOOR",
+   "wall_clock_seconds": 1.4322130680084229
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_activation_batch_prevented_count": 0,
+   "peak_rss_mb": 56.01953125,
+   "prediction_decision_count": 0,
+   "rounds_executed": 195,
+   "run_id": "8r-pilot-R01_LEGACY_FLOOR-p1",
+   "run_status": "COMPLETED",
+   "scenario_id": "R01_LEGACY_FLOOR",
+   "wall_clock_seconds": 1.3886842727661133
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_activation_batch_prevented_count": 1251,
+   "peak_rss_mb": 58.46875,
+   "prediction_decision_count": 148,
+   "rounds_executed": 189,
+   "run_id": "8r-pilot-R02_REVISED_CONTROLLER-p0",
+   "run_status": "COMPLETED",
+   "scenario_id": "R02_REVISED_CONTROLLER",
+   "wall_clock_seconds": 2.06042742729187
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_activation_batch_prevented_count": 1184,
+   "peak_rss_mb": 57.9140625,
+   "prediction_decision_count": 148,
+   "rounds_executed": 199,
+   "run_id": "8r-pilot-R02_REVISED_CONTROLLER-p1",
+   "run_status": "COMPLETED",
+   "scenario_id": "R02_REVISED_CONTROLLER",
+   "wall_clock_seconds": 1.8989911079406738
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_activation_batch_prevented_count": 171,
+   "peak_rss_mb": 60.9140625,
+   "prediction_decision_count": 147,
+   "rounds_executed": 189,
+   "run_id": "8r-pilot-R03_REVISED_PLUS_REASSIGNMENT-p0",
+   "run_status": "COMPLETED",
+   "scenario_id": "R03_REVISED_PLUS_REASSIGNMENT",
+   "wall_clock_seconds": 4.389816999435425
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_activation_batch_prevented_count": 147,
+   "peak_rss_mb": 60.66015625,
+   "prediction_decision_count": 149,
+   "rounds_executed": 199,
+   "run_id": "8r-pilot-R03_REVISED_PLUS_REASSIGNMENT-p1",
+   "run_status": "COMPLETED",
+   "scenario_id": "R03_REVISED_PLUS_REASSIGNMENT",
+   "wall_clock_seconds": 4.217892646789551
+  }
+ ]
+}
