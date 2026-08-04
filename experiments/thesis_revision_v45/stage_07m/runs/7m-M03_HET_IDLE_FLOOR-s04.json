@@ -1,0 +1,113 @@
+{
+ "E_idle_kwh": 0.014953990555555184,
+ "E_power_null_kwh": 0.03583333333333334,
+ "a1_continuous_control_kwh": 0.035833333333333335,
+ "absolute_reduction_kwh": 0.020879342777778157,
+ "adversarial_action_total": 0,
+ "all_integrity_gates_pass": true,
+ "config_sha256": "401115f89dd3ce8e76f5d2c2fe76c54d5d1530b790108f726f940d7b5c2c5a40",
+ "duplicate_nonce_count": 0,
+ "energy_kwh_reported": 0.014953990555555173,
+ "engine_sha256": "7ce5754a1ed461278b55de53002faad1fb82533e7224eb1bb199ce713d4f93d7",
+ "evaluation_ledger_entries": 6255,
+ "evaluation_missing_terminal_time_count": 0,
+ "floor_unattainable_count": 1032,
+ "hypotheses": "H-M3",
+ "integrity_gates": [
+  {
+   "gate": "maximum_energy_identity_residual_j <= 1e-8",
+   "pass": true
+  },
+  {
+   "gate": "maximum_residency_partition_residual_s <= 1e-9",
+   "pass": true
+  },
+  {
+   "gate": "duplicate_nonce_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "post_round_evaluation_record_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "post_round_evaluation_nonce_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "evaluation_missing_terminal_time_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "physical_frontier_rewind_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "work_reward_union_residual == 0",
+   "pass": true
+  },
+  {
+   "gate": "nonterminal_lease_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "nonterminal_reassignment_request_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "adversarial_action_total == 0 (maps nonterminal_adversarial_action_count)",
+   "pass": true
+  },
+  {
+   "gate": "nonterminal_activation_request_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "residency_reconciles",
+   "pass": true
+  },
+  {
+   "gate": "round_terminal_times_strictly_increasing",
+   "pass": true
+  },
+  {
+   "gate": "power_null_equals_A1_residual_kwh <= 1e-9 (zero offline residency)",
+   "pass": true
+  }
+ ],
+ "master_seed": 4888788266148067928,
+ "maximum_energy_identity_residual_j": 0.0,
+ "maximum_residency_partition_residual_s": 0.0,
+ "median_round_duration": 1.1825000000000259,
+ "nonterminal_activation_request_count": 0,
+ "nonterminal_lease_count": 0,
+ "nonterminal_reassignment_request_count": 0,
+ "offline_residency_s": 0.0,
+ "peak_rss_mb": 56.796875,
+ "physical_frontier_rewind_count": 0,
+ "post_round_evaluation_nonce_count": 0,
+ "post_round_evaluation_record_count": 0,
+ "power_null_equals_A1_residual_kwh": 6.938893903907228e-18,
+ "python_version": "3.11.15",
+ "record_sha256": "51abb6c3991250842a8eab58d4a1d08aa87d0a2db810e77630ccecf1e1dd3b33",
+ "relative_reduction": 0.5826793333333438,
+ "reserve_activations_completed": 205,
+ "reserve_activations_seated": 320,
+ "residency_reconciles": true,
+ "role": "CONFIRMATORY",
+ "round_duration_max": 3.000000000000057,
+ "round_duration_min": 1.0025000000000048,
+ "round_terminal_times_strictly_increasing": true,
+ "rounds_accepted": 145,
+ "rounds_executed": 184,
+ "run_id": "7m-M03_HET_IDLE_FLOOR-s04",
+ "run_status": "COMPLETED",
+ "scenario_id": "M03_HET_IDLE_FLOOR",
+ "security_floor_observation_count": 4746,
+ "seed_class": "CONFIRMATORY",
+ "seed_index": 4,
+ "total_duration_below_floor": 274.03750000000036,
+ "wall_clock_seconds": 1.5011911392211914,
+ "work_reward_union_residual": 0.0,
+ "zero_block_indicator": 0
+}

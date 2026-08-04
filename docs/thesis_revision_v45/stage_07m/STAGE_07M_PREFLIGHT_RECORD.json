@@ -1,0 +1,68 @@
+{
+ "all_gates_pass": true,
+ "engine_sha256": "7ce5754a1ed461278b55de53002faad1fb82533e7224eb1bb199ce713d4f93d7",
+ "gates": [
+  {
+   "gate": "exactly 32 planned runs",
+   "pass": true,
+   "value": 32
+  },
+  {
+   "gate": "all 32 run identifiers unique",
+   "pass": true,
+   "value": 32
+  },
+  {
+   "gate": "zero pre-existing output",
+   "pass": true,
+   "value": "none"
+  },
+  {
+   "gate": "free disk >= 2.0 GB",
+   "pass": true,
+   "value": 11.34
+  },
+  {
+   "gate": "projected total wall <= 4 h (sequential-equivalent x safety 1.5)",
+   "pass": true,
+   "value": 111.1
+  },
+  {
+   "gate": "projected peak RSS <= 8.0 GB at 2 workers (x1.25)",
+   "pass": true,
+   "value": 0.332
+  }
+ ],
+ "harness": "run_stage7m.py preflight",
+ "max_workers": 2,
+ "note": "dry-run preflight; every executed seed is an UNASSIGNED pilot seed; no confirmatory seed and no assigned exploratory seed was executed; no energy quantity was computed or recorded",
+ "rss_safety_factor": 1.25,
+ "timing_samples": [
+  {
+   "cost_class": "CORE",
+   "peak_rss_mb": 40.8359375,
+   "pilot_seed_index": 0,
+   "rounds_executed": 193,
+   "scenario_id": "M03_HET_IDLE_FLOOR",
+   "wall_seconds": 1.4120278358459473
+  },
+  {
+   "cost_class": "SCALE_X01",
+   "peak_rss_mb": 101.11328125,
+   "pilot_seed_index": 4,
+   "rounds_executed": 289,
+   "scenario_id": "X01_SCALE_HET_IDLE",
+   "wall_seconds": 7.253106594085693
+  },
+  {
+   "cost_class": "SCALE_X02",
+   "peak_rss_mb": 136.125,
+   "pilot_seed_index": 5,
+   "rounds_executed": 274,
+   "scenario_id": "X02_SCALE_HET_IDLE_FLOOR",
+   "wall_seconds": 24.458107471466064
+  }
+ ],
+ "verdict": "STAGE_7M_PREFLIGHT_PASSED",
+ "wall_safety_factor": 1.5
+}
