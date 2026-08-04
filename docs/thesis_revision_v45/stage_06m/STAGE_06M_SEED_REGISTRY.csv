@@ -1,0 +1,15 @@
+seed_class,seed_index,master_seed_decimal,provenance,used_by
+CONFIRMATORY,0,7266343386191483739,"Stage-6 registry PoCol-v45-stage7-confirmatory-, unchanged",M01;M02;M03
+CONFIRMATORY,1,7327669731288643706,"Stage-6 registry PoCol-v45-stage7-confirmatory-, unchanged",M01;M02;M03
+CONFIRMATORY,2,14021529625252821637,"Stage-6 registry PoCol-v45-stage7-confirmatory-, unchanged",M01;M02;M03
+CONFIRMATORY,3,13015257401067502099,"Stage-6 registry PoCol-v45-stage7-confirmatory-, unchanged",M01;M02;M03
+CONFIRMATORY,4,4888788266148067928,"Stage-6 registry PoCol-v45-stage7-confirmatory-, unchanged",M01;M02;M03
+CONFIRMATORY,5,372686234733934361,"Stage-6 registry PoCol-v45-stage7-confirmatory-, unchanged",M01;M02;M03
+CONFIRMATORY,6,8946841158517248766,"Stage-6 registry PoCol-v45-stage7-confirmatory-, unchanged",M01;M02;M03
+CONFIRMATORY,7,9009703059525875822,"Stage-6 registry PoCol-v45-stage7-confirmatory-, unchanged",M01;M02;M03
+CONFIRMATORY,8,13763262471769672163,"Stage-6 registry PoCol-v45-stage7-confirmatory-, unchanged",M01;M02;M03
+CONFIRMATORY,9,11943450448932995834,"Stage-6 registry PoCol-v45-stage7-confirmatory-, unchanged",M01;M02;M03
+PILOT,0,17024034099160922174,"Stage-6 registry PoCol-v45-stage6-pilot-, unchanged",structural pilot (M01;M02;M03)
+PILOT,1,11768030410170855390,"Stage-6 registry PoCol-v45-stage6-pilot-, unchanged",structural pilot (M01;M02;M03)
+PILOT,2,15937574252844005470,"Stage-6 registry PoCol-v45-stage6-pilot-, unchanged",X01_SCALE_HET_IDLE
+PILOT,3,193675606317841507,"Stage-6 registry PoCol-v45-stage6-pilot-, unchanged",X02_SCALE_HET_IDLE_FLOOR

@@ -1,0 +1,6 @@
+scenario_id,role,num_miners,horizon_T,nonce_domain_size,difficulty,batch_size,base_hash_rate,reserve_fraction,heterogeneous_hash_rates,security_floor_enabled,minimum_active_hash_rate,floor_unattainable_policy,range_leases,reassignment,adversarial_model,incentive_model,dynamic_difficulty,seeds,hypotheses
+M01_HET_IDLE,CONFIRMATORY,20,300.0,1600,1000,25,100.0,0.2,True,False,,,DISABLED,DISABLED,DISABLED,DISABLED,FORBIDDEN,confirmatory[0..9],H-M1;H-M3(control)
+M02_HOM_IDLE,CONFIRMATORY,20,300.0,1600,1000,25,100.0,0.2,False,False,,,DISABLED,DISABLED,DISABLED,DISABLED,FORBIDDEN,confirmatory[0..9],H-M2
+M03_HET_IDLE_FLOOR,CONFIRMATORY,20,300.0,1600,1000,25,100.0,0.2,True,True,3200.0,CONTINUE_DEGRADED,DISABLED,DISABLED,DISABLED,DISABLED,FORBIDDEN,confirmatory[0..9],H-M3
+X01_SCALE_HET_IDLE,EXPLORATORY_SCALE_CHECK,141,300.0,4000,1000,50,100.0,0.2,True,False,,,DISABLED,DISABLED,DISABLED,DISABLED,FORBIDDEN,pilot[2],NONE
+X02_SCALE_HET_IDLE_FLOOR,EXPLORATORY_SCALE_CHECK,141,300.0,4000,1000,50,100.0,0.2,True,True,22480.0,CONTINUE_DEGRADED,DISABLED,DISABLED,DISABLED,DISABLED,FORBIDDEN,pilot[3],NONE

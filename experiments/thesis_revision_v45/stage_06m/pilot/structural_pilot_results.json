@@ -1,0 +1,383 @@
+{
+ "all_structural_gates_pass": true,
+ "harness": "run_structural_pilot_6m.py",
+ "pilot_seed_indexes": [
+  0,
+  1
+ ],
+ "purpose": "STRUCTURE AND RUNTIME ONLY. No energy effect is computed or recorded: neither the per-run energy total nor the power-null counterfactual nor any difference or ratio of them appears in this file, by construction.",
+ "results": [
+  {
+   "all_gates_pass": true,
+   "duplicate_nonce_count": 0,
+   "evaluation_ledger_entries": 6099,
+   "evaluation_missing_terminal_time_count": 0,
+   "gates": [
+    {
+     "gate": "run completes",
+     "pass": true
+    },
+    {
+     "gate": "closes at least 100 rounds",
+     "pass": true
+    },
+    {
+     "gate": "evaluation ledger non-empty",
+     "pass": true
+    },
+    {
+     "gate": "duplicate_nonce_count == 0",
+     "pass": true
+    },
+    {
+     "gate": "post_round_evaluation_record_count == 0",
+     "pass": true
+    },
+    {
+     "gate": "residency reconciliation passes",
+     "pass": true
+    },
+    {
+     "gate": "wall time <= 10 min",
+     "pass": true
+    },
+    {
+     "gate": "peak RSS <= 4 GB",
+     "pass": true
+    }
+   ],
+   "master_seed": 17024034099160922174,
+   "maximum_energy_identity_residual_j": 0.0,
+   "maximum_residency_partition_residual_s": 0.0,
+   "nonterminal_activation_request_count": 0,
+   "peak_rss_mb": 54.171875,
+   "pilot_seed_index": 0,
+   "post_round_evaluation_nonce_count": 0,
+   "post_round_evaluation_record_count": 0,
+   "reserve_activations_completed": 0,
+   "reserve_activations_seated": 0,
+   "residency_reconciles": true,
+   "round_terminal_times_strictly_increasing": true,
+   "rounds_accepted": 189,
+   "rounds_executed": 227,
+   "run_status": "COMPLETED",
+   "scenario_id": "M01_HET_IDLE",
+   "security_floor_observation_count": 0,
+   "wall_clock_seconds": 1.1575343608856201
+  },
+  {
+   "all_gates_pass": true,
+   "duplicate_nonce_count": 0,
+   "evaluation_ledger_entries": 5872,
+   "evaluation_missing_terminal_time_count": 0,
+   "gates": [
+    {
+     "gate": "run completes",
+     "pass": true
+    },
+    {
+     "gate": "closes at least 100 rounds",
+     "pass": true
+    },
+    {
+     "gate": "evaluation ledger non-empty",
+     "pass": true
+    },
+    {
+     "gate": "duplicate_nonce_count == 0",
+     "pass": true
+    },
+    {
+     "gate": "post_round_evaluation_record_count == 0",
+     "pass": true
+    },
+    {
+     "gate": "residency reconciliation passes",
+     "pass": true
+    },
+    {
+     "gate": "wall time <= 10 min",
+     "pass": true
+    },
+    {
+     "gate": "peak RSS <= 4 GB",
+     "pass": true
+    }
+   ],
+   "master_seed": 11768030410170855390,
+   "maximum_energy_identity_residual_j": 0.0,
+   "maximum_residency_partition_residual_s": 0.0,
+   "nonterminal_activation_request_count": 0,
+   "peak_rss_mb": 60.4765625,
+   "pilot_seed_index": 1,
+   "post_round_evaluation_nonce_count": 0,
+   "post_round_evaluation_record_count": 0,
+   "reserve_activations_completed": 0,
+   "reserve_activations_seated": 0,
+   "residency_reconciles": true,
+   "round_terminal_times_strictly_increasing": true,
+   "rounds_accepted": 187,
+   "rounds_executed": 228,
+   "run_status": "COMPLETED",
+   "scenario_id": "M01_HET_IDLE",
+   "security_floor_observation_count": 0,
+   "wall_clock_seconds": 1.2261652946472168
+  },
+  {
+   "all_gates_pass": true,
+   "duplicate_nonce_count": 0,
+   "evaluation_ledger_entries": 4997,
+   "evaluation_missing_terminal_time_count": 0,
+   "gates": [
+    {
+     "gate": "run completes",
+     "pass": true
+    },
+    {
+     "gate": "closes at least 100 rounds",
+     "pass": true
+    },
+    {
+     "gate": "evaluation ledger non-empty",
+     "pass": true
+    },
+    {
+     "gate": "duplicate_nonce_count == 0",
+     "pass": true
+    },
+    {
+     "gate": "post_round_evaluation_record_count == 0",
+     "pass": true
+    },
+    {
+     "gate": "residency reconciliation passes",
+     "pass": true
+    },
+    {
+     "gate": "wall time <= 10 min",
+     "pass": true
+    },
+    {
+     "gate": "peak RSS <= 4 GB",
+     "pass": true
+    }
+   ],
+   "master_seed": 17024034099160922174,
+   "maximum_energy_identity_residual_j": 0.0,
+   "maximum_residency_partition_residual_s": 0.0,
+   "nonterminal_activation_request_count": 0,
+   "peak_rss_mb": 63.1640625,
+   "pilot_seed_index": 0,
+   "post_round_evaluation_nonce_count": 0,
+   "post_round_evaluation_record_count": 0,
+   "reserve_activations_completed": 0,
+   "reserve_activations_seated": 0,
+   "residency_reconciles": true,
+   "round_terminal_times_strictly_increasing": true,
+   "rounds_accepted": 172,
+   "rounds_executed": 204,
+   "run_status": "COMPLETED",
+   "scenario_id": "M02_HOM_IDLE",
+   "security_floor_observation_count": 0,
+   "wall_clock_seconds": 0.994920015335083
+  },
+  {
+   "all_gates_pass": true,
+   "duplicate_nonce_count": 0,
+   "evaluation_ledger_entries": 5236,
+   "evaluation_missing_terminal_time_count": 0,
+   "gates": [
+    {
+     "gate": "run completes",
+     "pass": true
+    },
+    {
+     "gate": "closes at least 100 rounds",
+     "pass": true
+    },
+    {
+     "gate": "evaluation ledger non-empty",
+     "pass": true
+    },
+    {
+     "gate": "duplicate_nonce_count == 0",
+     "pass": true
+    },
+    {
+     "gate": "post_round_evaluation_record_count == 0",
+     "pass": true
+    },
+    {
+     "gate": "residency reconciliation passes",
+     "pass": true
+    },
+    {
+     "gate": "wall time <= 10 min",
+     "pass": true
+    },
+    {
+     "gate": "peak RSS <= 4 GB",
+     "pass": true
+    }
+   ],
+   "master_seed": 11768030410170855390,
+   "maximum_energy_identity_residual_j": 0.0,
+   "maximum_residency_partition_residual_s": 0.0,
+   "nonterminal_activation_request_count": 0,
+   "peak_rss_mb": 63.1640625,
+   "pilot_seed_index": 1,
+   "post_round_evaluation_nonce_count": 0,
+   "post_round_evaluation_record_count": 0,
+   "reserve_activations_completed": 0,
+   "reserve_activations_seated": 0,
+   "residency_reconciles": true,
+   "round_terminal_times_strictly_increasing": true,
+   "rounds_accepted": 164,
+   "rounds_executed": 201,
+   "run_status": "COMPLETED",
+   "scenario_id": "M02_HOM_IDLE",
+   "security_floor_observation_count": 0,
+   "wall_clock_seconds": 1.022258996963501
+  },
+  {
+   "all_gates_pass": true,
+   "duplicate_nonce_count": 0,
+   "evaluation_ledger_entries": 6002,
+   "evaluation_missing_terminal_time_count": 0,
+   "gates": [
+    {
+     "gate": "run completes",
+     "pass": true
+    },
+    {
+     "gate": "closes at least 100 rounds",
+     "pass": true
+    },
+    {
+     "gate": "evaluation ledger non-empty",
+     "pass": true
+    },
+    {
+     "gate": "duplicate_nonce_count == 0",
+     "pass": true
+    },
+    {
+     "gate": "post_round_evaluation_record_count == 0",
+     "pass": true
+    },
+    {
+     "gate": "residency reconciliation passes",
+     "pass": true
+    },
+    {
+     "gate": "wall time <= 10 min",
+     "pass": true
+    },
+    {
+     "gate": "peak RSS <= 4 GB",
+     "pass": true
+    },
+    {
+     "gate": "M03 records security-floor observations",
+     "pass": true
+    },
+    {
+     "gate": "M03 seats at least one reserve activation",
+     "pass": true
+    },
+    {
+     "gate": "no nonterminal activation request remains",
+     "pass": true
+    }
+   ],
+   "master_seed": 17024034099160922174,
+   "maximum_energy_identity_residual_j": 0.0,
+   "maximum_residency_partition_residual_s": 5.684341886080802e-14,
+   "nonterminal_activation_request_count": 0,
+   "peak_rss_mb": 74.0390625,
+   "pilot_seed_index": 0,
+   "post_round_evaluation_nonce_count": 0,
+   "post_round_evaluation_record_count": 0,
+   "reserve_activations_completed": 186,
+   "reserve_activations_seated": 319,
+   "residency_reconciles": true,
+   "round_terminal_times_strictly_increasing": true,
+   "rounds_accepted": 161,
+   "rounds_executed": 193,
+   "run_status": "COMPLETED",
+   "scenario_id": "M03_HET_IDLE_FLOOR",
+   "security_floor_observation_count": 4834,
+   "wall_clock_seconds": 1.6472561359405518
+  },
+  {
+   "all_gates_pass": true,
+   "duplicate_nonce_count": 0,
+   "evaluation_ledger_entries": 6243,
+   "evaluation_missing_terminal_time_count": 0,
+   "gates": [
+    {
+     "gate": "run completes",
+     "pass": true
+    },
+    {
+     "gate": "closes at least 100 rounds",
+     "pass": true
+    },
+    {
+     "gate": "evaluation ledger non-empty",
+     "pass": true
+    },
+    {
+     "gate": "duplicate_nonce_count == 0",
+     "pass": true
+    },
+    {
+     "gate": "post_round_evaluation_record_count == 0",
+     "pass": true
+    },
+    {
+     "gate": "residency reconciliation passes",
+     "pass": true
+    },
+    {
+     "gate": "wall time <= 10 min",
+     "pass": true
+    },
+    {
+     "gate": "peak RSS <= 4 GB",
+     "pass": true
+    },
+    {
+     "gate": "M03 records security-floor observations",
+     "pass": true
+    },
+    {
+     "gate": "M03 seats at least one reserve activation",
+     "pass": true
+    },
+    {
+     "gate": "no nonterminal activation request remains",
+     "pass": true
+    }
+   ],
+   "master_seed": 11768030410170855390,
+   "maximum_energy_identity_residual_j": 0.0,
+   "maximum_residency_partition_residual_s": 0.0,
+   "nonterminal_activation_request_count": 0,
+   "peak_rss_mb": 75.6640625,
+   "pilot_seed_index": 1,
+   "post_round_evaluation_nonce_count": 0,
+   "post_round_evaluation_record_count": 0,
+   "reserve_activations_completed": 190,
+   "reserve_activations_seated": 336,
+   "residency_reconciles": true,
+   "round_terminal_times_strictly_increasing": true,
+   "rounds_accepted": 156,
+   "rounds_executed": 189,
+   "run_status": "COMPLETED",
+   "scenario_id": "M03_HET_IDLE_FLOOR",
+   "security_floor_observation_count": 4803,
+   "wall_clock_seconds": 1.6643354892730713
+  }
+ ]
+}

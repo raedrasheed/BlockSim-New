@@ -1,0 +1,27 @@
+outcome,definition,source,unit,role
+E_idle_kwh,sum over states of P_state * t_state from the run's residency ledger,energy_pair_kwh,kWh,PRIMARY_INPUT
+E_power_null_kwh,P_hash*(t_hash+t_listen+t_reserve+t_wake) + P_offline*t_offline from the SAME residency ledger (within-run counterfactual; no separate simulation),energy_pair_kwh,kWh,PRIMARY_INPUT
+absolute_reduction_kwh,E_power_null_kwh - E_idle_kwh,derived,kWh,PRIMARY
+relative_reduction,(E_power_null_kwh - E_idle_kwh) / E_power_null_kwh,derived,fraction,PRIMARY
+rounds_accepted,accepted block count,results_schema,count,SERVICE
+median_round_duration,median of per-round durations from round_terminal_times,round_durations,s,SERVICE
+rounds_executed,closed round count,run.round_terminal_times,count,SERVICE
+zero_block_indicator,"1 if rounds_accepted == 0 (retained, never excluded)",derived,indicator,SERVICE
+total_duration_below_floor,accepted Stage-3 below-floor duration,results_schema,s,OPERATIONAL
+floor_unattainable_count,accepted Stage-3 unattainable count (reported honestly),results_schema,count,OPERATIONAL
+security_floor_observation_count,floor observations,results_schema,count,OPERATIONAL
+reserve_activations_seated,reserve activations seated,results_schema,count,OPERATIONAL
+reserve_activations_completed,reserve activations completed,results_schema,count,OPERATIONAL
+nonterminal_activation_request_count,activation requests left non-terminal,nonterminal_activation_request_count,count,INTEGRITY
+maximum_energy_identity_residual_j,IP-H2 identity residual (gate <= 1e-8 J),residency_and_energy_identity,J,INTEGRITY
+maximum_residency_partition_residual_s,IP-H2 partition residual (gate <= 1e-9 s),residency_and_energy_identity,s,INTEGRITY
+duplicate_nonce_count,gate == 0,results_schema,count,INTEGRITY
+post_round_evaluation_record_count,gate == 0,post_round_audit,count,INTEGRITY
+post_round_evaluation_nonce_count,gate == 0,post_round_audit,count,INTEGRITY
+evaluation_missing_terminal_time_count,gate == 0,post_round_audit,count,INTEGRITY
+physical_frontier_rewind_count,gate == 0,results_schema,count,INTEGRITY
+work_reward_union_residual,gate == 0,results_schema,count,INTEGRITY
+nonterminal_lease_count,"gate == 0 (leases disabled -> vacuously 0, still checked)",results_schema,count,INTEGRITY
+nonterminal_reassignment_request_count,gate == 0 (reassignment disabled),results_schema,count,INTEGRITY
+adversarial_action_total,"sum of all adversarial action counters; the adversarial model is DISABLED so the gate is == 0 (maps the directive's nonterminal_adversarial_action_count onto the accepted schema, which has no field of that literal name)",results_schema,count,INTEGRITY
+power_null_equals_A1_residual_kwh,|E_power_null_kwh - A1_core| given zero offline residency (gate <= 1e-9 kWh),derived,kWh,INTEGRITY
