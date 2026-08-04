@@ -479,7 +479,9 @@ def test_s5_19_work_reward_is_paid_per_unique_accepted_committed_evaluation():
     assert run.adversarial_stats["work_reward_total"] == pytest.approx(2.0 * union_positions)
     assert run.adversarial_stats["unique_rewarded_nonce_count"] == union_positions
     assert run.adversarial_stats["work_reward_union_residual"] == pytest.approx(0.0)
-    assert all(e.eligibility_reason == "unique_physical_nonce_union" for e in work)
+    # S5B-1: the reason label is now the more precise first-physical-evaluator rule; the union
+    # semantics asserted above are unchanged.
+    assert all(e.eligibility_reason == "first_physical_evaluator_unique_nonce" for e in work)
 
 
 def test_s5_20_the_ledger_is_replay_idempotent_and_reconciles_exactly():
@@ -680,9 +682,9 @@ def test_s5_26_no_stage5_parameter_changes_the_fixed_target_and_the_schema_is_pr
     assert pair["attacked"]["solution_withholding_count"] > 0
     assert "NOT evidence of incentive" in pair["interpretation_scope"]
 
-    # the declared schema is stage5a.1 and every Stage-4C key survives.
+    # the declared schema is stage5b.1 and every Stage-4C key survives.
     res = pair["baseline"]
-    assert res["schema_version"] == RESULT_SCHEMA_VERSION == "stage5a.1"
+    assert res["schema_version"] == RESULT_SCHEMA_VERSION == "stage5b.1"
     for retained in ("algorithm", "mechanism", "success_model", "energy_kwh",
                      "continuous_all_active_control_kwh", "residency_reconciles",
                      "evaluation_ledger_entries", "security_floor_enabled",

@@ -237,6 +237,11 @@ class ProgressClaim:
     detected: bool
     accepted: bool
     accepted_frontier: int
+    # S5B-7: the OVERSTATEMENT (how much the miner claimed beyond what it really searched) is a
+    # DIFFERENT quantity from the actual uncovered suffix (how much of the range is genuinely
+    # unsearched).  Coverage accounting and round closure must use the latter.
+    claim_overstatement: int = 0
+    actual_unsearched_suffix: int = 0
     disposition: Any = None
 
 
@@ -274,9 +279,15 @@ class DelayedWakeAction:
     adversarial_scheduled_wake_time: float
     extra_delay: float
     actual_wake_time: Optional[float] = None
+    # S5B-4: which REAL wake lifecycle this action delayed, and the real request identity /
+    # EventRef of that wake.  Both are part of the action's audit trail, not decoration.
+    wake_lifecycle: str = "UNSPECIFIED"
+    wake_request_identity: Any = None
+    wake_generation: int = 0
     # S5A-6: measured from REAL security-floor observations at round close, never a constant.
     below_floor_overlap: float = 0.0
     another_reserve_activated: bool = False
+    realised_extra_delay: float = 0.0
     incremental_wake_energy_j: float = 0.0
     impact_finalised: bool = False
     penalty_eligible: bool = True
@@ -355,6 +366,13 @@ class SubAssignmentRecord:
     capacity_share: float               # nonces/second budgeted to this subassignment
     entity_capacity_budget: float       # the entity's TOTAL actual physical capacity
     lineage_id: Any = None
+    # S5B-6: the record is the ACCOUNTING UNIT, not decoration.  Every physical evaluation the
+    # parent assignment commits is mapped onto exactly one subassignment per nonce position by
+    # the virtual-subassignment accounting authority, and these fields are what the
+    # subassignment view of the round is derived from.
+    evaluated_nonce_count: int = 0
+    first_evaluation_time: Optional[float] = None
+    last_evaluation_time: Optional[float] = None
     disposition: Any = None
 
 
@@ -404,6 +422,11 @@ class AbandonmentActionRecord:
     def abandoned_nonce_count(self) -> int:
         return max(0, self.abandoned_suffix_end - self.abandoned_suffix_start)
 
+    def actual_unsearched_suffix(self) -> int:
+        """S5B-7: the REAL uncovered suffix left behind — range_end minus the actual frontier.
+        This is what the round's coverage accounting and closure label must use."""
+        return max(0, self.abandoned_suffix_end - self.actual_frontier)
+
 
 @dataclass(frozen=True)
 class IncentiveLedgerEntry:
@@ -450,6 +473,14 @@ def default_adversarial_stats() -> Dict[str, Any]:
         "adversarial_coverage_gap_round_count": 0,
         "delayed_wake_count": 0, "out_of_range_attempt_count": 0,
         "invalid_action_rejection_count": 0,
+        # --- S5B-4 wake-lifecycle coverage (one scalar counter per REAL wake lifecycle) ---
+        "delayed_wake_unattributed_refused": 0,            # MUST remain 0 (every wake is attributed)
+        "delayed_wake_replay_no_effect_count": 0,
+        "delayed_wake_primary_count": 0,
+        "delayed_wake_reserve_activation_count": 0,
+        "delayed_wake_path_a_reassignment_count": 0,
+        "delayed_wake_path_b_reserve_count": 0,
+        "delayed_wake_unspecified_lifecycle_count": 0,     # MUST remain 0 in an executed run
         # --- S5A-1 three-value frontier separation ---
         "accepted_frontier_record_count": 0,
         "accepted_below_actual_count": 0,
@@ -467,12 +498,20 @@ def default_adversarial_stats() -> Dict[str, Any]:
         "subassignment_count": 0,
         "virtual_identity_count": 0,
         "subassignment_capacity_residual": 0.0,            # MUST remain 0.0
+        # --- S5B-6 virtual-subassignment accounting authority ---
+        "subassignment_mapped_evaluation_count": 0,
+        "subassignment_unmapped_evaluation_count": 0,      # MUST remain 0
+        "entity_physical_capacity_residual": 0.0,          # MUST remain 0.0
+        "virtual_identity_physical_capacity_granted": 0.0,  # MUST remain 0.0
         # --- S5A-5 executed abandonment ---
         "abandonment_action_count": 0,
         "abandonment_penalty_without_action_count": 0,     # MUST remain 0
         "abandoned_nonce_count": 0,
         # --- S5A-7 declared-limit enforcement ---
         "actions_rejected_over_limit": 0,
+        # --- S5B-7 coverage separation ---
+        "claim_overstatement_total": 0,
+        "abandonment_coverage_gap_rounds": 0,
         "attack_induced_floor_breach_duration": 0.0,
         "allocation_distortion_max_ratio": 1.0,
         "actual_reported_divergence_count": 0,

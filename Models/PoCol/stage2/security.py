@@ -193,6 +193,11 @@ class ReserveActivationRequest:
     status: str = "SEATED"
     start_event_ref: Any = None
     complete_event_ref: Any = None
+    # S5B-4: the time the activation was SEATED.  ``finalise_delayed_wake_impact`` needs a seating
+    # time to decide whether another reserve activation was seated inside a delayed-wake interval;
+    # before Stage 5B it read a ``seated_time`` attribute that never existed on this record, so
+    # ``another_reserve_activated`` could never become true.
+    seated_at: Optional[float] = None
     started_at: Optional[float] = None
     completed_at: Optional[float] = None
     # S4A-6: RESERVE_DOMAIN_CLAIM (default, Stage-3) vs REASSIGNMENT_WAKE_ONLY (Stage-4 Path B,

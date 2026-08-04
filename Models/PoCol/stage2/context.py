@@ -295,6 +295,8 @@ class RunContext:
         self.adv_reeval_boundary: Dict[str, int] = {}        # slice_id -> actual frontier at revoke
         self.adv_credited_frontier: Dict[str, int] = {}      # slice_id -> work-reward credited end
         self.adv_round_coverage_gap: Dict[Any, int] = {}     # RoundID -> accepted-false-claim gap
+        # S5B-7: rounds whose coverage gap came from an EXECUTED abandonment.
+        self.adv_abandonment_gap_rounds: set = set()
         self.adv_gap_rounds_counted: set = set()             # RoundIDs already counted as gapped
         # ---------------------------------------------- Stage-5A executable corrections
         # S5A-1: the ACCEPTED frontier layer, kept strictly SEPARATE from the accepted Stage-4C
@@ -309,6 +311,10 @@ class RunContext:
         # S5A-4 executable subassignments + declared virtual identities.
         self.subassignments: List[Any] = []
         self.subassignment_by_id: Dict[Any, Any] = {}
+        # S5B-6: (RoundID, ParentAssignmentID) -> ordered SubAssignmentRecords.  The
+        # virtual-subassignment accounting authority maps every physical evaluation through
+        # this index, so a split assignment's accounting DERIVES from the records.
+        self.subassignments_by_parent: Dict[Any, List[Any]] = {}
         self.virtual_identities: List[Any] = []
         self.virtual_identity_by_id: Dict[Any, Any] = {}
         # S5A-5 EXECUTED abandonment actions (an abandonment penalty requires one of these).
@@ -317,8 +323,17 @@ class RunContext:
         # S5A-6 real security-floor breach intervals + per-(round, miner) wake generation.
         self.adv_floor_breach_intervals: List[Any] = []
         self.adv_wake_generation: Dict[Any, int] = {}
+        # S5B-4: (round, template, miner, real wake-request identity) -> DelayedWakeAction id.  An
+        # exact replay of the same wake request resolves here and creates NO second action.
+        self.adv_wake_action_by_request: Dict[Any, Any] = {}
         # S5A-7 declared per-round adversarial action budget.
         self.adv_actions_this_round: Dict[Any, int] = {}
+        # S5B-2: per-round incentive results.  Aggregates are RECOMPUTED from these plus the
+        # immutable ledger, so repeating finalisation is byte-for-byte state-pure.
+        self.round_incentive_result: Dict[Any, Dict[str, Any]] = {}
+        # S5B-5: replay-safe action-budget accounting — an action identity already charged is
+        # never charged twice.
+        self.adv_action_budget_charged: set = set()
         self.availability_snapshot: Dict[Any, float] = {}    # (RoundID, mid) -> residency at start
         self.adversarial_stats: Dict[str, Any] = default_adversarial_stats()
         self.q_adv_state: Dict[str, Any] = default_q_adv_state()

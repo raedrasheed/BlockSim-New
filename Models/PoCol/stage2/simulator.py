@@ -310,6 +310,17 @@ def _handle_prepare_participants(run_ctx: RunContext, payload: Dict[str, Any],
                 hash_rate=cfg.hash_rate_for(len(participants) + j),
                 reserve_status="AVAILABLE", activation_priority=j)
             run_ctx.reserve_records[(rc.RoundID, mid)] = rr
+        # S5B-8: the security floor and reported-rate allocation now COMPOSE instead of the
+        # allocation mode being silently dropped.  The reserve-domain slices keep exactly the
+        # sizes the floor gave them; only the PRIMARY span is re-sized from reported rates, so
+        # the domain stays fully covered and pairwise disjoint under both features at once.
+        if _adv.reported_rate_allocation_enabled(run_ctx) and ranges:
+            _adv.prematerialise_behaviours(run_ctx, rc, sorted(participants),
+                                           lambda i, m: cfg.hash_rate_for(i))
+            p_lo = min(lo for lo, _hi in ranges.values())
+            p_hi = max(hi for _lo, hi in ranges.values())
+            ranges = _adv.allocate_by_reported_rate(run_ctx, rc, p_hi - p_lo,
+                                                    sorted(participants), start=p_lo)
     elif _adv.reported_rate_allocation_enabled(run_ctx):
         # S5A-3: size the ranges from the REPORTED rates.  Profiles must exist BEFORE sizing, so
         # they are pre-materialised here.  The total domain, disjointness and full coverage are
@@ -423,7 +434,9 @@ def _start_wake(run_ctx: RunContext, rc: RoundContext, mid: Any, aid: Any,
     # S5-7: a DELAYED_WAKE actor stays WAKING for an extra deterministic interval.  It is NOT
     # a free energy saving — the miner is charged P_wake over the whole extended interval and
     # contributes zero to H_effective for its entire duration.
-    target += _adv.wake_extra_latency(run_ctx, rc, mid, target, eq.current_event_time)
+    target += _adv.wake_extra_latency(run_ctx, rc, mid, target, eq.current_event_time,
+                                      request_id=("PRIMARY_WAKE", mid, aid, version),
+                                      lifecycle="PRIMARY_WAKE")
     return ScheduleEvent(eq, rc, "WakeCompleteEvent", target, "WAKE_COMPLETE",
                          {"MinerID": mid, "AssignmentID": aid,
                           "assignment_version": version}, ordinary_dispatch_origin(eq))
@@ -605,6 +618,10 @@ def _handle_hash_work(run_ctx: RunContext, payload: Dict[str, Any],
                 prog.last_progress_time = now
                 _rearm_lease_deadlines(run_ctx, rc, prog, lease_ref, now)
             prog_gen = prog.progress_generation
+    # S5B-8/S5B-6: count EVERY committed physical evaluation (range leases on or off) and map it
+    # onto the committing assignment's subassignments.  This is the single accounting authority,
+    # so a zero physical count can never sit beside a non-empty evaluation ledger.
+    _adv.note_physical_evaluation(run_ctx, rc, st, cursor_start, commit_end, now)
     run_ctx.evaluation_ledger.append(EvaluationRecord(
         RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed, MinerID=mid,
         AssignmentID=st.AssignmentID, assignment_version=st.assignment_version,
@@ -650,6 +667,13 @@ def _handle_hash_work(run_ctx: RunContext, payload: Dict[str, Any],
     # uncovered suffix.  Only an executed action can ever attract an abandonment penalty.
     ab = _adv.maybe_abandon(run_ctx, rc, st, now)
     if ab is not None:
+        # S5B-7: an executed abandonment REMOVES active capacity, so the operational security
+        # floor must be re-evaluated at that capacity-change point exactly as any other one —
+        # the floor may now be breached and a reserve may have to be activated.
+        abort = EvaluateSecurityFloor(run_ctx, rc, now, "adversarial_abandonment",
+                                      trigger=("ABANDONMENT", ab.ActionID))
+        if abort is not None:
+            return abort
         term = _maybe_terminate_no_block(run_ctx, rc)
         return term if term is not None else Outcome(
             "hash_work_intentionally_abandoned", MinerID=mid,
@@ -771,6 +795,13 @@ def _maybe_terminate_no_block(run_ctx: RunContext, rc: RoundContext) -> Optional
             run_ctx.lease_stats["uncovered_range_count"] += len(unfinished)
             run_ctx.lease_stats["uncovered_nonce_count"] += sum(p.uncovered()
                                                                 for p in unfinished)
+            # S5B-7: an adversarially created coverage gap (executed abandonment, accepted false
+            # exhaustion, withheld solution) is named EXPLICITLY rather than folded into the
+            # generic unassigned-range disposition — the cause of the uncovered suffix is the
+            # adversarial action, not an unfilled reassignment.
+            if _adv.round_has_coverage_gap(run_ctx, rc):
+                return RoundAbort(run_ctx, rc, reason=ADVERSARIAL_COVERAGE_GAP_NO_BLOCK,
+                                  envelope={})
             if unclaimed_reserve:
                 run_ctx.security_stats["unused_reserve_domain_count"] += 1
                 return RoundAbort(run_ctx, rc, reason=ROUND_CLOSED_WITH_UNUSED_RESERVE_DOMAIN,
@@ -1647,6 +1678,13 @@ def _handle_range_reassignment_start(run_ctx: RunContext, payload: Dict[str, Any
     req.status = "STARTED"
     req.started_at = t
     complete_time = t + run_ctx.config.range_lease.reassignment_wake_latency
+    # S5B-4: the Path-A reassignment wake is a REAL wake lifecycle — consult the delayed-wake
+    # policy here too, keyed on the reassignment request's own identity.
+    complete_time += _adv.wake_extra_latency(
+        run_ctx, rc, mid, complete_time, t,
+        request_id=("PATH_A_REASSIGNMENT", req.RangeReassignmentRequestID,
+                    req.new_lease_generation),
+        lifecycle="PATH_A_REASSIGNMENT_WAKE")
     cpayload = dict(payload)
     cpayload["expected_new_request_status"] = "STARTED"
     cpayload["expected_round_state_version"] = rc.state_version
@@ -1767,7 +1805,7 @@ def _bind_reassigned_lease(run_ctx: RunContext, rc: RoundContext, mid: Any, prog
 
 
 def _bind_reserve_reassignment_if_any(run_ctx: RunContext, rc: RoundContext, mid: Any,
-                                      sl: Any, t: float) -> None:
+                                      sl: Any, t: float, st: Any = None) -> None:
     """S4B-4 Path B: when the woken reserve is a reassignment wake handle, bind the reassigned
     lease on the ORIGINAL RangeProgress and complete the reassignment request."""
     link = run_ctx.reassign_by_suffix_slice.get(_obj_activation_id(sl))
@@ -1779,12 +1817,20 @@ def _bind_reserve_reassignment_if_any(run_ctx: RunContext, rc: RoundContext, mid
     if req is None or prog is None:
         return
     new_lid = req.new_lease_id
+    # S5B-3: Path B consults the SAME accepted-frontier authority as Path A.  An undetected
+    # under-report lowers only the ACCEPTED frontier the reserve reassignee resumes from; the
+    # ORIGINAL RangeProgress stays authoritative and its physical frontier never rewinds.
+    _accepted = _adv.apply_progress_withholding(run_ctx, rc, prog, req.predecessor_lease_id, t)
+    start_nonce = _accepted if _accepted is not None else prog.committed_frontier
+    _adv.note_reassignment_reeval(run_ctx, rc, orig_slice_id, start_nonce,
+                                  run_ctx.adv_actual_frontier.get(orig_slice_id,
+                                                                  prog.committed_frontier))
     lease = RangeLease(
         LeaseID=new_lid, RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed,
         RangeSliceID=orig_slice_id, lease_generation=req.new_lease_generation,
         AssignmentID=f"AR-{rc.RoundID}-{mid}", assignment_version=1, MinerID=mid,
-        assignment_kind=REASSIGNED_RESERVE_WORK, lease_start_nonce=prog.committed_frontier,
-        lease_end_nonce=prog.range_end, committed_cursor=prog.committed_frontier,
+        assignment_kind=REASSIGNED_RESERVE_WORK, lease_start_nonce=start_nonce,
+        lease_end_nonce=prog.range_end, committed_cursor=start_nonce,
         lease_start_time=t, lease_expiry_time=t + run_ctx.config.range_lease.lease_duration,
         lease_status="ACTIVE", predecessor_lease_id=req.predecessor_lease_id,
         reserve_activation_request_id=req.reserve_activation_request_id)
@@ -1796,6 +1842,15 @@ def _bind_reserve_reassignment_if_any(run_ctx: RunContext, rc: RoundContext, mid
     prog.last_progress_time = t
     run_ctx.slice_of_miner[(rc.RoundID, mid)] = orig_slice_id
     run_ctx.search_assignment_kind[(rc.RoundID, mid)] = REASSIGNED_RESERVE_WORK
+    # S5B-3: the reserve reassignee physically resumes from the ACCEPTED frontier (which may be
+    # below the untouched physical frontier), so its search state and assignment record must
+    # describe the range it actually works.
+    if st is not None and start_nonce != st.range_start:
+        st.range_start = start_nonce
+        st.cursor = start_nonce
+        a = rc.assignments.get(st.AssignmentID)
+        if a is not None:
+            a["range"] = (start_nonce, prog.range_end)
     run_ctx.lease_stats["leases_created"] += 1
     # S4A-1/S4A-2: arm the reassigned lease's expiry + progress-timeout deadlines.
     _seat_lease_expiry(run_ctx, rc, lease, prog, t)
@@ -2401,7 +2456,8 @@ def SeatReserveActivationTransaction(run_ctx: RunContext, rc: RoundContext, rr: 
         ReserveActivationRequestID=req_id, RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed,
         SecurityFloorBreachID=obs.ObservationID, DecisionID=decision_id, MinerID=rr.MinerID,
         ReserveSliceID=sid, activation_generation=rr.activation_generation,
-        status="SEATED", start_event_ref=ev, activation_scope=activation_scope,
+        status="SEATED", start_event_ref=ev, seated_at=now,   # S5B-4: explicit seating time
+        activation_scope=activation_scope,
         range_reassignment_request_id=range_reassignment_request_id,
         # S4C-4: explicit, auditable Path-B identity (ReserveSliceID is NOT overloaded as the wake
         # identity) — retained even after the wake handle is later removed.
@@ -2579,6 +2635,20 @@ def _handle_reserve_activation_start(run_ctx: RunContext, payload: Dict[str, Any
             rreq.reassignee_low_residency_at_wake_start = _residency(rm, "LOW_POWER_LISTEN", t)
             rreq.reassignee_offline_residency_at_wake_start = _residency(rm, "OFFLINE", t)
     complete_time = t + run_ctx.config.security_floor.activation_wake_latency
+    # S5B-4: the reserve-activation wake is a REAL wake lifecycle and must consult the delayed-wake
+    # policy exactly like the primary wake.  A Path-B reassignment reserve wake travels through this
+    # same lifecycle with activation_scope REASSIGNMENT_WAKE_ONLY, so it is attributed to its OWN
+    # lifecycle label and carries the linked reassignment-request identity.
+    if req.activation_scope == "REASSIGNMENT_WAKE_ONLY":
+        _wake_lc = "PATH_B_REASSIGNMENT_RESERVE_WAKE"
+        _wake_rid = ("PATH_B_RESERVE_WAKE", req.ReserveActivationRequestID,
+                     req.RangeReassignmentRequestID, req.WakeHandleID)
+    else:
+        _wake_lc = "RESERVE_ACTIVATION_WAKE"
+        _wake_rid = ("RESERVE_ACTIVATION", req.ReserveActivationRequestID,
+                     req.activation_generation)
+    complete_time += _adv.wake_extra_latency(run_ctx, rc, mid, complete_time, t,
+                                             request_id=_wake_rid, lifecycle=_wake_lc)
     cpayload = dict(payload)
     cpayload["expected_reserve_status"] = "WAKING"
     cpayload["expected_round_state_version"] = rc.state_version
@@ -2672,7 +2742,7 @@ def _handle_reserve_activation_complete(run_ctx: RunContext, payload: Dict[str, 
     # (Path B); a normal reserve-domain activation gets its own RangeProgress + ACTIVE lease.
     if cfg.range_lease.enabled:
         if is_wake and sid in run_ctx.reassign_by_suffix_slice:
-            _bind_reserve_reassignment_if_any(run_ctx, rc, mid, sl, t)
+            _bind_reserve_reassignment_if_any(run_ctx, rc, mid, sl, t, st)
         elif not is_wake:
             _create_range_progress_and_lease(run_ctx, rc, mid, aid, version, sid,
                                              r_start, r_end, ACTIVATED_RESERVE_ASSIGNMENT, t)

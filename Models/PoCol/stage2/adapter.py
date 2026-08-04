@@ -27,10 +27,10 @@ from .adversarial import (AdversarialPolicy, IncentivePolicy, ACTOR_CLASSES, BEH
 from . import adversarial_runtime as _adv
 
 # Declared result schema keys (stable contract for BlockSim consumers).
-# stage5a.1 ADDS the Stage-5A executable-correction block on top of stage5.1.  Every Stage-4C
-# and Stage-5 key is retained unchanged, and every Stage-5/5A field is inert (zero, or NA for
-# q_adv) when the Stage-5 model is disabled — which is the default.
-RESULT_SCHEMA_VERSION = "stage5a.1"
+# stage5b.1 ADDS the Stage-5B executable-correction block on top of stage5a.1.  Every Stage-4C,
+# Stage-5 and Stage-5A key is retained unchanged, and every Stage-5/5A/5B field is inert (zero, or
+# NA for q_adv) when the Stage-5 model is disabled — which is the default.
+RESULT_SCHEMA_VERSION = "stage5b.1"
 
 
 def _range_lease_from_blocksim(b: Dict[str, Any]) -> Optional[RangeLeasePolicy]:
@@ -112,6 +112,7 @@ def _adversarial_from_blocksim(b: Dict[str, Any]) -> Optional[AdversarialPolicy]
             "solution_release_policy", "solution_withholding_delay",
             "delayed_wake_extra_latency", "free_rider_work_fraction",
             "reported_hash_rate_multiplier", "false_exhaustion_claim_offset",
+            "false_exhaustion_claims_range_end",
             "progress_withholding_fraction", "assignment_split_count",
             "sybil_identity_count", "coordinator_uses_reported_hash_rate",
             "maximum_actions_per_round", "q_adv_threshold", "out_of_range_nonce_offset",
@@ -140,6 +141,12 @@ def _adversarial_from_blocksim(b: Dict[str, Any]) -> Optional[AdversarialPolicy]
         kw["solution_release_policy"] = srp
     if b.get("coordinator_uses_reported_hash_rate") is not None:
         kw["coordinator_uses_reported_hash_rate"] = bool(b["coordinator_uses_reported_hash_rate"])
+    # S5B-8: ``false_exhaustion_claims_range_end`` was declared and consumed at runtime but never
+    # mapped here, so a configured ``false_exhaustion_claim_offset`` had NO effect through the
+    # BlockSim path (range-end claiming, on by default, always won).  Both now travel together and
+    # a configured offset means the same thing through every entry point.
+    if b.get("false_exhaustion_claims_range_end") is not None:
+        kw["false_exhaustion_claims_range_end"] = bool(b["false_exhaustion_claims_range_end"])
     if b.get("adversarial_entities") is not None:
         ents = []
         for ent in b["adversarial_entities"]:
@@ -403,6 +410,42 @@ def _adversarial_incentive_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str,
         "actions_rejected_over_limit": s["actions_rejected_over_limit"],
         "withheld_alternative_solution_won_count":
             s["withheld_alternative_solution_won_count"],
+        # --- S5B-1 first-physical-evaluator work-reward ownership ---
+        "ownership_reconciliation": _adv.ownership_reconciliation(run_ctx),
+        # --- S5B-4 delayed wake across EVERY real wake lifecycle ---
+        "delayed_wake_primary_count": s["delayed_wake_primary_count"],
+        "delayed_wake_reserve_activation_count": s["delayed_wake_reserve_activation_count"],
+        "delayed_wake_path_a_reassignment_count": s["delayed_wake_path_a_reassignment_count"],
+        "delayed_wake_path_b_reserve_count": s["delayed_wake_path_b_reserve_count"],
+        "delayed_wake_unspecified_lifecycle_count":
+            s["delayed_wake_unspecified_lifecycle_count"],
+        "delayed_wake_unattributed_refused": s["delayed_wake_unattributed_refused"],
+        "delayed_wake_replay_no_effect_count": s["delayed_wake_replay_no_effect_count"],
+        "delayed_wake_realised_extra_delay_total": sum(
+            r.realised_extra_delay for r in run_ctx.delayed_wake_actions.values()),
+        # --- S5B-6 conserved effective capacity under splitting / identities ---
+        "subassignment_accounting": _adv.subassignment_accounting(
+            run_ctx, run_ctx.current_round_context) if run_ctx.current_round_context else
+            {"rows": [], "max_physical_capacity_residual": 0.0},
+        "virtual_identity_accounting": _adv.virtual_identity_accounting(
+            run_ctx, run_ctx.current_round_context) if run_ctx.current_round_context else
+            {"rows": [], "physical_capacity_granted_by_identities": 0.0},
+        "subassignment_mapped_evaluation_count": s["subassignment_mapped_evaluation_count"],
+        "subassignment_unmapped_evaluation_count": s["subassignment_unmapped_evaluation_count"],
+        "entity_physical_capacity_residual": s["entity_physical_capacity_residual"],
+        "virtual_identity_physical_capacity_granted":
+            s["virtual_identity_physical_capacity_granted"],
+        # --- S5B-7 coverage separation (claim overstatement vs REAL unsearched suffix) ---
+        "claim_overstatement_total": s["claim_overstatement_total"],
+        "abandonment_coverage_gap_rounds": s["abandonment_coverage_gap_rounds"],
+        # --- S5B-8 complete adapter + metric semantics ---
+        "false_exhaustion_claims_range_end": bool(
+            cfg.adversarial.false_exhaustion_claims_range_end),
+        "false_exhaustion_claim_offset": int(cfg.adversarial.false_exhaustion_claim_offset),
+        "evaluation_ledger_nonce_total": _evaluation_ledger_nonce_total(run_ctx),
+        "physical_evaluation_ledger_residual": abs(
+            s["physical_evaluation_count"] - _evaluation_ledger_nonce_total(run_ctx))
+            if cfg.adversarial.enabled else 0,
         # --- explicit scope statement carried in the results themselves ---
         "stage5_claim_scope": (
             "Stage 5 MODELS bounded adversarial behaviours and MEASURES outcomes under the "
@@ -414,6 +457,16 @@ def _adversarial_incentive_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str,
             "an operational active-capacity floor only.  Dynamic difficulty remains excluded "
             "and no Stage-5 parameter changes the fixed SHA-256 target or difficulty."),
     }
+
+
+def _evaluation_ledger_nonce_total(run_ctx: Any) -> int:
+    """S5B-8: the nonce positions the EXECUTION ledger actually records.
+
+    ``physical_evaluation_count`` must equal this whenever the Stage-5 model is enabled — the two
+    are counted at the same single authority, with or without range leases.  A zero physical count
+    beside a non-empty evaluation ledger is therefore impossible.
+    """
+    return sum(max(0, r.interval_end - r.interval_start) for r in run_ctx.evaluation_ledger)
 
 
 def _res_delta(start: Any, end: Any) -> float:
