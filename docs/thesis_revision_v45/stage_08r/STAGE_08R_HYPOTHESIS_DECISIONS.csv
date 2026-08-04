@@ -1,0 +1,20 @@
+hypothesis,criterion,value,pass
+H-R1,accepted_blocks R02 > R01 (paired mean diff; Holm-corrected),"+2.667 (CI [1.75, 3.6666666666666665]), p=0.000488",True
+H-R2,total_duration_below_floor R02 < R01,"-0.536 (CI [-0.6027777777777695, -0.4609027777770933]), p=0.000244",True
+H-R2,floor_deficit_area_hash_s R02 < R01,"-3068.972 (CI [-3417.2638888878378, -2659.777777777102]), p=0.000244",
+H-R2,floor_unattainable_count R02 < R01,"-948.083 (CI [-989.75, -905.1666666666666]), p=0.000244",
+H-R3,activation_batches_seated R02 < R01,"-164.333 (CI [-176.33333333333334, -153.33333333333334]), p=0.000244",
+H-R3,activation_requests_seated R02 < R01,"+280.917 (CI [259.6666666666667, 301.5]), p=1.000000",False
+H-R3,incomplete_activation_request_count R02 < R01,"+272.000 (CI [251.08333333333334, 292.6666666666667]), p=1.000000",
+H-R3,activations_per_closed_round R02 < R01,"+1.436 (CI [1.3303947579467792, 1.5336143726391684]), p=1.000000",
+H-R4,mean_accepted_blocks_ratio_R02_over_R00_ge_0.90,0.8519,False
+H-R4,mean_median_round_duration_ratio_R02_over_R00_le_1.10,0.9954,True
+H-R4,mean_total_duration_below_floor_R02_le_15s,274.1217,False
+H-R4,nonterminal_activation_request_count_zero_every_run,0,True
+H-R4,duplicate_nonce_count_zero_every_run,0,True
+H-R4,post_round_evaluation_record_count_zero_every_run,0,True
+H-R4,DECISION,FAIL,False
+H-R5,mean relative low-power-state reduction >= 0.20,"0.5735 (CI [0.5713, 0.5755])",True
+H-R5,95% bootstrap lower bound of mean absolute reduction > 0,0.020471 kWh,True
+H-R5,DECISION,PASS,True
+OVERALL,revised-policy claim licensed (H-R4 AND H-R5 AND integrity),NOT LICENSED,False

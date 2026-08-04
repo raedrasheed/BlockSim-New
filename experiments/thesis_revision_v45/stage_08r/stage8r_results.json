@@ -1,0 +1,487 @@
+{
+ "H_R1": {
+  "ci95_difference": [
+   1.75,
+   3.6666666666666665
+  ],
+  "control_mean": 147.25,
+  "direction_expected": "greater",
+  "direction_observed": "greater",
+  "exact_p_one_sided": 0.00048828125,
+  "field": "rounds_accepted",
+  "paired_mean_difference": 2.6666666666666665,
+  "paired_median_difference": 2.0,
+  "per_seed_difference": [
+   6.0,
+   1.0,
+   4.0,
+   5.0,
+   2.0,
+   4.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   0.0,
+   2.0
+  ],
+  "treatment_mean": 149.91666666666666
+ },
+ "H_R2": {
+  "floor_deficit_area_hash_s": {
+   "ci95_difference": [
+    -3417.2638888878378,
+    -2659.777777777102
+   ],
+   "control_mean": 834234.2499999873,
+   "direction_expected": "less",
+   "direction_observed": "less",
+   "exact_p_one_sided": 0.000244140625,
+   "field": "floor_deficit_area_hash_s",
+   "paired_mean_difference": -3068.972222220104,
+   "paired_median_difference": -3134.166666665522,
+   "per_seed_difference": [
+    -1293.0000000004657,
+    -3477.4999999998836,
+    -2778.6666666673264,
+    -3176.3333333340706,
+    -2871.83333333279,
+    -2836.666666665813,
+    -3204.8333333332557,
+    -3788.3333333295304,
+    -2732.33333332045,
+    -3412.166666666046,
+    -4163.999999994645,
+    -3091.999999996973
+   ],
+   "treatment_mean": 831165.2777777672
+  },
+  "floor_unattainable_count": {
+   "ci95_difference": [
+    -989.75,
+    -905.1666666666666
+   ],
+   "control_mean": 999.8333333333334,
+   "direction_expected": "less",
+   "direction_observed": "less",
+   "exact_p_one_sided": 0.000244140625,
+   "field": "floor_unattainable_count",
+   "paired_mean_difference": -948.0833333333334,
+   "paired_median_difference": -967.0,
+   "per_seed_difference": [
+    -875.0,
+    -1004.0,
+    -974.0,
+    -1076.0,
+    -809.0,
+    -966.0,
+    -1002.0,
+    -1030.0,
+    -913.0,
+    -906.0,
+    -968.0,
+    -854.0
+   ],
+   "treatment_mean": 51.75
+  },
+  "total_duration_below_floor": {
+   "ci95_difference": [
+    -0.6027777777777695,
+    -0.4609027777770933
+   ],
+   "control_mean": 274.65791666666297,
+   "direction_expected": "less",
+   "direction_observed": "less",
+   "exact_p_one_sided": 0.000244140625,
+   "field": "total_duration_below_floor",
+   "paired_mean_difference": -0.5361805555551911,
+   "paired_median_difference": -0.5654166666667777,
+   "per_seed_difference": [
+    -0.225833333333469,
+    -0.6000000000000227,
+    -0.5575000000002319,
+    -0.7383333333335713,
+    -0.47999999999996135,
+    -0.5449999999997317,
+    -0.47750000000013415,
+    -0.5999999999999659,
+    -0.4066666666619767,
+    -0.6299999999999955,
+    -0.599999999999909,
+    -0.5733333333333235
+   ],
+   "treatment_mean": 274.1217361111078
+  }
+ },
+ "H_R3": {
+  "activation_batches_seated": {
+   "ci95_difference": [
+    -176.33333333333334,
+    -153.33333333333334
+   ],
+   "control_mean": 312.75,
+   "direction_expected": "less",
+   "direction_observed": "less",
+   "exact_p_one_sided": 0.000244140625,
+   "field": "activation_batches_seated",
+   "paired_mean_difference": -164.33333333333334,
+   "paired_median_difference": -164.5,
+   "per_seed_difference": [
+    -171.0,
+    -180.0,
+    -156.0,
+    -211.0,
+    -131.0,
+    -158.0,
+    -176.0,
+    -173.0,
+    -155.0,
+    -157.0,
+    -171.0,
+    -133.0
+   ],
+   "treatment_mean": 148.41666666666666
+  },
+  "activation_requests_seated": {
+   "ci95_difference": [
+    259.6666666666667,
+    301.5
+   ],
+   "control_mean": 312.75,
+   "direction_expected": "less",
+   "direction_observed": "greater",
+   "exact_p_one_sided": 1.0,
+   "field": "activation_requests_seated",
+   "paired_mean_difference": 280.9166666666667,
+   "paired_median_difference": 280.0,
+   "per_seed_difference": [
+    246.0,
+    246.0,
+    324.0,
+    209.0,
+    346.0,
+    277.0,
+    259.0,
+    283.0,
+    292.0,
+    296.0,
+    267.0,
+    326.0
+   ],
+   "treatment_mean": 593.6666666666666
+  },
+  "activations_per_closed_round": {
+   "ci95_difference": [
+    1.3303947579467792,
+    1.5336143726391684
+   ],
+   "control_mean": 1.677344889012821,
+   "direction_expected": "less",
+   "direction_observed": "greater",
+   "exact_p_one_sided": 1.0,
+   "field": "activations_per_closed_round",
+   "paired_mean_difference": 1.4356469969067003,
+   "paired_median_difference": 1.4534173322276243,
+   "per_seed_difference": [
+    1.1902564102564102,
+    1.2942005993301604,
+    1.6603129445234706,
+    1.077058442159859,
+    1.6830049261083746,
+    1.4293686780606907,
+    1.3616544721517096,
+    1.5250168825587822,
+    1.4957010582010581,
+    1.4774659863945578,
+    1.4094811388929036,
+    1.6242424242424243
+   ],
+   "treatment_mean": 3.1129918859195214
+  },
+  "incomplete_activation_request_count": {
+   "ci95_difference": [
+    251.08333333333334,
+    292.6666666666667
+   ],
+   "control_mean": 116.33333333333333,
+   "direction_expected": "less",
+   "direction_observed": "greater",
+   "exact_p_one_sided": 1.0,
+   "field": "incomplete_activation_request_count",
+   "paired_mean_difference": 272.0,
+   "paired_median_difference": 269.5,
+   "per_seed_difference": [
+    238.0,
+    237.0,
+    316.0,
+    202.0,
+    336.0,
+    271.0,
+    251.0,
+    268.0,
+    283.0,
+    290.0,
+    254.0,
+    318.0
+   ],
+   "treatment_mean": 388.3333333333333
+  }
+ },
+ "H_R4": {
+  "blocks_ratio_per_seed": [
+   0.8877005347593583,
+   0.815028901734104,
+   0.8771929824561403,
+   0.8057142857142857,
+   0.8762886597938144,
+   0.838150289017341,
+   0.8224852071005917,
+   0.8333333333333334,
+   0.8670520231213873,
+   0.8813559322033898,
+   0.8430232558139535,
+   0.875
+  ],
+  "checks": {
+   "duplicate_nonce_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   },
+   "mean_accepted_blocks_ratio_R02_over_R00_ge_0.90": {
+    "pass": false,
+    "value": 0.8518604504206416
+   },
+   "mean_median_round_duration_ratio_R02_over_R00_le_1.10": {
+    "pass": true,
+    "value": 0.9954476151680871
+   },
+   "mean_total_duration_below_floor_R02_le_15s": {
+    "pass": false,
+    "value": 274.1217361111078
+   },
+   "nonterminal_activation_request_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   },
+   "post_round_evaluation_record_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   }
+  },
+  "decision": "FAIL",
+  "dur_ratio_per_seed": [
+   0.9935344827586141,
+   0.9985754985754999,
+   0.9863013698629848,
+   1.0034916201117048,
+   0.9989142236699312,
+   1.002839900603493,
+   1.0187590187590383,
+   1.0106382978723503,
+   0.9829059829059729,
+   0.9802259887005593,
+   0.9915254237287975,
+   0.9776595744680997
+  ]
+ },
+ "H_R5": {
+  "ci95_absolute_kwh": [
+   0.020470933273534136,
+   0.020622204353781075
+  ],
+  "ci95_relative": [
+   0.5713259479166728,
+   0.5754673761574133
+  ],
+  "criteria": {
+   "ci95_lower_of_mean_abs_gt_0": true,
+   "mean_relative_ge_0.20": true
+  },
+  "decision": "PASS",
+  "mean_absolute_reduction_kwh": 0.020550924761767186,
+  "mean_relative_reduction": 0.5735141793981541
+ },
+ "R03_note": "EXPLORATORY \u2014 descriptive only; excluded from every estimator, Holm family and the verdict",
+ "analysis_seed_root": 5792508466225871155,
+ "bootstrap_resamples": 10000,
+ "harness": "analyze_8r.py",
+ "holm_family_alpha_0.05": {
+  "H-R1(accepted_blocks)": {
+   "holm_threshold": 0.025,
+   "p": 0.00048828125,
+   "reject_null": true
+  },
+  "H-R2(total_duration_below_floor)": {
+   "holm_threshold": 0.016666666666666666,
+   "p": 0.000244140625,
+   "reject_null": true
+  },
+  "H-R3(activation_requests_seated)": {
+   "holm_threshold": 0.05,
+   "p": 1.0,
+   "reject_null": false
+  }
+ },
+ "input_dataset_sha256": "c8eaef51261450fb5e8ce1d904441441a5dbde37de48f50c90f393df3e72a55f",
+ "integrity_all_pass": true,
+ "n_seeds": 12,
+ "revised_policy_claim_licensed": false,
+ "scenario_means_descriptive": {
+  "R00_NO_FLOOR": {
+   "E_idle_kwh": 0.01652224468364173,
+   "E_power_null_kwh": 0.035833333333333335,
+   "accepted_blocks_per_closed_round": 0.7881451325114578,
+   "activated_reserve_energy_kwh": 0.0,
+   "activation_batches_seated": 0.0,
+   "activation_requests_cancelled": 0.0,
+   "activation_requests_completed": 0.0,
+   "activation_requests_seated": 0.0,
+   "activations_per_closed_round": 0.0,
+   "breach_episode_count": 0.0,
+   "controller_suffix_reassignment_count": 0.0,
+   "duplicate_activation_batch_prevented_count": 0.0,
+   "duplicate_nonce_count": 0.0,
+   "duration_pipeline_above_target_while_H_effective_below_target": 0.0,
+   "false_positive_wake_count": 0.0,
+   "floor_deficit_area_hash_s": 0.0,
+   "floor_unattainable_count": 0.0,
+   "incomplete_activation_request_count": 0.0,
+   "late_wake_count": 0.0,
+   "maximum_H_pipeline": 0.0,
+   "mean_absolute_prediction_error": 0.0,
+   "mean_activation_batches_per_episode": 0.0,
+   "mean_round_duration": 1.345608796226707,
+   "median_round_duration": 1.172465277777802,
+   "p95_round_duration": 2.0000000000000284,
+   "post_round_evaluation_record_count": 0.0,
+   "prediction_decision_count": 0.0,
+   "range_idle_energy_difference_kwh": 0.0022215382638893564,
+   "relative_reduction": 0.5389141018518587,
+   "reserve_standby_energy_difference_kwh": 0.00645,
+   "rounds_accepted": 175.83333333333334,
+   "rounds_executed": 223.0,
+   "time_weighted_H_pipeline": 0.0,
+   "total_duration_below_floor": 0.0,
+   "total_low_power_state_difference_kwh": 0.019311088649691607,
+   "unclosed_final_tail_s": 0.0,
+   "wake_energy_difference_kwh": 0.0
+  },
+  "R01_LEGACY_FLOOR": {
+   "E_idle_kwh": 0.0149432465277776,
+   "E_power_null_kwh": 0.035833333333333335,
+   "accepted_blocks_per_closed_round": 0.7864855058334244,
+   "activated_reserve_energy_kwh": 0.0004275795910493833,
+   "activation_batches_seated": 0.0,
+   "activation_requests_cancelled": 115.0,
+   "activation_requests_completed": 196.41666666666666,
+   "activation_requests_seated": 312.75,
+   "activations_per_closed_round": 1.677344889012821,
+   "breach_episode_count": 0.0,
+   "controller_suffix_reassignment_count": 0.0,
+   "duplicate_activation_batch_prevented_count": 0.0,
+   "duplicate_nonce_count": 0.0,
+   "duration_pipeline_above_target_while_H_effective_below_target": 0.0,
+   "false_positive_wake_count": 0.0,
+   "floor_deficit_area_hash_s": 834234.2499999873,
+   "floor_unattainable_count": 999.8333333333334,
+   "incomplete_activation_request_count": 116.33333333333333,
+   "late_wake_count": 0.0,
+   "maximum_H_pipeline": 0.0,
+   "mean_absolute_prediction_error": 0.0,
+   "mean_activation_batches_per_episode": 0.0,
+   "mean_round_duration": 1.6064173252885465,
+   "median_round_duration": 1.1674305555555808,
+   "p95_round_duration": 3.0000000000000284,
+   "post_round_evaluation_record_count": 0.0,
+   "prediction_decision_count": 0.0,
+   "range_idle_energy_difference_kwh": 0.006424682256944786,
+   "relative_reduction": 0.5829791666666716,
+   "reserve_standby_energy_difference_kwh": 0.004901110885416665,
+   "rounds_accepted": 147.25,
+   "rounds_executed": 187.0,
+   "time_weighted_H_pipeline": 0.0,
+   "total_duration_below_floor": 274.65791666666297,
+   "total_low_power_state_difference_kwh": 0.020890086805555735,
+   "unclosed_final_tail_s": 0.0,
+   "wake_energy_difference_kwh": 0.000646704157021606
+  },
+  "R02_REVISED_CONTROLLER": {
+   "E_idle_kwh": 0.015282408571566146,
+   "E_power_null_kwh": 0.035833333333333335,
+   "accepted_blocks_per_closed_round": 0.7846296138429008,
+   "activated_reserve_energy_kwh": 0.0004435822434413421,
+   "activation_batches_seated": 148.41666666666666,
+   "activation_requests_cancelled": 386.6666666666667,
+   "activation_requests_completed": 205.33333333333334,
+   "activation_requests_seated": 593.6666666666666,
+   "activations_per_closed_round": 3.1129918859195214,
+   "breach_episode_count": 339.0833333333333,
+   "controller_suffix_reassignment_count": 0.0,
+   "duplicate_activation_batch_prevented_count": 1211.0833333333333,
+   "duplicate_nonce_count": 0.0,
+   "duration_pipeline_above_target_while_H_effective_below_target": 5.089305555556225,
+   "false_positive_wake_count": 0.0,
+   "floor_deficit_area_hash_s": 831165.2777777672,
+   "floor_unattainable_count": 51.75,
+   "incomplete_activation_request_count": 388.3333333333333,
+   "late_wake_count": 190.25,
+   "maximum_H_pipeline": 5000.0,
+   "mean_absolute_prediction_error": 100.0,
+   "mean_activation_batches_per_episode": 0.4376315936184714,
+   "mean_round_duration": 1.5739405962148314,
+   "median_round_duration": 1.1670833333333546,
+   "p95_round_duration": 2.86250000000004,
+   "post_round_evaluation_record_count": 0.0,
+   "prediction_decision_count": 148.83333333333334,
+   "range_idle_energy_difference_kwh": 0.0060174438888892234,
+   "relative_reduction": 0.5735141793981541,
+   "reserve_standby_energy_difference_kwh": 0.004660582994791682,
+   "rounds_accepted": 149.91666666666666,
+   "rounds_executed": 190.83333333333334,
+   "time_weighted_H_pipeline": 1004.8157175925862,
+   "total_duration_below_floor": 274.1217361111078,
+   "total_low_power_state_difference_kwh": 0.020550924761767186,
+   "unclosed_final_tail_s": 0.0,
+   "wake_energy_difference_kwh": 0.0007723294367283948
+  },
+  "R03_REVISED_PLUS_REASSIGNMENT": {
+   "E_idle_kwh": 0.015116650248842437,
+   "E_power_null_kwh": 0.03583333333333334,
+   "accepted_blocks_per_closed_round": 0.7697090257144327,
+   "activated_reserve_energy_kwh": 0.0004399810763888752,
+   "activation_batches_seated": 147.25,
+   "activation_requests_cancelled": 370.6666666666667,
+   "activation_requests_completed": 216.33333333333334,
+   "activation_requests_seated": 589.0,
+   "activations_per_closed_round": 3.1160215819840094,
+   "breach_episode_count": 336.4166666666667,
+   "controller_suffix_reassignment_count": 1290.1666666666667,
+   "duplicate_activation_batch_prevented_count": 162.25,
+   "duplicate_nonce_count": 0.0,
+   "duration_pipeline_above_target_while_H_effective_below_target": 8.508750000000006,
+   "false_positive_wake_count": 0.0,
+   "floor_deficit_area_hash_s": 679400.0277777679,
+   "floor_unattainable_count": 54.583333333333336,
+   "incomplete_activation_request_count": 372.6666666666667,
+   "late_wake_count": 188.66666666666666,
+   "maximum_H_pipeline": 5000.0,
+   "mean_absolute_prediction_error": 100.0,
+   "mean_activation_batches_per_episode": 0.43765371243005263,
+   "mean_round_duration": 1.5881299686550119,
+   "median_round_duration": 1.1686111111111286,
+   "p95_round_duration": 2.8125000000000284,
+   "post_round_evaluation_record_count": 0.0,
+   "prediction_decision_count": 147.75,
+   "range_idle_energy_difference_kwh": 0.0062730714236113655,
+   "relative_reduction": 0.57813999305556,
+   "reserve_standby_energy_difference_kwh": 0.004623795225694457,
+   "rounds_accepted": 145.83333333333334,
+   "rounds_executed": 189.16666666666666,
+   "time_weighted_H_pipeline": 1096.6456249999958,
+   "total_duration_below_floor": 222.95430555555208,
+   "total_low_power_state_difference_kwh": 0.020716683084490897,
+   "unclosed_final_tail_s": 0.0,
+   "wake_energy_difference_kwh": 0.0007945676697530863
+  }
+ }
+}

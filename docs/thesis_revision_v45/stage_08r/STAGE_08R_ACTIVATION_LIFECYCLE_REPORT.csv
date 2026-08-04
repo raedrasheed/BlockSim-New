@@ -1,0 +1,5 @@
+scenario_id,mean_activation_requests_seated,mean_activation_requests_completed,mean_activation_requests_cancelled,mean_incomplete_requests,completion_ratio,mean_activations_per_closed_round,mean_activation_batches_seated,mean_breach_episode_count,mean_batches_per_episode,mean_duplicate_batch_prevented,mean_prediction_decisions,mean_absolute_prediction_error,mean_false_positive_wakes,mean_late_wakes,mean_suffix_reassignments
+R00_NO_FLOOR,0.0,0.0,0.0,0.0,,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+R01_LEGACY_FLOOR,312.75,196.41666666666666,115.0,116.33333333333333,0.6280309086064482,1.677344889012821,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+R02_REVISED_CONTROLLER,593.6666666666666,205.33333333333334,386.6666666666667,388.3333333333333,0.34587310499719265,3.1129918859195214,148.41666666666666,339.0833333333333,0.4376315936184714,1211.0833333333333,148.83333333333334,100.0,0.0,190.25,0.0
+R03_REVISED_PLUS_REASSIGNMENT,589.0,216.33333333333334,370.6666666666667,372.6666666666667,0.36728919071873234,3.1160215819840094,147.25,336.4166666666667,0.43765371243005263,162.25,147.75,100.0,0.0,188.66666666666666,1290.1666666666667

@@ -1,0 +1,191 @@
+{
+ "E_idle_kwh": 0.016422333055555356,
+ "E_power_null_kwh": 0.035833333333333335,
+ "a1_continuous_control_kwh": 0.035833333333333335,
+ "absolute_reduction_kwh": 0.01941100027777798,
+ "accepted_blocks_per_closed_round": 0.7612612612612613,
+ "activated_reserve_energy_kwh": 0.0,
+ "activation_batch_terminal_count": 0,
+ "activation_batches_seated": 0,
+ "activation_requests_cancelled": 0,
+ "activation_requests_completed": 0,
+ "activation_requests_seated": 0,
+ "activations_per_closed_round": 0.0,
+ "adversarial_action_total": 0,
+ "all_integrity_gates_pass": true,
+ "breach_count": 0,
+ "breach_episode_count": 0,
+ "breach_episode_recovered_count": 0,
+ "cancelled_reserve_hash_rate_total": 0.0,
+ "completed_reserve_hash_rate_total": 0.0,
+ "config_sha256": "0e3959855c22c23731c545923b0cd64a5e1065d80279c2d7d63a105b21e09dd5",
+ "controller_central_target_ratio": 0.8,
+ "controller_mode": "LEGACY_REACTIVE",
+ "controller_mode_configured": "LEGACY_REACTIVE",
+ "controller_reactive_trigger_ratio": 0.78,
+ "controller_recovery_ratio": 0.82,
+ "controller_suffix_reassignment_count": 0,
+ "controller_suffix_reassignment_skipped_in_flight": 0,
+ "duplicate_activation_batch_prevented_count": 0,
+ "duplicate_nonce_count": 0,
+ "duration_pipeline_above_target_while_H_effective_below_target": 0.0,
+ "energy_ACTIVATED_RESERVE_HASHING_kwh": 0.0,
+ "energy_COORDINATION_AND_VERIFICATION_kwh": 0.010571669444444178,
+ "energy_OFFLINE_kwh": 0.0,
+ "energy_PRIMARY_ACTIVE_HASHING_kwh": 0.00486851574074075,
+ "energy_PRIMARY_LOW_POWER_LISTEN_kwh": 0.000265481203703756,
+ "energy_RESERVE_STANDBY_kwh": 0.0007166666666666667,
+ "energy_RESERVE_WAKING_kwh": 0.0,
+ "engine_sha256": "6b7ea6ed33dd5b004979df72b31a2e436bd555a5ec60d2c8ff5abe464d4f19e5",
+ "episode_closed_with_live_activation_count": 0,
+ "episode_round_closed_count": 0,
+ "episode_unattainable_count": 0,
+ "evaluation_ledger_entries": 6028,
+ "evaluation_missing_terminal_time_count": 0,
+ "excess_activation_hash_rate_total": 0.0,
+ "false_positive_wake_count": 0,
+ "floor_deficit_area_hash_s": 0.0,
+ "floor_unattainable_count": 0,
+ "incomplete_activation_request_count": 0,
+ "integrity_gates": [
+  {
+   "gate": "maximum_energy_identity_residual_j <= 1e-8",
+   "pass": true
+  },
+  {
+   "gate": "maximum_residency_partition_residual_s <= 1e-9",
+   "pass": true
+  },
+  {
+   "gate": "duplicate_nonce_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "post_round_evaluation_record_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "post_round_evaluation_nonce_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "evaluation_missing_terminal_time_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "physical_frontier_rewind_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "work_reward_union_residual == 0",
+   "pass": true
+  },
+  {
+   "gate": "nonterminal_lease_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "nonterminal_reassignment_request_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "adversarial_action_total == 0",
+   "pass": true
+  },
+  {
+   "gate": "nonterminal_activation_request_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "nonterminal_episode_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "live_batch_after_close_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "residency_reconciles",
+   "pass": true
+  },
+  {
+   "gate": "round_terminal_times_strictly_increasing",
+   "pass": true
+  }
+ ],
+ "late_wake_count": 0,
+ "live_batch_after_close_count": 0,
+ "master_seed": 15880714972592362664,
+ "max_activation_batches_per_episode": 0,
+ "max_round_duration": 2.000000000000057,
+ "maximum_H_pipeline": 0.0,
+ "maximum_energy_identity_residual_j": 0.0,
+ "maximum_floor_deficit_hash": 0.0,
+ "maximum_hash_rate_deficit": 0.0,
+ "maximum_residency_partition_residual_s": 0.0,
+ "mean_absolute_prediction_error": 0.0,
+ "mean_activation_batches_per_episode": 0.0,
+ "mean_episode_recovery_time_s": 0.0,
+ "mean_round_duration": 1.3513513513513513,
+ "median_round_duration": 1.1550000000000153,
+ "nonterminal_activation_request_count": 0,
+ "nonterminal_episode_count": 0,
+ "nonterminal_lease_count": 0,
+ "nonterminal_reassignment_request_count": 0,
+ "offline_residency_s": 0.0,
+ "p90_round_duration": 2.0000000000000284,
+ "p95_round_duration": 2.0000000000000284,
+ "peak_rss_mb": 54.22265625,
+ "physical_frontier_rewind_count": 0,
+ "post_round_evaluation_nonce_count": 0,
+ "post_round_evaluation_record_count": 0,
+ "power_null_difference_ACTIVATED_RESERVE_HASHING_kwh": 0.0,
+ "power_null_difference_COORDINATION_AND_VERIFICATION_kwh": 0.010571669444444178,
+ "power_null_difference_OFFLINE_kwh": 0.0,
+ "power_null_difference_PRIMARY_ACTIVE_HASHING_kwh": 0.0,
+ "power_null_difference_PRIMARY_LOW_POWER_LISTEN_kwh": 0.002389330833333804,
+ "power_null_difference_RESERVE_STANDBY_kwh": 0.00645,
+ "power_null_difference_RESERVE_WAKING_kwh": 0.0,
+ "prediction_decision_count": 0,
+ "predictive_batches_seated": 0,
+ "python_version": "3.11.15",
+ "range_idle_energy_difference_kwh": 0.002389330833333804,
+ "reactive_batches_seated": 0,
+ "record_sha256": "c2f823c54261a280bd91fb453ba4e348ea0f545713c81a9a7d59b577adbd6fd9",
+ "relative_reduction": 0.541702333333339,
+ "requested_reserve_hash_rate_total": 0.0,
+ "reserve_active_energy_kwh": 0.0,
+ "reserve_standby_energy_difference_kwh": 0.00645,
+ "reserve_standby_energy_kwh": 0.0007166666666666667,
+ "reserve_wake_energy_kwh": 0.0,
+ "residency_ACTIVATED_RESERVE_HASHING_s": 0.0,
+ "residency_COORDINATION_AND_VERIFICATION_s": 3540.279999999911,
+ "residency_OFFLINE_s": 0.0,
+ "residency_PRIMARY_ACTIVE_HASHING_s": 815.1933333333349,
+ "residency_PRIMARY_LOW_POWER_LISTEN_s": 444.5266666667543,
+ "residency_RESERVE_STANDBY_s": 1200.0,
+ "residency_RESERVE_WAKING_s": 0.0,
+ "residency_reconciles": true,
+ "resolved_prediction_count": 0,
+ "role": "CONFIRMATORY_CONTROL",
+ "round_terminal_times_strictly_increasing": true,
+ "rounds_accepted": 169,
+ "rounds_executed": 222,
+ "run_id": "8r-R00_NO_FLOOR-s06",
+ "run_status": "COMPLETED",
+ "scenario_id": "R00_NO_FLOOR",
+ "security_floor_observation_count": 0,
+ "seed_class": "CONFIRMATORY_8R",
+ "seed_index": 6,
+ "time_weighted_H_pipeline": 0.0,
+ "total_duration_below_floor": 0.0,
+ "total_episode_recovery_time_s": 0.0,
+ "total_low_power_state_difference_kwh": 0.019411000277777982,
+ "unclosed_final_tail_s": 0.0,
+ "under_activation_hash_rate_total": 0.0,
+ "unresolved_prediction_count": 0,
+ "wake_energy_difference_kwh": 0.0,
+ "wall_clock_seconds": 1.1555407047271729,
+ "work_reward_union_residual": 0.0,
+ "zero_block_indicator": 0
+}
