@@ -47,6 +47,9 @@ from .leases import (RangeLease, RangeProgress, RangeReassignmentDecision,
 # coalition-resistance, common-prefix, chain-quality or PoW-equivalent security claim.
 from . import adversarial_runtime as _adv
 from .adversarial import ADVERSARIAL_COVERAGE_GAP_NO_BLOCK
+from .refinement import (ActivationBatch, BreachEpisode, PredictionRecord,
+                         TERMINAL_EPISODE_STATUSES, h_pipeline as _r5_h_pipeline,
+                         predict_h_future as _r4_predict_h_future)
 
 _TERMINAL_ROUND = ("ROUND_ACCEPTED", "ROUND_ABORTED")
 
@@ -682,6 +685,13 @@ def _handle_hash_work(run_ctx: RunContext, payload: Dict[str, Any],
     if fe is not None:
         term = _maybe_terminate_no_block(run_ctx, rc)
         return term if term is not None else fe
+    # Stage-8R (R4): predictive wake-ahead check at each committed batch — the forecast
+    # changes as cursors advance even though physical capacity did not.  Inert in
+    # LEGACY_REACTIVE and HYSTERESIS_ONLY modes.
+    if cfg.security_floor.enabled and cfg.controller.is_predictive():
+        abort = _refined_predictive_check(run_ctx, rc, now)
+        if abort is not None:
+            return abort
     _seat_hash_work(run_ctx, rc, st, at_time=now)          # plan the next batch
     return Outcome("hash_work_committed", MinerID=mid, searched=st.searched_count,
                    committed=committed)
@@ -2310,6 +2320,8 @@ def EvaluateSecurityFloor(run_ctx: RunContext, rc: RoundContext, observation_tim
             rc.below_floor_since = None
             rc.below_floor_open_reason = None
             rc.current_breach_id = None
+        if cfg.controller.is_refined():
+            _refined_on_not_breached(run_ctx, rc, observation_time, h_eff)
         return None
 
     if round_terminal:
@@ -2320,6 +2332,12 @@ def EvaluateSecurityFloor(run_ctx: RunContext, rc: RoundContext, observation_tim
         # measure-only observation (round start): defer every activation/abort decision to a
         # capacity-change point where simulation time has advanced.
         return None
+
+    if cfg.controller.is_refined():
+        # Stage-8R: the revised controller replaces ONLY the decision tail — the observation,
+        # measurement and below-floor interval semantics above are IDENTICAL in every mode.
+        return _refined_floor_decide(run_ctx, rc, obs, observation_time, h_eff, active_count,
+                                     inflight, inflight_count, pending_rate, pending_count)
 
     # remaining need beyond in-flight reserve AND pending WAKING-primary capacity
     # (idempotence: imminent wakes/activations already cover part of the deficit).
@@ -2387,6 +2405,450 @@ def _apply_floor_unattainable(run_ctx: RunContext, rc: RoundContext,
     if run_ctx.config.floor_unattainable_policy == "ABORT_ROUND":
         return RoundAbort(run_ctx, rc, reason="security_floor_unattainable", envelope={})
     return None   # CONTINUE_DEGRADED: keep the round executable; duration keeps accumulating.
+
+
+# ============================================================ Stage-8R revised controller
+# The revised idle and reserve-control policy within PoCol.  EVERY function below is inert
+# under the default LEGACY_REACTIVE mode: nothing here runs, no registry fills, no counter
+# advances, so the accepted Stage-8M controller is reproduced exactly (R-TEST-01).
+def _current_episode(run_ctx: RunContext, rc: RoundContext) -> Any:
+    eid = rc.current_episode_id
+    if eid is None:
+        return None
+    ep = run_ctx.breach_episodes.get(eid)
+    if ep is None or ep.status in TERMINAL_EPISODE_STATUSES:
+        return None
+    return ep
+
+
+def _live_batch(run_ctx: RunContext, ep: Any) -> Any:
+    """The episode's live activation batch, self-healing on missed terminalisation."""
+    bid = ep.live_activation_batch_id
+    if bid is None:
+        return None
+    batch = run_ctx.activation_batches.get(bid)
+    if batch is None:
+        ep.live_activation_batch_id = None
+        return None
+    if batch.status != "TERMINAL":
+        reqs = [run_ctx.activation_requests.get(r) for r in batch.request_ids]
+        if all(r is not None and r.status in TERMINAL_REQUEST_STATUSES for r in reqs):
+            batch.status = "TERMINAL"
+    if batch.status == "TERMINAL":
+        ep.live_activation_batch_id = None
+        return None
+    return batch
+
+
+def _open_episode(run_ctx: RunContext, rc: RoundContext, now: float, h_eff: float,
+                  reason: str) -> Any:
+    """R1: open ONE breach episode with immutable identity.  A reactive open in a
+    predictive mode means the prediction missed — counted as a late wake."""
+    ctrl = run_ctx.config.controller
+    pol = run_ctx.config.security_floor
+    run_ctx.episode_seq += 1
+    gen = run_ctx.episodes_per_round.get(rc.RoundID, 0) + 1
+    run_ctx.episodes_per_round[rc.RoundID] = gen
+    ep = BreachEpisode(
+        BreachEpisodeID=(run_ctx.RunID, "EPISODE", run_ctx.episode_seq),
+        RoundID=rc.RoundID, TemplateID=rc.TemplateID_committed, episode_generation=gen,
+        opened_at=now, opened_h_effective=h_eff,
+        target_hash_rate=pol.minimum_active_hash_rate,
+        reactive_trigger_hash_rate=ctrl.trigger_rate(pol.minimum_active_hash_rate),
+        recovery_hash_rate=ctrl.recovery_rate(pol.minimum_active_hash_rate),
+        opened_reason=reason)
+    run_ctx.breach_episodes[ep.BreachEpisodeID] = ep
+    rc.current_episode_id = ep.BreachEpisodeID
+    run_ctx.controller_stats["breach_episode_count"] += 1
+    if reason == "REACTIVE" and ctrl.is_predictive():
+        run_ctx.controller_stats["late_wake_count"] += 1
+    return ep
+
+
+def _update_pipeline_stats(run_ctx: RunContext, rc: RoundContext, now: float):
+    """R5: piecewise-constant tracking of the H_pipeline REPORTING quantity.  H_pipeline is
+    a scheduling forecast — never substituted for H_effective in any integrity check."""
+    h_eff, _n, _ids = compute_h_effective(run_ctx, rc)
+    pipe = _r5_h_pipeline(run_ctx, rc, h_eff)
+    cs = run_ctx.controller_stats
+    target = run_ctx.config.security_floor.minimum_active_hash_rate
+    last_t = run_ctx._pipe_last_time
+    if last_t is not None and now > last_t:
+        dt = now - last_t
+        cs["H_pipeline_time_integral"] += run_ctx._pipe_last_value * dt
+        if run_ctx._pipe_last_value >= target and run_ctx._pipe_last_h_effective < target:
+            cs["duration_pipeline_above_target_while_H_effective_below_target"] += dt
+    run_ctx._pipe_last_time = now
+    run_ctx._pipe_last_value = pipe
+    run_ctx._pipe_last_h_effective = h_eff
+    if pipe > cs["maximum_H_pipeline"]:
+        cs["maximum_H_pipeline"] = pipe
+    return h_eff, pipe
+
+
+def _resolve_due_predictions(run_ctx: RunContext, rc: RoundContext, now: float) -> None:
+    """R4: fill each pending prediction with the ACTUAL H_effective at (or first touch
+    after) its horizon.  A prediction of a closed round stays unresolved and is reported."""
+    for pr in run_ctx.prediction_records:
+        if pr.resolution_time is not None or pr.RoundID != rc.RoundID:
+            continue
+        if now >= pr.decision_time + pr.lookahead:
+            h_eff, _n, _ids = compute_h_effective(run_ctx, rc)
+            pr.resolution_time = now
+            pr.actual_h_effective_at_horizon = h_eff
+            pr.prediction_error = h_eff - pr.predicted_h_future
+            target = run_ctx.config.security_floor.minimum_active_hash_rate
+            pr.false_positive_wake = bool(pr.predicted_h_future < target <= h_eff)
+            cs = run_ctx.controller_stats
+            cs["resolved_prediction_count"] += 1
+            cs["sum_absolute_prediction_error"] += abs(pr.prediction_error)
+            if pr.false_positive_wake and pr.seated_batch_id is not None:
+                cs["false_positive_wake_count"] += 1
+
+
+def _refined_on_not_breached(run_ctx: RunContext, rc: RoundContext, now: float,
+                             h_eff: float) -> None:
+    """R2: recovery-side episode transitions.  RECOVERED requires the recovery threshold
+    (0.82 x H0) AND no live activation batch still in flight; merely crossing the central
+    0.80 target moves the episode to RECOVERY_IN_PROGRESS, never closes it."""
+    ep = _current_episode(run_ctx, rc)
+    if ep is None:
+        return
+    if h_eff >= ep.recovery_hash_rate and _live_batch(run_ctx, ep) is None:
+        ep.status = "RECOVERED"
+        ep.recovered_at = now
+        ep.closed_at = now
+        ep.disposition = "recovered_above_recovery_threshold"
+        rc.current_episode_id = None
+        cs = run_ctx.controller_stats
+        cs["breach_episode_recovered_count"] += 1
+        cs["total_episode_recovery_time_s"] += now - ep.opened_at
+    else:
+        ep.status = "RECOVERY_IN_PROGRESS"
+
+
+def _refined_floor_decide(run_ctx: RunContext, rc: RoundContext, obs: Any, now: float,
+                          h_eff: float, active_count: int, inflight: float,
+                          inflight_count: int, pending_rate: float,
+                          pending_count: int) -> Optional[Outcome]:
+    """The refined REACTIVE decision at a breached, nonterminal, decide=True observation.
+
+    Hysteresis (R2): a reactive episode opens only below 0.78 x H0 — the [0.78, 0.80)
+    deadband is measured as breached (the measurement semantics are unchanged) but seats
+    nothing.  One live activation batch per episode (R1/R3); deterministic cooldown (R3)."""
+    ctrl = run_ctx.config.controller
+    pol = run_ctx.config.security_floor
+    min_rate = pol.minimum_active_hash_rate
+    trigger = ctrl.trigger_rate(min_rate)
+    _update_pipeline_stats(run_ctx, rc, now)
+    _resolve_due_predictions(run_ctx, rc, now)
+    covered = h_eff + inflight + pending_rate
+    deficit = max(0.0, min_rate - covered)
+    ep = _current_episode(run_ctx, rc)
+    if ep is None:
+        if h_eff >= trigger or rc.controller_reserves_exhausted:
+            _record_decision(run_ctx, obs, [], [], covered, deficit,
+                             "NO_ACTIVATION_REQUIRED")
+            return None
+        ep = _open_episode(run_ctx, rc, now, h_eff, "REACTIVE")
+    live = _live_batch(run_ctx, ep)
+    if covered + pol.floor_tolerance >= min_rate:
+        # a sufficient live batch (plus pending capacity) already covers the target.
+        if live is not None:
+            run_ctx.controller_stats["duplicate_activation_batch_prevented_count"] += 1
+        _record_decision(run_ctx, obs, [], [], covered, 0.0, "NO_ACTIVATION_REQUIRED")
+        return None
+    if live is not None:
+        # R1/R3: at most ONE live activation batch per breach episode — never a second.
+        run_ctx.controller_stats["duplicate_activation_batch_prevented_count"] += 1
+        _record_decision(run_ctx, obs, [], [], covered, deficit, "NO_ACTIVATION_REQUIRED")
+        return None
+    if now < ep.cooldown_until and h_eff >= trigger:
+        # R3 cooldown: no replacement batch for ordinary small oscillations; a new batch is
+        # allowed only when the terminal batch left capacity below the frozen trigger.
+        _record_decision(run_ctx, obs, [], [], covered, deficit, "NO_ACTIVATION_REQUIRED")
+        return None
+    return _seat_refined_batch(run_ctx, rc, ep, obs, now, covered, active_count,
+                               inflight_count, pending_count, origin="REACTIVE",
+                               seat_h_effective=h_eff)
+
+
+def _seat_refined_batch(run_ctx: RunContext, rc: RoundContext, ep: Any, obs: Any,
+                        now: float, covered: float, active_count: int, inflight_count: int,
+                        pending_count: int, origin: str,
+                        seat_h_effective: float = 0.0) -> Optional[Outcome]:
+    """R3: seat ONE activation batch sized to the capacity still missing from the target,
+    using the accepted minimum-cardinality selection and the accepted all-or-none seating
+    transaction.  Stale/cancelled/terminal requests never count toward sufficiency."""
+    ctrl = run_ctx.config.controller
+    pol = run_ctx.config.security_floor
+    min_rate = pol.minimum_active_hash_rate
+    min_count = pol.minimum_active_miner_count
+    need = min_rate - covered
+    need_count = 0 if min_count is None else max(
+        0, min_count - (active_count + inflight_count + pending_count))
+    seated_so_far = run_ctx.activations_per_round.get(rc.RoundID, 0)
+    remaining = pol.maximum_activations_per_round - seated_so_far
+    eligible = sorted([rr for rr in _reserve_records_for(run_ctx, rc)
+                       if rr.reserve_status == "AVAILABLE"],
+                      key=lambda r: (r.activation_priority, str(r.MinerID)))
+    unclaimed = [sl for sl in run_ctx.reserve_slices.get(rc.RoundID, [])
+                 if sl.status == "UNCLAIMED"]
+    cap = min(len(eligible), len(unclaimed), max(0, remaining))
+    cs = run_ctx.controller_stats
+    if cap <= 0:
+        # the reserve pool of this round is spent: the episode terminalises UNATTAINABLE
+        # and no further episode opens this round (the pool cannot refill inside a round).
+        rc.controller_reserves_exhausted = True
+        ep.status = "UNATTAINABLE"
+        ep.closed_at = now
+        ep.disposition = "no_eligible_reserve_or_unclaimed_slice"
+        rc.current_episode_id = None
+        cs["episode_unattainable_count"] += 1
+        _record_decision(run_ctx, obs, [], [], covered, max(0.0, min_rate - covered),
+                         "FLOOR_UNATTAINABLE")
+        return _apply_floor_unattainable(run_ctx, rc, now)
+    top = sorted((r.hash_rate for r in eligible), reverse=True)[:cap]
+    max_projected = covered + sum(top)
+    attainable = (max_projected + pol.floor_tolerance >= min_rate) \
+        and (min_count is None
+             or (active_count + inflight_count + pending_count + cap) >= min_count)
+    if attainable:
+        selected = select_reserves_to_cover(eligible, need, cap, need_count)
+        policy = "ACTIVATION_SEATED"
+    else:
+        # CONTINUE_DEGRADED partial restoration: one bounded best-effort batch.
+        selected = eligible[:cap]
+        policy = "PARTIAL_RESTORATION"
+        run_ctx.security_stats["partial_restoration_count"] += 1
+    slices = unclaimed[:len(selected)]
+    projected = covered + sum(r.hash_rate for r in selected)
+    dec = _record_decision(run_ctx, obs, [r.MinerID for r in selected],
+                           [s.RangeSliceID for s in slices], projected,
+                           max(0.0, min_rate - projected), policy)
+    run_ctx.batch_seq += 1
+    batch = ActivationBatch(
+        BatchID=(run_ctx.RunID, "BATCH", run_ctx.batch_seq),
+        BreachEpisodeID=ep.BreachEpisodeID, RoundID=rc.RoundID, seated_at=now,
+        status="LIVE", policy_result=policy, origin=origin,
+        excess_activation_hash_rate=max(0.0, projected - min_rate),
+        under_activation_hash_rate=max(0.0, min_rate - projected),
+        seat_h_effective=seat_h_effective, seat_covered_capacity=covered)
+    for rr, sl in zip(selected, slices):
+        r = SeatReserveActivationTransaction(run_ctx, rc, rr, sl, obs, dec.DecisionID)
+        if isinstance(r, Outcome):                     # seat failed and rolled back
+            continue
+        batch.request_ids.append(r.ReserveActivationRequestID)
+        batch.miner_ids.append(rr.MinerID)
+        batch.requested_hash_rate += float(rr.hash_rate)
+        run_ctx.batch_by_request[r.ReserveActivationRequestID] = batch.BatchID
+    if not batch.request_ids:
+        return None                                    # nothing seated -> no batch exists
+    run_ctx.activation_batches[batch.BatchID] = batch
+    ep.live_activation_batch_id = batch.BatchID
+    ep.activation_batch_ids.append(batch.BatchID)
+    ep.cooldown_until = now + ctrl.cooldown(pol.activation_wake_latency)
+    if ep.status == "OPEN":
+        ep.status = "RECOVERY_IN_PROGRESS"
+    cs["activation_batches_seated"] += 1
+    cs["predictive_batches_seated" if origin == "PREDICTIVE"
+       else "reactive_batches_seated"] += 1
+    cs["requested_reserve_hash_rate_total"] += batch.requested_hash_rate
+    cs["excess_activation_hash_rate_total"] += batch.excess_activation_hash_rate
+    cs["under_activation_hash_rate_total"] += batch.under_activation_hash_rate
+    if len(ep.activation_batch_ids) > cs["max_batches_per_episode"]:
+        cs["max_batches_per_episode"] = len(ep.activation_batch_ids)
+    return None
+
+
+def _record_predictive_observation(run_ctx: RunContext, rc: RoundContext, now: float,
+                                   trigger: Any) -> Any:
+    """One authoritative floor observation for a predictive seat decision, with the SAME
+    measurement semantics as EvaluateSecurityFloor (interval bookkeeping included)."""
+    pol = run_ctx.config.security_floor
+    key = _observation_key(run_ctx, rc, trigger)
+    h_eff, active_count, _ = compute_h_effective(run_ctx, rc)
+    min_rate = pol.minimum_active_hash_rate
+    min_count = pol.minimum_active_miner_count
+    hash_deficit = max(0.0, min_rate - h_eff)
+    count_deficit = 0 if min_count is None else max(0, min_count - active_count)
+    breached = (h_eff + pol.floor_tolerance < min_rate) \
+        or (min_count is not None and active_count < min_count)
+    run_ctx.observation_seq += 1
+    obs = SecurityFloorObservation(
+        ObservationID=(run_ctx.RunID, "OBS", run_ctx.observation_seq), RoundID=rc.RoundID,
+        TemplateID=rc.TemplateID_committed, observation_time=now,
+        observation_reason="predictive_wake_ahead", effective_active_hash_rate=h_eff,
+        active_miner_count=active_count, minimum_required_hash_rate=min_rate,
+        minimum_required_miner_count=min_count, hash_rate_deficit=hash_deficit,
+        miner_count_deficit=count_deficit, breached=breached, observation_key=key)
+    run_ctx.observation_by_key[key] = obs
+    run_ctx.security_observations.append(obs)
+    run_ctx.security_stats["observation_count"] += 1
+    if breached:
+        run_ctx.security_stats["breach_observation_count"] += 1
+        if hash_deficit > run_ctx.security_stats["max_hash_rate_deficit"]:
+            run_ctx.security_stats["max_hash_rate_deficit"] = hash_deficit
+        if rc.below_floor_since is None:
+            rc.below_floor_since = now
+            rc.below_floor_open_reason = "predictive_wake_ahead"
+            rc.current_breach_id = obs.ObservationID
+            run_ctx.security_stats["distinct_breach_count"] += 1
+    elif rc.below_floor_since is not None:
+        dur = now - rc.below_floor_since
+        _adv.record_floor_breach_interval(run_ctx, rc.below_floor_since, now)
+        run_ctx.security_stats["total_duration_below_floor"] += dur
+        if rc.below_floor_open_reason == "participants_prepared":
+            run_ctx.security_stats["early_wake_below_floor_duration"] += dur
+        rc.below_floor_since = None
+        rc.below_floor_open_reason = None
+        rc.current_breach_id = None
+    return obs
+
+
+def _refined_predictive_check(run_ctx: RunContext, rc: RoundContext,
+                              now: float) -> Optional[Outcome]:
+    """R4 predictive wake-ahead, from OBSERVABLE progress only (never a future solution,
+    round-end time or random draw).  Seats a predictive batch when the forecast capacity at
+    the lookahead horizon falls below the central target and no sufficient live batch
+    exists.  A prediction is an engineering estimate, not a security proof."""
+    cfg = run_ctx.config
+    ctrl = cfg.controller
+    pol = cfg.security_floor
+    if rc is None or rc.round_state in _TERMINAL_ROUND:
+        return None
+    h_eff, _pipe = _update_pipeline_stats(run_ctx, rc, now)
+    _resolve_due_predictions(run_ctx, rc, now)
+    min_rate = pol.minimum_active_hash_rate
+    look = ctrl.lookahead(pol.activation_wake_latency)
+    h_future, det = _r4_predict_h_future(run_ctx, rc, now, look, min_rate)
+    out: Optional[Outcome] = None
+    if h_future + pol.floor_tolerance < min_rate and not rc.controller_reserves_exhausted:
+        ep = _current_episode(run_ctx, rc)
+        live = _live_batch(run_ctx, ep) if ep is not None else None
+        in_cooldown = (ep is not None and now < ep.cooldown_until
+                       and h_future >= ctrl.trigger_rate(min_rate))
+        if live is None and not in_cooldown:
+            if ep is None:
+                ep = _open_episode(run_ctx, rc, now, h_eff, "PREDICTIVE")
+            run_ctx.prediction_seq += 1
+            pid = (run_ctx.RunID, "PRED", run_ctx.prediction_seq)
+            obs = _record_predictive_observation(run_ctx, rc, now, ("PREDICTIVE", pid))
+            pr = PredictionRecord(
+                PredictionID=pid, RoundID=rc.RoundID, decision_time=now, lookahead=look,
+                current_h_effective=h_eff, predicted_h_future=h_future,
+                predicted_expiring_miners=list(det["expiring"]),
+                live_incoming_capacity=det["live_incoming"],
+                predicted_deficit=max(0.0, min_rate - h_future))
+            run_ctx.prediction_records.append(pr)
+            run_ctx.controller_stats["prediction_decision_count"] += 1
+            _, active_count, _ids = compute_h_effective(run_ctx, rc)
+            out = _seat_refined_batch(run_ctx, rc, ep, obs, now, h_future, active_count,
+                                      0, 0, origin="PREDICTIVE",
+                                      seat_h_effective=h_eff)
+            pr.seated_batch_id = ep.live_activation_batch_id
+            if pr.seated_batch_id is not None:
+                pr.selected_reserve_set = list(
+                    run_ctx.activation_batches[pr.seated_batch_id].miner_ids)
+    # R6 (EXPLORATORY arm only): bounded suffix reassignment fallback.
+    if out is None and ctrl.mode == "HYSTERESIS_PREDICTIVE_REASSIGNMENT":
+        _maybe_controller_suffix_reassignment(run_ctx, rc, now, h_future)
+    return out
+
+
+def _maybe_controller_suffix_reassignment(run_ctx: RunContext, rc: RoundContext,
+                                          now: float, h_future: float) -> None:
+    """R6 (EXPLORATORY only): bounded suffix reassignment through the ACCEPTED Stage-4
+    mechanism.  The controller seats a voluntary MinerCancelledEvent for a donor whose
+    remaining unsearched suffix is at most the fixed 25-nonce chunk; the accepted lease
+    machinery then terminalises the donor's lease and reassigns the EXACT remaining suffix
+    (no overlap, no physical-frontier rewind, no duplicate honest work — the accepted
+    Stage-4 gates enforce all three).  One immutable request per suffix lineage."""
+    cfg = run_ctx.config
+    ctrl = cfg.controller
+    pol = cfg.security_floor
+    if not cfg.range_lease.enabled:
+        return
+    if not any(b.RoundID == rc.RoundID for b in run_ctx.activation_batches.values()):
+        return              # requires a live or completed controller reserve batch
+    if h_future + pol.floor_tolerance >= pol.minimum_active_hash_rate:
+        return              # predicted capacity is not below the target
+    if _reassignment_in_flight(run_ctx, rc):
+        run_ctx.controller_stats["controller_suffix_reassignment_skipped_in_flight"] += 1
+        return
+    chunk = ctrl.reassignment_chunk_nonces
+    best = None
+    for mid, st in rc.search_states.items():
+        if st.completed:
+            continue
+        m = run_ctx.miners.get(mid)
+        if m is None or m.state != "ACTIVE_HASHING":
+            continue
+        slice_id = run_ctx.slice_of_miner.get((rc.RoundID, mid))
+        if slice_id is None or slice_id in run_ctx.controller_reassigned_slices:
+            continue        # one immutable reassignment request per suffix lineage
+        remaining = st.range_end - st.cursor
+        if remaining <= 0 or remaining > chunk:
+            continue        # fixed chunk bound: 25 nonces or the smaller remaining suffix
+        t_rem = remaining / st.hash_rate if st.hash_rate > 0 else 0.0
+        if best is None or t_rem > best[0]:
+            best = (t_rem, str(mid), mid, slice_id)
+    if best is None:
+        return
+    _t, _k, mid, slice_id = best
+    run_ctx.controller_reassigned_slices.add(slice_id)
+    run_ctx.controller_stats["controller_suffix_reassignment_count"] += 1
+    eq = run_ctx.event_queue
+    ScheduleEvent(eq, rc, "MinerCancelledEvent", now, "MINER_CANCELLED",
+                  {"MinerID": mid, "RoundID_at_seat": rc.RoundID,
+                   "TemplateID_at_seat": rc.TemplateID_committed,
+                   "cancellation_reason": "controller_bounded_suffix_reassignment"},
+                  ordinary_dispatch_origin(eq))
+
+
+def _refined_note_request_terminal(run_ctx: RunContext, rc: RoundContext, req: Any,
+                                   rate: float, completed: bool) -> None:
+    """Batch bookkeeping when an activation request reaches a terminal status."""
+    bid = run_ctx.batch_by_request.get(req.ReserveActivationRequestID)
+    if bid is None:
+        return
+    batch = run_ctx.activation_batches.get(bid)
+    if batch is None:
+        return
+    cs = run_ctx.controller_stats
+    if completed:
+        batch.completed_hash_rate += float(rate)
+        cs["completed_reserve_hash_rate_total"] += float(rate)
+    else:
+        batch.cancelled_hash_rate += float(rate)
+        cs["cancelled_reserve_hash_rate_total"] += float(rate)
+    reqs = [run_ctx.activation_requests.get(r) for r in batch.request_ids]
+    if all(r is not None and r.status in TERMINAL_REQUEST_STATUSES for r in reqs):
+        batch.status = "TERMINAL"
+        ep = run_ctx.breach_episodes.get(batch.BreachEpisodeID)
+        if ep is not None and ep.live_activation_batch_id == batch.BatchID:
+            ep.live_activation_batch_id = None
+
+
+def _refined_close_round(run_ctx: RunContext, rc: RoundContext, t: float) -> None:
+    """R1: round closure terminalises EVERY episode and activation batch of the round; no
+    episode or activation may affect the next round."""
+    cs = run_ctx.controller_stats
+    _update_pipeline_stats(run_ctx, rc, t)
+    for ep in run_ctx.breach_episodes.values():
+        if ep.RoundID != rc.RoundID or ep.status in TERMINAL_EPISODE_STATUSES:
+            continue
+        if ep.live_activation_batch_id is not None:
+            cs["episode_closed_with_live_activation_count"] += 1
+        ep.status = "ROUND_CLOSED"
+        ep.closed_at = t
+        ep.disposition = "terminalised_at_round_close"
+        ep.live_activation_batch_id = None
+        cs["episode_round_closed_count"] += 1
+    for batch in run_ctx.activation_batches.values():
+        if batch.RoundID == rc.RoundID and batch.status != "TERMINAL":
+            batch.status = "TERMINAL"
+    rc.current_episode_id = None
 
 
 def SeatReserveActivationTransaction(run_ctx: RunContext, rc: RoundContext, rr: Any, sl: Any,
@@ -2711,6 +3173,8 @@ def _handle_reserve_activation_complete(run_ctx: RunContext, payload: Dict[str, 
     req.status = "COMPLETED"
     req.completed_at = t
     req.disposition = Outcome("reserve_activation_completed")
+    if cfg.controller.is_refined():                         # Stage-8R batch bookkeeping
+        _refined_note_request_terminal(run_ctx, rc, req, rr.hash_rate, completed=True)
     is_wake = isinstance(sl, ReassignmentWakeHandle)
     sid = _obj_activation_id(sl)
     # S4B-4: the reassignment wake handle carries NO interval; the reassignee's search range is
@@ -2803,6 +3267,10 @@ def _close_security_state(run_ctx: RunContext, rc: RoundContext, t: float) -> No
                 sl.status = "EXHAUSTED"          # searched to the end by an activated reserve
             else:
                 sl.status = "UNUSED_AT_ROUND_CLOSE"   # claimed but not fully searched
+    # Stage-8R: terminalise every breach episode and batch BEFORE the request loop so an
+    # episode closed while its batch is still live is counted truthfully.
+    if run_ctx.config.controller.is_refined():
+        _refined_close_round(run_ctx, rc, t)
     # S3A-6: every activation request of this closed round must be terminal.
     for req in run_ctx.activation_requests.values():
         if req.RoundID != rc.RoundID:
@@ -2810,6 +3278,11 @@ def _close_security_state(run_ctx: RunContext, rc: RoundContext, t: float) -> No
         if req.status not in TERMINAL_REQUEST_STATUSES:
             req.status = "CANCELLED"
             req.disposition = Outcome("reserve_activation_request_cancelled_at_round_close")
+            if run_ctx.config.controller.is_refined():
+                rr = run_ctx.reserve_records.get((rc.RoundID, req.MinerID))
+                _refined_note_request_terminal(run_ctx, rc, req,
+                                               rr.hash_rate if rr is not None else 0.0,
+                                               completed=False)
 
 
 def _seat_acceptance(run_ctx: RunContext, rc: RoundContext, at_time: float,

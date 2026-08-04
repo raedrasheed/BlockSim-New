@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from .security import SecurityFloorPolicy
 from .leases import RangeLeasePolicy
 from .adversarial import AdversarialPolicy, IncentivePolicy
+from .refinement import ControllerPolicy
 
 # A1 accounting invariant — the frozen matched control (kWh).
 A1_BASELINE_KWH = 8.420833333
@@ -69,6 +70,12 @@ class Stage2Config:
     # --- Stage-3 security floor + reserve activation (disabled by default) ---
     security_floor: SecurityFloorPolicy = SecurityFloorPolicy()
     floor_unattainable_policy: str = "CONTINUE_DEGRADED"   # or ABORT_ROUND
+
+    # --- Stage-8R revised idle and reserve-control policy (LEGACY by default).
+    # The default mode LEGACY_REACTIVE reproduces the accepted Stage-8M controller
+    # exactly; every refinement (hysteresis, breach episodes, predictive wake-ahead,
+    # H_pipeline, bounded suffix reassignment) is inert unless a refined mode is set. ---
+    controller: ControllerPolicy = ControllerPolicy()
 
     # --- Stage-4 range leases + reassignment (disabled by default) ---
     range_lease: RangeLeasePolicy = RangeLeasePolicy()

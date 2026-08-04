@@ -131,6 +131,9 @@ class RoundContext:
     below_floor_since: Optional[float] = None
     below_floor_open_reason: Optional[str] = None
     current_breach_id: Any = None
+    # Stage-8R revised-controller per-round state (inert under LEGACY_REACTIVE).
+    current_episode_id: Any = None
+    controller_reserves_exhausted: bool = False
 
     def transition(self, new_state: str) -> None:
         self.round_state = new_state
@@ -237,6 +240,22 @@ class RunContext:
         self.lease_seq: int = 0
         self.reassignment_decision_seq: int = 0
         self.reassignment_retry_seq: Dict[str, int] = {}
+        # Stage-8R revised idle and reserve-control policy state (inert under
+        # LEGACY_REACTIVE: registries stay empty and every counter stays zero).
+        from .refinement import controller_stats_template
+        self.breach_episodes: Dict[Any, Any] = {}          # BreachEpisodeID -> BreachEpisode
+        self.episode_seq: int = 0
+        self.episodes_per_round: Dict[Any, int] = {}       # RoundID -> episode_generation seq
+        self.activation_batches: Dict[Any, Any] = {}       # BatchID -> ActivationBatch
+        self.batch_seq: int = 0
+        self.batch_by_request: Dict[Any, Any] = {}         # request id -> BatchID
+        self.prediction_records: List[Any] = []            # PredictionRecord (R4 ledger)
+        self.prediction_seq: int = 0
+        self.controller_stats: Dict[str, Any] = controller_stats_template()
+        self.controller_reassigned_slices: set = set()     # R6: one request per suffix lineage
+        self._pipe_last_time: Optional[float] = None       # H_pipeline piecewise tracking
+        self._pipe_last_value: float = 0.0
+        self._pipe_last_h_effective: float = 0.0
         # S4A-4: the ONE authoritative, auditable list of range-lease observations, plus its
         # immutable-key replay registry and monotone sequence.
         self.lease_observations: List[Any] = []

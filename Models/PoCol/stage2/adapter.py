@@ -288,6 +288,7 @@ def results_schema(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
                    "nonce_domain_size": cfg.nonce_domain_size, "difficulty": cfg.difficulty},
     }
     out.update(_security_floor_results(run_ctx, cfg))
+    out.update(_controller_results(run_ctx, cfg))
     out.update(_range_lease_results(run_ctx, cfg))
     out.update(_adversarial_incentive_results(run_ctx, cfg))
     return out
@@ -850,6 +851,66 @@ def _security_floor_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
         "reserve_wake_energy_kwh": wake / 3_600_000.0,
         "reserve_active_energy_kwh": active / 3_600_000.0,
         "activated_reserve_evaluation_count": s["activated_reserve_evaluation_count"],
+    }
+
+
+def _controller_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
+    """Stage-8R revised-controller reporting block.  Present (all zeros) in EVERY mode so
+    the run-level schema is mode-invariant.  ``H_pipeline`` figures are scheduling
+    forecasts, never security metrics, and are never substituted for ``H_effective``."""
+    cs = run_ctx.controller_stats
+    ctrl = cfg.controller
+    horizon = float(cfg.horizon_T)
+    episodes = list(run_ctx.breach_episodes.values())
+    batches = list(run_ctx.activation_batches.values())
+    resolved = cs["resolved_prediction_count"]
+    unresolved = sum(1 for p in run_ctx.prediction_records if p.resolution_time is None)
+    return {
+        "controller_mode": ctrl.mode,
+        "controller_reactive_trigger_ratio": ctrl.reactive_trigger_ratio,
+        "controller_central_target_ratio": ctrl.central_target_ratio,
+        "controller_recovery_ratio": ctrl.recovery_ratio,
+        "breach_episode_count": cs["breach_episode_count"],
+        "breach_episode_recovered_count": cs["breach_episode_recovered_count"],
+        "episode_unattainable_count": cs["episode_unattainable_count"],
+        "episode_round_closed_count": cs["episode_round_closed_count"],
+        "episode_closed_with_live_activation_count":
+            cs["episode_closed_with_live_activation_count"],
+        "total_episode_recovery_time_s": cs["total_episode_recovery_time_s"],
+        "mean_episode_recovery_time_s": (
+            cs["total_episode_recovery_time_s"] / cs["breach_episode_recovered_count"]
+            if cs["breach_episode_recovered_count"] else 0.0),
+        "activation_batches_seated": cs["activation_batches_seated"],
+        "predictive_batches_seated": cs["predictive_batches_seated"],
+        "reactive_batches_seated": cs["reactive_batches_seated"],
+        "duplicate_activation_batch_prevented_count":
+            cs["duplicate_activation_batch_prevented_count"],
+        "max_activation_batches_per_episode": cs["max_batches_per_episode"],
+        "mean_activation_batches_per_episode": (
+            (sum(len(e.activation_batch_ids) for e in episodes) / len(episodes))
+            if episodes else 0.0),
+        "activation_batch_terminal_count": sum(1 for b in batches
+                                               if b.status == "TERMINAL"),
+        "prediction_decision_count": cs["prediction_decision_count"],
+        "resolved_prediction_count": resolved,
+        "unresolved_prediction_count": unresolved,
+        "mean_absolute_prediction_error": (
+            cs["sum_absolute_prediction_error"] / resolved if resolved else 0.0),
+        "false_positive_wake_count": cs["false_positive_wake_count"],
+        "late_wake_count": cs["late_wake_count"],
+        "requested_reserve_hash_rate_total": cs["requested_reserve_hash_rate_total"],
+        "completed_reserve_hash_rate_total": cs["completed_reserve_hash_rate_total"],
+        "cancelled_reserve_hash_rate_total": cs["cancelled_reserve_hash_rate_total"],
+        "excess_activation_hash_rate_total": cs["excess_activation_hash_rate_total"],
+        "under_activation_hash_rate_total": cs["under_activation_hash_rate_total"],
+        "maximum_H_pipeline": cs["maximum_H_pipeline"],
+        "time_weighted_H_pipeline": (cs["H_pipeline_time_integral"] / horizon
+                                     if horizon else 0.0),
+        "duration_pipeline_above_target_while_H_effective_below_target":
+            cs["duration_pipeline_above_target_while_H_effective_below_target"],
+        "controller_suffix_reassignment_count": cs["controller_suffix_reassignment_count"],
+        "controller_suffix_reassignment_skipped_in_flight":
+            cs["controller_suffix_reassignment_skipped_in_flight"],
     }
 
 
