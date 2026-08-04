@@ -1,0 +1,73 @@
+{
+ "baseline_commit": "026483496ffb434243f45e174c63b43b77b3b43a",
+ "binding_failure": "V3_lifetime",
+ "evaluated_at_utc": "2026-08-04T15:31:27Z",
+ "preflight_id": "STAGE_07_RESOURCE_PREFLIGHT",
+ "projection": {
+  "heavy_serial_chain_hours": 2982,
+  "lightweight_hours_at_limit": 248,
+  "per_class_peak_rss_mb": {
+   "LIGHTWEIGHT": 3010.0,
+   "REASSIGNMENT": 5266.0,
+   "SECURITY_FLOOR": 4398.17297233993
+  },
+  "per_class_wall_seconds": {
+   "LIGHTWEIGHT": 9914.3,
+   "REASSIGNMENT": 15735.8,
+   "SECURITY_FLOOR": 66834.30487877989
+  },
+  "resource_aware_duration_days": 124.3,
+  "security_floor_basis": "ESTIMATED from right-censored B02 (quadratic fit) \u2014 NOT a completed measurement",
+  "total_single_threaded_hours": 3726
+ },
+ "record": {
+  "archive_destination": "NONE IDENTIFIED",
+  "availability_lifetime_guarantee": "NONE \u2014 reclaimed on inactivity or at session end",
+  "checkpoint_policy": "atomic registry update after each run; resume PENDING + FAILED_INFRASTRUCTURE only",
+  "compression_benchmark": {
+   "bounded_memory_streaming": true,
+   "gzip9_ratio": 41.1,
+   "note": "measured on reduced-horizon C04",
+   "xz9_ratio": 85.6,
+   "xz_fixed_encoder_mb": 706.8
+  },
+  "cpu_cores": 4,
+  "durable_output_path": "data/thesis_revision_v45/stage_07/ (container-local; NOT durable)",
+  "free_disk_gb": 11.35,
+  "heartbeat_interval_s": 30,
+  "host_identifier": "ephemeral session container (vm, Linux 6.18.5-fc-v18, x86_64)",
+  "network_durable_storage_path": "NONE IDENTIFIED",
+  "per_run_timeout_hours": 24,
+  "same_seed_infrastructure_rerun_policy": "retry identical (scenario_id, master_seed); never draw a replacement seed",
+  "streaming_compression_command": "lzma.LZMACompressor(preset=9) incremental, 1 MiB chunks",
+  "total_ram_gb": 15.7,
+  "usable_ram_gb": 12.56,
+  "worker_limits_by_class": {
+   "LIGHTWEIGHT": 3,
+   "REASSIGNMENT": 1,
+   "SECURITY_FLOOR": 1
+  }
+ },
+ "verdict": "STAGE_7_RESOURCE_PREFLIGHT_FAILED",
+ "verifications": {
+  "V1_memory": {
+   "available_gb": 12.56,
+   "note": "one worst-case heavy worker at a time",
+   "pass": true,
+   "required_gb": 6.43
+  },
+  "V2_disk": {
+   "available_gb": 11.35,
+   "note": "compress-on-write; raw-first would need ~16.3 GB and would NOT fit",
+   "pass": true,
+   "required_gb": 1.9
+  },
+  "V3_lifetime": {
+   "evidence": "B02 reaped at 6h14m without completing; no lifetime guarantee exists",
+   "guaranteed_days": 0.0,
+   "longest_process_sustained_hours": 6.24,
+   "pass": false,
+   "required_days": 155.3
+  }
+ }
+}
