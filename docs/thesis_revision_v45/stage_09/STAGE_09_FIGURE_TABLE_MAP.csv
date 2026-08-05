@@ -1,0 +1,27 @@
+artifact_id,stage8u_figure,thesis_number,placement,source_svg_png,caption_short,sample_size,source_statement
+FIG-A,FIG01,Figure 7.10,Chapter 7 results (main),docs/thesis_revision_v45/stage_08u/figures/FIG01_total_energy.*,"Total energy per run, five scenarios",12 seeds/scenario,Author's simulation results
+FIG-B,FIG03,Figure 7.11,Chapter 7 results (main),docs/thesis_revision_v45/stage_08u/figures/FIG03_accepted_blocks.*,"Accepted blocks per run",12 seeds/scenario,Author's simulation results
+FIG-C,FIG04,Figure 7.12,Chapter 7 results (main),docs/thesis_revision_v45/stage_08u/figures/FIG04_round_durations.*,"Median and p95 round duration",12 seeds/scenario,Author's simulation results
+FIG-D,FIG05,Figure 7.13,Chapter 7 results (main),docs/thesis_revision_v45/stage_08u/figures/FIG05_energy_per_block.*,"Energy per accepted block (NA when 0 blocks)",12 seeds/scenario,Author's simulation results
+FIG-E,FIG06,Figure 7.14,Chapter 7 results (main),docs/thesis_revision_v45/stage_08u/figures/FIG06_evaluations.*,"Total, unique and duplicate physical evaluations",12 seeds/scenario,Author's simulation results
+FIG-F,FIG07,Figure 7.15,Chapter 7 results (main),docs/thesis_revision_v45/stage_08u/figures/FIG07_blocks_per_million_evals.*,"Accepted blocks per million evaluations",12 seeds/scenario,Author's simulation results
+FIG-G,FIG10,Figure 7.16,Chapter 7 results (main),docs/thesis_revision_v45/stage_08u/figures/FIG10_floors.*,"Static and useful floor durations and deficit areas",12 seeds/scenario,Author's simulation results
+FIG-H,FIG11,Figure 7.17,Chapter 7 results (main),docs/thesis_revision_v45/stage_08u/figures/FIG11_churn.*,"Activation and reassignment churn per closed round",12 seeds/scenario,Author's simulation results
+FIG-I,FIG12,Figure 7.18,Chapter 7 discussion (main),docs/thesis_revision_v45/stage_08u/figures/FIG12_pareto.*,"Energy-service Pareto plane",12 seeds/scenario,Author's simulation results
+FIG-J,FIG18,Figure 7.19,Chapter 7 discussion (main),docs/thesis_revision_v45/stage_08u/figures/FIG18_decision_dashboard.*,"Final decision dashboard (frozen pass/fail criteria)",12 seeds/scenario,Author's simulation results
+FIG-K,FIG02,Figure A.1,Appendix (supplementary),docs/thesis_revision_v45/stage_08u/figures/FIG02_relative_energy_vs_pow.*,"Relative energy differences vs W00 and W01",12 seeds/scenario,Author's simulation results
+FIG-L,FIG08,Figure A.2,Appendix (supplementary),docs/thesis_revision_v45/stage_08u/figures/FIG08_residency.*,"Per-state residency decomposition",12 seeds/scenario,Author's simulation results
+FIG-M,FIG09,Figure A.3,Appendix (supplementary),docs/thesis_revision_v45/stage_08u/figures/FIG09_energy_decomposition.*,"Energy decomposition (six components)",12 seeds/scenario,Author's simulation results
+FIG-N,FIG13,Figure A.4,Appendix (supplementary),docs/thesis_revision_v45/stage_08u/figures/FIG13_energy_slopes.*,"Paired energy slopes W01->P02 and W00->P02",12 seeds/scenario,Author's simulation results
+FIG-O,FIG14,Figure A.5,Appendix (supplementary),docs/thesis_revision_v45/stage_08u/figures/FIG14_service_slopes.*,"Paired service slopes",12 seeds/scenario,Author's simulation results
+FIG-P,FIG15,Figure A.6,Appendix (supplementary),docs/thesis_revision_v45/stage_08u/figures/FIG15_timeline.*,"Representative P02 timeline",1 representative seed,Author's simulation results
+FIG-Q,FIG16,Figure A.7,Appendix (supplementary),docs/thesis_revision_v45/stage_08u/figures/FIG16_heatmap.*,"Normalised summary heatmap",12 seeds/scenario,Author's simulation results
+FIG-R,FIG17,Figure A.8,Appendix (supplementary),docs/thesis_revision_v45/stage_08u/figures/FIG17_policy_evolution.*,"Policy evolution 8M->8R->8S->8U (descriptive only)",per-stage means,Author's simulation results
+TAB-1,,Table 7.2,Chapter 7 results (main),derived from scenarios_8u.py + STAGE_08U_EXPERIMENT_MATRIX.csv,"Experimental scenario definitions (W00/W01/P00/P01/P02)",5 scenarios,Author's simulation setup
+TAB-2,,Table 7.3,Chapter 7 results (main),STAGE_08S_RUN_DATASET.csv / stage8s_results.json,"Stage-8S within-PoCol results (S00-S03)",12 seeds/scenario,Author's simulation results
+TAB-3,,Table 7.4,Chapter 7 results (main),STAGE_08U_RUN_DATASET.csv / POW_POCOL_COMPARISON_TABLE.csv,"Stage-8U matched-PoW results (W00/W01/P00/P01/P02)",12 seeds/scenario,Author's simulation results
+TAB-4,,Table 7.5,Chapter 7 results (main),STAGE_08S_ENERGY_DECOMPOSITION.csv / FIG09 CSV,"Energy decomposition (six components)",12 seeds/scenario,Author's simulation results
+TAB-5,,Table 7.6,Chapter 7 results (main),stage8u_results.json scenario means,"Physical-evaluation efficiency (total/unique/duplicate, blocks per M)",12 seeds/scenario,Author's simulation results
+TAB-6,,Table 7.7,Chapter 7 results (main),STAGE_08U_HYPOTHESIS_DECISIONS.csv + STAGE_08S_HYPOTHESIS_DECISIONS.csv,"Preregistered hypothesis decisions (H-S/H-U)",n=12 paired,Author's simulation results
+TAB-7,,Table 7.8,Chapter 7 discussion (main),FIG17 CSV / cross-stage means,"Policy-evolution comparison 8M/8R/8S/8U (descriptive)",per-stage,Author's simulation results
+TAB-8,,Table 8.1,Chapter 8 conclusion (main),this stage,"Research-question answer matrix (RQ1-RQ5)",n/a,Author's synthesis
