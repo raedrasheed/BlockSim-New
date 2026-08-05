@@ -1,0 +1,209 @@
+{
+ "all_structural_gates_pass": true,
+ "gates": [
+  {
+   "gate": "every mode executes (8/8 COMPLETED)",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S00_NO_FLOOR-p0: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S00_NO_FLOOR-p0: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S00_NO_FLOOR-p0: useful-floor metrics exist",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S00_NO_FLOOR-p1: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S00_NO_FLOOR-p1: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S00_NO_FLOOR-p1: useful-floor metrics exist",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S01_STAGE8R_STATIC_FLOOR-p0: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S01_STAGE8R_STATIC_FLOOR-p0: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S01_STAGE8R_STATIC_FLOOR-p0: useful-floor metrics exist",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S01_STAGE8R_STATIC_FLOOR-p1: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S01_STAGE8R_STATIC_FLOOR-p1: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S01_STAGE8R_STATIC_FLOOR-p1: useful-floor metrics exist",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S02_USEFUL_FLOOR-p0: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S02_USEFUL_FLOOR-p0: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S02_USEFUL_FLOOR-p0: useful-floor metrics exist",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S02_USEFUL_FLOOR-p1: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S02_USEFUL_FLOOR-p1: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S02_USEFUL_FLOOR-p1: useful-floor metrics exist",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S03_USEFUL_FLOOR_COARSE_REASSIGNMENT-p0: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S03_USEFUL_FLOOR_COARSE_REASSIGNMENT-p0: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S03_USEFUL_FLOOR_COARSE_REASSIGNMENT-p0: useful-floor metrics exist",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S03_USEFUL_FLOOR_COARSE_REASSIGNMENT-p1: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S03_USEFUL_FLOOR_COARSE_REASSIGNMENT-p1: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8s-pilot-S03_USEFUL_FLOOR_COARSE_REASSIGNMENT-p1: useful-floor metrics exist",
+   "pass": true
+  },
+  {
+   "gate": "coarse reassignment occurs (every S03 pilot run)",
+   "pass": true
+  },
+  {
+   "gate": "chunk union/disjointness gates pass (every S03 pilot run)",
+   "pass": true
+  },
+  {
+   "gate": "reserve admission enforced (every wake bound to useful work)",
+   "pass": true
+  }
+ ],
+ "harness": "run_stage8s.py pilot",
+ "purpose": "STRUCTURE AND FEASIBILITY ONLY.  Nothing here may tune the 0.80 static target, the useful-floor formula, batch_size, the partition rule, reassignment caps or acceptance margins.",
+ "runs": [
+  {
+   "all_integrity_gates_pass": true,
+   "coarse_reassignment_count": 0,
+   "coarse_repartition_count": 0,
+   "reserve_wakes_rejected_no_useful_work": 0,
+   "rounds_executed": 225,
+   "run_id": "8s-pilot-S00_NO_FLOOR-p0",
+   "run_status": "COMPLETED",
+   "scenario_id": "S00_NO_FLOOR",
+   "wall_clock_seconds": 1.2486214637756348
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "coarse_reassignment_count": 0,
+   "coarse_repartition_count": 0,
+   "reserve_wakes_rejected_no_useful_work": 0,
+   "rounds_executed": 228,
+   "run_id": "8s-pilot-S00_NO_FLOOR-p1",
+   "run_status": "COMPLETED",
+   "scenario_id": "S00_NO_FLOOR",
+   "wall_clock_seconds": 1.2875537872314453
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "coarse_reassignment_count": 0,
+   "coarse_repartition_count": 0,
+   "reserve_wakes_rejected_no_useful_work": 0,
+   "rounds_executed": 186,
+   "run_id": "8s-pilot-S01_STAGE8R_STATIC_FLOOR-p0",
+   "run_status": "COMPLETED",
+   "scenario_id": "S01_STAGE8R_STATIC_FLOOR",
+   "wall_clock_seconds": 2.231450319290161
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "coarse_reassignment_count": 0,
+   "coarse_repartition_count": 0,
+   "reserve_wakes_rejected_no_useful_work": 0,
+   "rounds_executed": 194,
+   "run_id": "8s-pilot-S01_STAGE8R_STATIC_FLOOR-p1",
+   "run_status": "COMPLETED",
+   "scenario_id": "S01_STAGE8R_STATIC_FLOOR",
+   "wall_clock_seconds": 2.285674571990967
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "coarse_reassignment_count": 0,
+   "coarse_repartition_count": 0,
+   "reserve_wakes_rejected_no_useful_work": 0,
+   "rounds_executed": 186,
+   "run_id": "8s-pilot-S02_USEFUL_FLOOR-p0",
+   "run_status": "COMPLETED",
+   "scenario_id": "S02_USEFUL_FLOOR",
+   "wall_clock_seconds": 2.2734930515289307
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "coarse_reassignment_count": 0,
+   "coarse_repartition_count": 0,
+   "reserve_wakes_rejected_no_useful_work": 0,
+   "rounds_executed": 194,
+   "run_id": "8s-pilot-S02_USEFUL_FLOOR-p1",
+   "run_status": "COMPLETED",
+   "scenario_id": "S02_USEFUL_FLOOR",
+   "wall_clock_seconds": 2.5235798358917236
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "coarse_reassignment_count": 364,
+   "coarse_repartition_count": 206,
+   "reserve_wakes_rejected_no_useful_work": 0,
+   "rounds_executed": 201,
+   "run_id": "8s-pilot-S03_USEFUL_FLOOR_COARSE_REASSIGNMENT-p0",
+   "run_status": "COMPLETED",
+   "scenario_id": "S03_USEFUL_FLOOR_COARSE_REASSIGNMENT",
+   "wall_clock_seconds": 3.228032350540161
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "coarse_reassignment_count": 320,
+   "coarse_repartition_count": 181,
+   "reserve_wakes_rejected_no_useful_work": 0,
+   "rounds_executed": 207,
+   "run_id": "8s-pilot-S03_USEFUL_FLOOR_COARSE_REASSIGNMENT-p1",
+   "run_status": "COMPLETED",
+   "scenario_id": "S03_USEFUL_FLOOR_COARSE_REASSIGNMENT",
+   "wall_clock_seconds": 3.0936801433563232
+  }
+ ]
+}
