@@ -1,0 +1,20 @@
+{
+ "figure_id": "FIG15",
+ "kind": "timeline",
+ "palette": "okabe-ito",
+ "scenario_ids": [
+  "P02_POCOL_SINGLE_HANDOFF"
+ ],
+ "scenario_scope": [
+  "P02_POCOL_SINGLE_HANDOFF"
+ ],
+ "source_csv": "FIG15_timeline.csv",
+ "style_rules": [
+  "colour_blind_safe",
+  "no_3d",
+  "no_truncated_bars",
+  "paired_seed_points_visible",
+  "mean_with_95ci"
+ ],
+ "title": "Representative P02 timeline (H_effective, H_pipeline, static floor, useful target, live wakes, the handoff event, accepted blocks)"
+}

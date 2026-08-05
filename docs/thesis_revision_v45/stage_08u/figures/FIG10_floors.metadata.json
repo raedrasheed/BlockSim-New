@@ -1,0 +1,24 @@
+{
+ "figure_id": "FIG10",
+ "kind": "grouped_bars",
+ "palette": "okabe-ito",
+ "scenario_ids": [
+  "P00_POCOL_NO_FLOOR",
+  "P01_POCOL_STAGE8S_COARSE",
+  "P02_POCOL_SINGLE_HANDOFF"
+ ],
+ "scenario_scope": [
+  "P00_POCOL_NO_FLOOR",
+  "P01_POCOL_STAGE8S_COARSE",
+  "P02_POCOL_SINGLE_HANDOFF"
+ ],
+ "source_csv": "FIG10_floors.csv",
+ "style_rules": [
+  "colour_blind_safe",
+  "no_3d",
+  "no_truncated_bars",
+  "paired_seed_points_visible",
+  "mean_with_95ci"
+ ],
+ "title": "Static and useful floor durations and deficit areas"
+}

@@ -1,0 +1,581 @@
+{
+ "H_U1": {
+  "checks": {
+   "mean_activation_requests_lt_P01": {
+    "pass": true,
+    "value": 0.0
+   },
+   "mean_incomplete_requests_lt_P01": {
+    "pass": true,
+    "value": 0.0
+   },
+   "mean_reassignments_per_closed_round_le_1.0": {
+    "pass": true,
+    "value": 0.4535024547610644
+   }
+  },
+  "decision": "PASS"
+ },
+ "H_U2": {
+  "checks": {
+   "mean_accepted_blocks_ratio_P02_over_W01_ge_0.90": {
+    "pass": false,
+    "value": 0.677007928300586
+   },
+   "mean_median_round_duration_ratio_P02_over_W01_le_1.10": {
+    "pass": false,
+    "value": 5.218962322421378
+   }
+  },
+  "decision": "FAIL"
+ },
+ "H_U3": {
+  "checks": {
+   "bootstrap_ci95_lower_bound_gt_0": {
+    "pass": true,
+    "value": 0.44872662742774
+   },
+   "mean_paired_relative_energy_reduction_ge_0.20": {
+    "pass": true,
+    "value": 0.4495148642163587
+   }
+  },
+  "decision": "PASS",
+  "paired_relative_reduction": {
+   "ci95_lower": 0.44872662742774,
+   "ci95_upper": 0.4502307997402976,
+   "mean": 0.4495148642163587,
+   "median": 0.45003089430894855
+  }
+ },
+ "H_U4_sensitivity": {
+  "blocks": {
+   "ci95_difference": [
+    -95.5,
+    -76.91666666666667
+   ],
+   "control_mean": 249.41666666666666,
+   "exact_p_two_sided": 0.00048828125,
+   "field": "rounds_accepted",
+   "paired_mean_difference": -85.75,
+   "paired_median_difference": -83.0,
+   "per_seed_difference": [
+    -102.0,
+    -67.0,
+    -79.0,
+    -81.0,
+    -72.0,
+    -93.0,
+    -87.0,
+    -78.0,
+    -103.0,
+    -122.0,
+    -85.0,
+    -60.0
+   ],
+   "treatment_mean": 163.66666666666666
+  },
+  "duplicate_evaluations": {
+   "ci95_difference": [
+    -1234815.5,
+    -1220836.25
+   ],
+   "control_mean": 1228114.8333333333,
+   "exact_p_two_sided": 0.00048828125,
+   "field": "duplicate_physical_evaluations",
+   "paired_mean_difference": -1228114.8333333333,
+   "paired_median_difference": -1230773.5,
+   "per_seed_difference": [
+    -1218419.0,
+    -1236547.0,
+    -1231576.0,
+    -1234248.0,
+    -1239280.0,
+    -1226558.0,
+    -1212595.0,
+    -1235751.0,
+    -1223060.0,
+    -1200346.0,
+    -1229971.0,
+    -1249027.0
+   ],
+   "treatment_mean": 0.0
+  },
+  "energy": {
+   "ci95_difference": [
+    -0.019679172631173077,
+    -0.01963492999421322
+   ],
+   "control_mean": 0.035833333333333335,
+   "exact_p_two_sided": 0.00048828125,
+   "field": "E_idle_kwh",
+   "paired_mean_difference": -0.019658245093557344,
+   "paired_median_difference": -0.01967340777777794,
+   "per_seed_difference": [
+    -0.019585635023148373,
+    -0.019689587523148387,
+    -0.01965968659722273,
+    -0.01967519197916689,
+    -0.019705211851852082,
+    -0.01961091145833356,
+    -0.019701769363426175,
+    -0.019663141030092816,
+    -0.01967346451388911,
+    -0.019587460532407647,
+    -0.019673530208333567,
+    -0.01967335104166677
+   ],
+   "treatment_mean": 0.01617508823977599
+  },
+  "energy_per_accepted_block": {
+   "ci95_difference": [
+    -5.0872037708648036e-05,
+    -4.0452982959458713e-05
+   ],
+   "control_mean": 0.0001447506657146416,
+   "exact_p_two_sided": 0.00048828125,
+   "field": "energy_per_accepted_block_kwh",
+   "paired_mean_difference": -4.576989592995417e-05,
+   "paired_median_difference": -4.651862943407818e-05,
+   "per_seed_difference": [
+    -3.591781094822055e-05,
+    -5.653964940173331e-05,
+    -4.883582206629441e-05,
+    -4.764212629239737e-05,
+    -5.3826510703326345e-05,
+    -4.051210602618689e-05,
+    -4.445563238599034e-05,
+    -4.9461111617721745e-05,
+    -3.5767868755968977e-05,
+    -2.8175496124637216e-05,
+    -4.539513257575899e-05,
+    -6.270948426121384e-05
+   ],
+   "treatment_mean": 9.898076978468743e-05
+  },
+  "median_duration": {
+   "ci95_difference": [
+    0.9804513888889076,
+    0.9978819444444573
+   ],
+   "control_mean": 0.18472222222222387,
+   "exact_p_two_sided": 0.00048828125,
+   "field": "median_round_duration",
+   "paired_mean_difference": 0.9888194444444592,
+   "paired_median_difference": 0.986458333333351,
+   "per_seed_difference": [
+    1.0225000000000257,
+    0.966666666666697,
+    0.9966666666666697,
+    0.9862500000000267,
+    1.0037500000000095,
+    0.9829166666666822,
+    0.9675000000000127,
+    0.9866666666666752,
+    0.9899999999999975,
+    1.0045833333333292,
+    0.9750000000000085,
+    0.9833333333333769
+   ],
+   "treatment_mean": 1.1735416666666831
+  },
+  "note": "DESCRIPTIVE + INFERENTIAL SENSITIVITY ONLY \u2014 never a licensing gate",
+  "paired_relative_energy_reduction": {
+   "ci95_lower": 0.5479537453703768,
+   "ci95_upper": 0.5491734363425987,
+   "mean": 0.5486021886574142,
+   "median": 0.5490253333333378
+  },
+  "total_evaluations": {
+   "ci95_difference": [
+    -1310452.0833333333,
+    -1304976.4166666667
+   ],
+   "control_mean": 1447488.5833333333,
+   "exact_p_two_sided": 0.00048828125,
+   "field": "total_physical_evaluations",
+   "paired_mean_difference": -1307776.1666666667,
+   "paired_median_difference": -1308221.5,
+   "per_seed_difference": [
+    -1298167.0,
+    -1315876.0,
+    -1310803.0,
+    -1308139.0,
+    -1308106.0,
+    -1305289.0,
+    -1309448.0,
+    -1313543.0,
+    -1307462.0,
+    -1299575.0,
+    -1308304.0,
+    -1308602.0
+   ],
+   "treatment_mean": 139712.41666666666
+  },
+  "unique_evaluations": {
+   "ci95_difference": [
+    -85574.0,
+    -74011.58333333333
+   ],
+   "control_mean": 219373.75,
+   "exact_p_two_sided": 0.00048828125,
+   "field": "unique_physical_evaluations",
+   "paired_mean_difference": -79661.33333333333,
+   "paired_median_difference": -78979.0,
+   "per_seed_difference": [
+    -79748.0,
+    -79329.0,
+    -79227.0,
+    -73891.0,
+    -68826.0,
+    -78731.0,
+    -96853.0,
+    -77792.0,
+    -84402.0,
+    -99229.0,
+    -78333.0,
+    -59575.0
+   ],
+   "treatment_mean": 139712.41666666666
+  }
+ },
+ "H_U5": {
+  "checks": {
+   "duplicate_nonce_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   },
+   "mean_duration_below_useful_floor_le_15s": {
+    "pass": false,
+    "value": 23.13048611111118
+   },
+   "nonterminal_activation_request_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   },
+   "nonterminal_handoff_epoch_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   },
+   "nonterminal_lease_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   },
+   "nonterminal_reassignment_request_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   },
+   "physical_frontier_rewind_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   },
+   "post_round_evaluation_record_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   }
+  },
+  "decision": "FAIL"
+ },
+ "analysis_seed_root": 17618529829928476883,
+ "bootstrap_resamples": 10000,
+ "contrasts": {
+  "P02_vs_P01_incomplete": {
+   "ci95_difference": [
+    -441.0,
+    -407.6666666666667
+   ],
+   "control_mean": 425.0,
+   "exact_p_two_sided": 0.00048828125,
+   "field": "incomplete_activation_request_count",
+   "paired_mean_difference": -425.0,
+   "paired_median_difference": -430.0,
+   "per_seed_difference": [
+    -432.0,
+    -416.0,
+    -436.0,
+    -428.0,
+    -376.0,
+    -444.0,
+    -416.0,
+    -444.0,
+    -416.0,
+    -480.0,
+    -444.0,
+    -368.0
+   ],
+   "treatment_mean": 0.0
+  },
+  "P02_vs_P01_requests": {
+   "ci95_difference": [
+    -654.6666666666666,
+    -637.6666666666666
+   ],
+   "control_mean": 646.6666666666666,
+   "exact_p_two_sided": 0.00048828125,
+   "field": "activation_requests_seated",
+   "paired_mean_difference": -646.6666666666666,
+   "paired_median_difference": -646.0,
+   "per_seed_difference": [
+    -644.0,
+    -640.0,
+    -648.0,
+    -656.0,
+    -612.0,
+    -668.0,
+    -644.0,
+    -664.0,
+    -640.0,
+    -660.0,
+    -656.0,
+    -628.0
+   ],
+   "treatment_mean": 0.0
+  },
+  "P02_vs_W01_blocks": {
+   "ci95_difference": [
+    -88.58333333333333,
+    -68.16666666666667
+   ],
+   "control_mean": 241.75,
+   "exact_p_two_sided": 0.00048828125,
+   "field": "rounds_accepted",
+   "paired_mean_difference": -78.08333333333333,
+   "paired_median_difference": -77.5,
+   "per_seed_difference": [
+    -96.0,
+    -60.0,
+    -73.0,
+    -68.0,
+    -53.0,
+    -86.0,
+    -84.0,
+    -76.0,
+    -94.0,
+    -116.0,
+    -79.0,
+    -52.0
+   ],
+   "treatment_mean": 163.66666666666666
+  },
+  "P02_vs_W01_energy": {
+   "ci95_difference": [
+    -0.01322894423514686,
+    -0.013184867576196267
+   ],
+   "control_mean": 0.029383333333333334,
+   "exact_p_two_sided": 0.00048828125,
+   "field": "E_idle_kwh",
+   "paired_mean_difference": -0.013208245093557341,
+   "paired_median_difference": -0.013223407777777939,
+   "per_seed_difference": [
+    -0.013135635023148372,
+    -0.013239587523148386,
+    -0.013209686597222728,
+    -0.01322519197916689,
+    -0.013255211851852081,
+    -0.01316091145833356,
+    -0.013251769363426175,
+    -0.013213141030092815,
+    -0.013223464513889109,
+    -0.013137460532407646,
+    -0.013223530208333566,
+    -0.013223351041666769
+   ],
+   "treatment_mean": 0.01617508823977599
+  }
+ },
+ "harness": "analyze_8u.py",
+ "holm_family": {
+  "P02_vs_P01(activation_requests_seated)": {
+   "holm_threshold": 0.0125,
+   "p": 0.00048828125,
+   "reject_null": true
+  },
+  "P02_vs_P01(incomplete_requests)": {
+   "holm_threshold": 0.016666666666666666,
+   "p": 0.00048828125,
+   "reject_null": true
+  },
+  "P02_vs_W01(accepted_blocks)": {
+   "holm_threshold": 0.025,
+   "p": 0.00048828125,
+   "reject_null": true
+  },
+  "P02_vs_W01(total_energy)": {
+   "holm_threshold": 0.05,
+   "p": 0.00048828125,
+   "reject_null": true
+  }
+ },
+ "input_dataset_sha256": "f0a1e205c8fed70292b4cd9e381e6fba464b1727116de5ed1efbe50cc60fcac1",
+ "integrity_all_pass": true,
+ "n_seeds": 12,
+ "scenario_means_descriptive": {
+  "P00_POCOL_NO_FLOOR": {
+   "E_idle_kwh": 0.016548453780863916,
+   "accepted_blocks_per_closed_round": 0.7964594870502674,
+   "activation_requests_seated": 0.0,
+   "activations_per_closed_round": 0.0,
+   "blocks_per_million_physical_evaluations": 1166.1351110471028,
+   "duplicate_handoff_prevented_count": 0.0,
+   "duplicate_physical_evaluations": 0.0,
+   "duration_below_static_floor": 0.0,
+   "duration_below_useful_floor": 0.0,
+   "energy_per_accepted_block_kwh": 9.31244072547007e-05,
+   "handoff_cancelled_count": 0.0,
+   "handoff_committed_count": 0.0,
+   "handoff_completed_count": 0.0,
+   "handoff_epoch_count": 0.0,
+   "handoffs_per_closed_round": 0.0,
+   "incomplete_activation_request_count": 0.0,
+   "mean_round_duration": 1.3430243492679639,
+   "median_round_duration": 1.1803819444444652,
+   "p95_round_duration": 2.0000000000000284,
+   "reassignments_per_closed_round": 0.0,
+   "relative_reduction": 0.5381826851851931,
+   "reserve_wake_rejected_awake_receiver_available": 0.0,
+   "reserve_wake_rejected_no_bound_work": 0.0,
+   "reserve_wake_rejected_short_useful_window": 0.0,
+   "rounds_accepted": 178.0,
+   "rounds_executed": 223.41666666666666,
+   "single_reserve_requests_seated": 0.0,
+   "static_floor_deficit_area_hash_s": 0.0,
+   "total_physical_evaluations": 152980.41666666666,
+   "unique_physical_evaluations": 152980.41666666666,
+   "useful_floor_deficit_area": 0.0
+  },
+  "P01_POCOL_STAGE8S_COARSE": {
+   "E_idle_kwh": 0.01612871281442877,
+   "accepted_blocks_per_closed_round": 0.7980357658246432,
+   "activation_requests_seated": 646.6666666666666,
+   "activations_per_closed_round": 3.1396105791559186,
+   "blocks_per_million_physical_evaluations": 1172.2408599306682,
+   "duplicate_handoff_prevented_count": 0.0,
+   "duplicate_physical_evaluations": 0.0,
+   "duration_below_static_floor": 271.606666666663,
+   "duration_below_useful_floor": 27.70208333333385,
+   "energy_per_accepted_block_kwh": 9.831514636487693e-05,
+   "handoff_cancelled_count": 0.0,
+   "handoff_committed_count": 0.0,
+   "handoff_completed_count": 0.0,
+   "handoff_epoch_count": 0.0,
+   "handoffs_per_closed_round": 0.0,
+   "incomplete_activation_request_count": 425.0,
+   "mean_round_duration": 1.4569370927778778,
+   "median_round_duration": 1.1726388888889039,
+   "p95_round_duration": 2.3325000000000387,
+   "reassignments_per_closed_round": 1.6760921611312192,
+   "relative_reduction": 0.5498963865740808,
+   "reserve_wake_rejected_awake_receiver_available": 0.0,
+   "reserve_wake_rejected_no_bound_work": 0.0,
+   "reserve_wake_rejected_short_useful_window": 0.0,
+   "rounds_accepted": 164.5,
+   "rounds_executed": 206.0,
+   "single_reserve_requests_seated": 0.0,
+   "static_floor_deficit_area_hash_s": 821197.9930555437,
+   "total_physical_evaluations": 140644.91666666666,
+   "unique_physical_evaluations": 140644.91666666666,
+   "useful_floor_deficit_area": 41310.562500000204
+  },
+  "P02_POCOL_SINGLE_HANDOFF": {
+   "E_idle_kwh": 0.01617508823977599,
+   "accepted_blocks_per_closed_round": 0.7223886010022404,
+   "activation_requests_seated": 0.0,
+   "activations_per_closed_round": 0.0,
+   "blocks_per_million_physical_evaluations": 1173.1941816520948,
+   "duplicate_handoff_prevented_count": 1801.25,
+   "duplicate_physical_evaluations": 0.0,
+   "duration_below_static_floor": 268.6587499999955,
+   "duration_below_useful_floor": 23.13048611111118,
+   "energy_per_accepted_block_kwh": 9.898076978468743e-05,
+   "handoff_cancelled_count": 0.0,
+   "handoff_committed_count": 102.66666666666667,
+   "handoff_completed_count": 79.08333333333333,
+   "handoff_epoch_count": 102.66666666666667,
+   "handoffs_per_closed_round": 0.4535024547610644,
+   "incomplete_activation_request_count": 0.0,
+   "mean_round_duration": 1.3246616391516635,
+   "median_round_duration": 1.1735416666666831,
+   "p95_round_duration": 1.8000000000000398,
+   "reassignments_per_closed_round": 0.4535024547610644,
+   "relative_reduction": 0.5486021886574142,
+   "reserve_wake_rejected_awake_receiver_available": 1544.9166666666667,
+   "reserve_wake_rejected_no_bound_work": 0.0,
+   "reserve_wake_rejected_short_useful_window": 3619.75,
+   "rounds_accepted": 163.66666666666666,
+   "rounds_executed": 226.5,
+   "single_reserve_requests_seated": 0.0,
+   "static_floor_deficit_area_hash_s": 821495.2777777635,
+   "total_physical_evaluations": 139712.41666666666,
+   "unique_physical_evaluations": 139712.41666666666,
+   "useful_floor_deficit_area": 23024.47222222162
+  },
+  "W00_POW_POPULATION_MATCHED": {
+   "E_idle_kwh": 0.035833333333333335,
+   "accepted_blocks_per_closed_round": 0.8002592810146015,
+   "activation_requests_seated": null,
+   "activations_per_closed_round": null,
+   "blocks_per_million_physical_evaluations": 172.35693756980888,
+   "duplicate_handoff_prevented_count": null,
+   "duplicate_physical_evaluations": 1228114.8333333333,
+   "duration_below_static_floor": null,
+   "duration_below_useful_floor": null,
+   "energy_per_accepted_block_kwh": 0.0001447506657146416,
+   "handoff_cancelled_count": null,
+   "handoff_committed_count": null,
+   "handoff_completed_count": null,
+   "handoff_epoch_count": null,
+   "handoffs_per_closed_round": null,
+   "incomplete_activation_request_count": null,
+   "mean_round_duration": 0.9626268612086116,
+   "median_round_duration": 0.18472222222222387,
+   "p95_round_duration": 4.0,
+   "reassignments_per_closed_round": null,
+   "relative_reduction": null,
+   "reserve_wake_rejected_awake_receiver_available": null,
+   "reserve_wake_rejected_no_bound_work": null,
+   "reserve_wake_rejected_short_useful_window": null,
+   "rounds_accepted": 249.41666666666666,
+   "rounds_executed": 311.25,
+   "single_reserve_requests_seated": null,
+   "static_floor_deficit_area_hash_s": null,
+   "total_physical_evaluations": 1447488.5833333333,
+   "unique_physical_evaluations": 219373.75,
+   "useful_floor_deficit_area": null
+  },
+  "W01_POW_ACTIVE_CAPACITY_MATCHED": {
+   "E_idle_kwh": 0.029383333333333334,
+   "accepted_blocks_per_closed_round": 0.8010766073755983,
+   "activation_requests_seated": null,
+   "activations_per_closed_round": null,
+   "blocks_per_million_physical_evaluations": 208.73187436451136,
+   "duplicate_handoff_prevented_count": null,
+   "duplicate_physical_evaluations": 942371.1666666666,
+   "duration_below_static_floor": null,
+   "duration_below_useful_floor": null,
+   "energy_per_accepted_block_kwh": 0.00012271500228419705,
+   "handoff_cancelled_count": null,
+   "handoff_committed_count": null,
+   "handoff_completed_count": null,
+   "handoff_epoch_count": null,
+   "handoffs_per_closed_round": null,
+   "incomplete_activation_request_count": null,
+   "mean_round_duration": 0.995124970666399,
+   "median_round_duration": 0.22486111111110865,
+   "p95_round_duration": 4.0,
+   "reassignments_per_closed_round": null,
+   "relative_reduction": null,
+   "reserve_wake_rejected_awake_receiver_available": null,
+   "reserve_wake_rejected_no_bound_work": null,
+   "reserve_wake_rejected_short_useful_window": null,
+   "rounds_accepted": 241.75,
+   "rounds_executed": 301.25,
+   "single_reserve_requests_seated": null,
+   "static_floor_deficit_area_hash_s": null,
+   "total_physical_evaluations": 1158561.5833333333,
+   "unique_physical_evaluations": 216190.41666666666,
+   "useful_floor_deficit_area": null
+  }
+ },
+ "single_handoff_policy_claim_licensed": false
+}

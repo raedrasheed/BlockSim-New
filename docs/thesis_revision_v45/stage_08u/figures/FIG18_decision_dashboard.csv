@@ -1,0 +1,22 @@
+hypothesis,criterion,value,pass
+H-U1,mean_activation_requests_lt_P01,0.0000,True
+H-U1,mean_incomplete_requests_lt_P01,0.0000,True
+H-U1,mean_reassignments_per_closed_round_le_1.0,0.4535,True
+H-U1,DECISION,PASS,True
+H-U2,mean_accepted_blocks_ratio_P02_over_W01_ge_0.90,0.6770,False
+H-U2,mean_median_round_duration_ratio_P02_over_W01_le_1.10,5.2190,False
+H-U2,DECISION,FAIL,False
+H-U3,bootstrap_ci95_lower_bound_gt_0,0.4487,True
+H-U3,mean_paired_relative_energy_reduction_ge_0.20,0.4495,True
+H-U3,DECISION,PASS,True
+H-U5,duplicate_nonce_count_zero_every_run,0,True
+H-U5,mean_duration_below_useful_floor_le_15s,23.1305,False
+H-U5,nonterminal_activation_request_count_zero_every_run,0,True
+H-U5,nonterminal_handoff_epoch_count_zero_every_run,0,True
+H-U5,nonterminal_lease_count_zero_every_run,0,True
+H-U5,nonterminal_reassignment_request_count_zero_every_run,0,True
+H-U5,physical_frontier_rewind_count_zero_every_run,0,True
+H-U5,post_round_evaluation_record_count_zero_every_run,0,True
+H-U5,DECISION,FAIL,False
+INTEGRITY,all deterministic gates in all 60 runs,PASS,True
+OVERALL,single-handoff policy claim,NOT LICENSED,False

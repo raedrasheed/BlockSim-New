@@ -1,0 +1,22 @@
+{
+ "figure_id": "FIG05",
+ "kind": "grouped_points_mean_ci",
+ "palette": "okabe-ito",
+ "scenario_ids": [
+  "P00_POCOL_NO_FLOOR",
+  "P01_POCOL_STAGE8S_COARSE",
+  "P02_POCOL_SINGLE_HANDOFF",
+  "W00_POW_POPULATION_MATCHED",
+  "W01_POW_ACTIVE_CAPACITY_MATCHED"
+ ],
+ "scenario_scope": "ALL",
+ "source_csv": "FIG05_energy_per_block.csv",
+ "style_rules": [
+  "colour_blind_safe",
+  "no_3d",
+  "no_truncated_bars",
+  "paired_seed_points_visible",
+  "mean_with_95ci"
+ ],
+ "title": "Energy per accepted block (NA when a run has zero blocks)"
+}

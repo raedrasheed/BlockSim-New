@@ -1,0 +1,79 @@
+{
+ "E_idle_kwh": 0.035833333333333335,
+ "E_power_null_kwh": null,
+ "a1_continuous_control_kwh": null,
+ "absolute_reduction_kwh": null,
+ "accepted_blocks_per_closed_round": 0.8083067092651757,
+ "all_integrity_gates_pass": true,
+ "blocks_per_million_physical_evaluations": 175.13183342955202,
+ "config_sha256": "a6baa9b2d2ec220b526f1320c8576df9cafa65f1c003579d031e308276267812",
+ "controller_mode_configured": "MATCHED_POW",
+ "difficulty_configured": 1000,
+ "duplicate_physical_evaluations": 1212595,
+ "energy_kwh_active_hashing": 0.03583333333333333,
+ "energy_kwh_reserve_standby": 0.0,
+ "energy_per_accepted_block_kwh": 0.00014163372859025034,
+ "engine": "MATCHED_POW",
+ "engine_sha256": "66cda7be55442ca38119abe893fb23c8ef9f8ff0e2db3dd21e83513d6d7988e1",
+ "first_valid_solution_count": 253,
+ "integrity_gates": [
+  {
+   "gate": "energy_identity_residual_j <= 1e-8",
+   "pass": true
+  },
+  {
+   "gate": "residency_partition_residual_s <= 1e-9",
+   "pass": true
+  },
+  {
+   "gate": "post_round_evaluation_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "total == unique + duplicate",
+   "pass": true
+  },
+  {
+   "gate": "blocks == first_valid_solution_count",
+   "pass": true
+  },
+  {
+   "gate": "round close times strictly increasing",
+   "pass": true
+  },
+  {
+   "gate": "fixed target and difficulty",
+   "pass": true
+  }
+ ],
+ "master_seed": 11348986123437513146,
+ "maximum_energy_identity_residual_j": 1.4551915228366852e-11,
+ "maximum_residency_partition_residual_s": 0.0,
+ "mean_round_duration": 0.9534504792332269,
+ "median_round_duration": 0.19500000000000028,
+ "mining_node_count": 20,
+ "offline_residency_s": 0.0,
+ "p95_round_duration": 4.0,
+ "peak_rss_mb": 29.64453125,
+ "post_round_evaluation_count": 0,
+ "python_version": "3.11.15",
+ "record_sha256": "c39b20824a22c8fd36723d84ca9cbdbd7a149190b827845b9cb0b0d41cd69153",
+ "relative_reduction": null,
+ "role": "CONFIRMATORY_POW_CONTROL",
+ "round_terminal_times_strictly_increasing": true,
+ "rounds_accepted": 253,
+ "rounds_executed": 313,
+ "rounds_exhausted": 60,
+ "rounds_horizon_truncated": 1,
+ "run_id": "8u-W00_POW_POPULATION_MATCHED-s06",
+ "run_status": "COMPLETED",
+ "scenario_id": "W00_POW_POPULATION_MATCHED",
+ "seed_class": "CONFIRMATORY_8U",
+ "seed_index": 6,
+ "standby_node_count": 0,
+ "total_physical_evaluations": 1444626,
+ "unclosed_final_tail_s": 0.0,
+ "unique_physical_evaluations": 232031,
+ "wall_clock_seconds": 0.6789846420288086,
+ "zero_block_indicator": 0
+}

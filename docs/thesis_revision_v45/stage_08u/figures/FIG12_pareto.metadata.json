@@ -1,0 +1,22 @@
+{
+ "figure_id": "FIG12",
+ "kind": "scatter_centroids",
+ "palette": "okabe-ito",
+ "scenario_ids": [
+  "P00_POCOL_NO_FLOOR",
+  "P01_POCOL_STAGE8S_COARSE",
+  "P02_POCOL_SINGLE_HANDOFF",
+  "W00_POW_POPULATION_MATCHED",
+  "W01_POW_ACTIVE_CAPACITY_MATCHED"
+ ],
+ "scenario_scope": "ALL",
+ "source_csv": "FIG12_pareto.csv",
+ "style_rules": [
+  "colour_blind_safe",
+  "no_3d",
+  "no_truncated_bars",
+  "paired_seed_points_visible",
+  "mean_with_95ci"
+ ],
+ "title": "Energy-service Pareto plane (per-seed points and scenario centroids)"
+}

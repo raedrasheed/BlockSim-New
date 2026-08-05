@@ -1,0 +1,24 @@
+{
+ "figure_id": "FIG11",
+ "kind": "grouped_bars",
+ "palette": "okabe-ito",
+ "scenario_ids": [
+  "P00_POCOL_NO_FLOOR",
+  "P01_POCOL_STAGE8S_COARSE",
+  "P02_POCOL_SINGLE_HANDOFF"
+ ],
+ "scenario_scope": [
+  "P00_POCOL_NO_FLOOR",
+  "P01_POCOL_STAGE8S_COARSE",
+  "P02_POCOL_SINGLE_HANDOFF"
+ ],
+ "source_csv": "FIG11_churn.csv",
+ "style_rules": [
+  "colour_blind_safe",
+  "no_3d",
+  "no_truncated_bars",
+  "paired_seed_points_visible",
+  "mean_with_95ci"
+ ],
+ "title": "Activation requests, incomplete activations, handoffs and reassignments per closed round"
+}

@@ -1,0 +1,20 @@
+{
+ "figure_id": "FIG17",
+ "kind": "descriptive_lines",
+ "palette": "okabe-ito",
+ "scenario_ids": [
+  "P02_POCOL_SINGLE_HANDOFF"
+ ],
+ "scenario_scope": [
+  "P02_POCOL_SINGLE_HANDOFF"
+ ],
+ "source_csv": "FIG17_policy_evolution.csv",
+ "style_rules": [
+  "colour_blind_safe",
+  "no_3d",
+  "no_truncated_bars",
+  "paired_seed_points_visible",
+  "mean_with_95ci"
+ ],
+ "title": "Policy evolution 8M -> 8R -> 8S -> P02 (descriptive only; no cross-stage inferential statistic)"
+}
