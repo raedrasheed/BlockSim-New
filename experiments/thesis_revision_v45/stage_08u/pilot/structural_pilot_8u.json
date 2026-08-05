@@ -1,0 +1,283 @@
+{
+ "all_structural_gates_pass": true,
+ "gates": [
+  {
+   "gate": "every scenario executes (10/10 COMPLETED)",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-W00_POW_POPULATION_MATCHED-p0: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-W00_POW_POPULATION_MATCHED-p0: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-W00_POW_POPULATION_MATCHED-p0: comparison fields present",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-W00_POW_POPULATION_MATCHED-p1: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-W00_POW_POPULATION_MATCHED-p1: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-W00_POW_POPULATION_MATCHED-p1: comparison fields present",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-W01_POW_ACTIVE_CAPACITY_MATCHED-p0: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-W01_POW_ACTIVE_CAPACITY_MATCHED-p0: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-W01_POW_ACTIVE_CAPACITY_MATCHED-p0: comparison fields present",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-W01_POW_ACTIVE_CAPACITY_MATCHED-p1: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-W01_POW_ACTIVE_CAPACITY_MATCHED-p1: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-W01_POW_ACTIVE_CAPACITY_MATCHED-p1: comparison fields present",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P00_POCOL_NO_FLOOR-p0: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P00_POCOL_NO_FLOOR-p0: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P00_POCOL_NO_FLOOR-p0: comparison fields present",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P00_POCOL_NO_FLOOR-p1: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P00_POCOL_NO_FLOOR-p1: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P00_POCOL_NO_FLOOR-p1: comparison fields present",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P01_POCOL_STAGE8S_COARSE-p0: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P01_POCOL_STAGE8S_COARSE-p0: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P01_POCOL_STAGE8S_COARSE-p0: comparison fields present",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P01_POCOL_STAGE8S_COARSE-p1: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P01_POCOL_STAGE8S_COARSE-p1: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P01_POCOL_STAGE8S_COARSE-p1: comparison fields present",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P02_POCOL_SINGLE_HANDOFF-p0: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P02_POCOL_SINGLE_HANDOFF-p0: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P02_POCOL_SINGLE_HANDOFF-p0: comparison fields present",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P02_POCOL_SINGLE_HANDOFF-p1: integrity fields computable and pass",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P02_POCOL_SINGLE_HANDOFF-p1: wall/RSS feasible",
+   "pass": true
+  },
+  {
+   "gate": "8u-pilot-P02_POCOL_SINGLE_HANDOFF-p1: comparison fields present",
+   "pass": true
+  },
+  {
+   "gate": "the single handoff occurs (every P02 pilot run)",
+   "pass": true
+  },
+  {
+   "gate": "handoff structural gates pass (every P02 pilot run)",
+   "pass": true
+  },
+  {
+   "gate": "PoW overlap measurable (every W pilot run)",
+   "pass": true
+  },
+  {
+   "gate": "PoW post-round evaluations zero (every W pilot run)",
+   "pass": true
+  },
+  {
+   "gate": "W00 and W01 remain separate scenarios",
+   "pass": true
+  }
+ ],
+ "harness": "run_stage8u.py pilot",
+ "purpose": "STRUCTURE AND FEASIBILITY ONLY.  Nothing here may tune any seed, margin, acceptance threshold, target, difficulty or scenario definition.",
+ "runs": [
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_physical_evaluations": 1249587,
+   "engine": "MATCHED_POW",
+   "handoff_committed_count": null,
+   "rounds_accepted": 233,
+   "rounds_executed": 297,
+   "run_id": "8u-pilot-W00_POW_POPULATION_MATCHED-p0",
+   "run_status": "COMPLETED",
+   "scenario_id": "W00_POW_POPULATION_MATCHED",
+   "single_reserve_requests_seated": null,
+   "wall_clock_seconds": 0.44156861305236816
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_physical_evaluations": 1268771,
+   "engine": "MATCHED_POW",
+   "handoff_committed_count": null,
+   "rounds_accepted": 192,
+   "rounds_executed": 257,
+   "run_id": "8u-pilot-W00_POW_POPULATION_MATCHED-p1",
+   "run_status": "COMPLETED",
+   "scenario_id": "W00_POW_POPULATION_MATCHED",
+   "single_reserve_requests_seated": null,
+   "wall_clock_seconds": 0.3742499351501465
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_physical_evaluations": 967239,
+   "engine": "MATCHED_POW",
+   "handoff_committed_count": null,
+   "rounds_accepted": 222,
+   "rounds_executed": 284,
+   "run_id": "8u-pilot-W01_POW_ACTIVE_CAPACITY_MATCHED-p0",
+   "run_status": "COMPLETED",
+   "scenario_id": "W01_POW_ACTIVE_CAPACITY_MATCHED",
+   "single_reserve_requests_seated": null,
+   "wall_clock_seconds": 0.40779638290405273
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_physical_evaluations": 976694,
+   "engine": "MATCHED_POW",
+   "handoff_committed_count": null,
+   "rounds_accepted": 189,
+   "rounds_executed": 253,
+   "run_id": "8u-pilot-W01_POW_ACTIVE_CAPACITY_MATCHED-p1",
+   "run_status": "COMPLETED",
+   "scenario_id": "W01_POW_ACTIVE_CAPACITY_MATCHED",
+   "single_reserve_requests_seated": null,
+   "wall_clock_seconds": 0.35706281661987305
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_physical_evaluations": 0,
+   "engine": "POCOL",
+   "handoff_committed_count": 0,
+   "rounds_accepted": 173,
+   "rounds_executed": 220,
+   "run_id": "8u-pilot-P00_POCOL_NO_FLOOR-p0",
+   "run_status": "COMPLETED",
+   "scenario_id": "P00_POCOL_NO_FLOOR",
+   "single_reserve_requests_seated": 0,
+   "wall_clock_seconds": 1.1304256916046143
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_physical_evaluations": 0,
+   "engine": "POCOL",
+   "handoff_committed_count": 0,
+   "rounds_accepted": 166,
+   "rounds_executed": 218,
+   "run_id": "8u-pilot-P00_POCOL_NO_FLOOR-p1",
+   "run_status": "COMPLETED",
+   "scenario_id": "P00_POCOL_NO_FLOOR",
+   "single_reserve_requests_seated": 0,
+   "wall_clock_seconds": 1.105583906173706
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_physical_evaluations": 0,
+   "engine": "POCOL",
+   "handoff_committed_count": 0,
+   "rounds_accepted": 167,
+   "rounds_executed": 210,
+   "run_id": "8u-pilot-P01_POCOL_STAGE8S_COARSE-p0",
+   "run_status": "COMPLETED",
+   "scenario_id": "P01_POCOL_STAGE8S_COARSE",
+   "single_reserve_requests_seated": 0,
+   "wall_clock_seconds": 2.819965362548828
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_physical_evaluations": 0,
+   "engine": "POCOL",
+   "handoff_committed_count": 0,
+   "rounds_accepted": 153,
+   "rounds_executed": 201,
+   "run_id": "8u-pilot-P01_POCOL_STAGE8S_COARSE-p1",
+   "run_status": "COMPLETED",
+   "scenario_id": "P01_POCOL_STAGE8S_COARSE",
+   "single_reserve_requests_seated": 0,
+   "wall_clock_seconds": 2.96466326713562
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_physical_evaluations": 0,
+   "engine": "POCOL",
+   "handoff_committed_count": 96,
+   "rounds_accepted": 171,
+   "rounds_executed": 230,
+   "run_id": "8u-pilot-P02_POCOL_SINGLE_HANDOFF-p0",
+   "run_status": "COMPLETED",
+   "scenario_id": "P02_POCOL_SINGLE_HANDOFF",
+   "single_reserve_requests_seated": 0,
+   "wall_clock_seconds": 2.2107784748077393
+  },
+  {
+   "all_integrity_gates_pass": true,
+   "duplicate_physical_evaluations": 0,
+   "engine": "POCOL",
+   "handoff_committed_count": 106,
+   "rounds_accepted": 154,
+   "rounds_executed": 224,
+   "run_id": "8u-pilot-P02_POCOL_SINGLE_HANDOFF-p1",
+   "run_status": "COMPLETED",
+   "scenario_id": "P02_POCOL_SINGLE_HANDOFF",
+   "single_reserve_requests_seated": 0,
+   "wall_clock_seconds": 2.2114856243133545
+  }
+ ]
+}
