@@ -25,8 +25,17 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional, Tuple
 
 CONTROLLER_MODES = ("LEGACY_REACTIVE", "HYSTERESIS_ONLY", "HYSTERESIS_PREDICTIVE",
-                    "HYSTERESIS_PREDICTIVE_REASSIGNMENT")
-PREDICTIVE_MODES = ("HYSTERESIS_PREDICTIVE", "HYSTERESIS_PREDICTIVE_REASSIGNMENT")
+                    "HYSTERESIS_PREDICTIVE_REASSIGNMENT",
+                    # Stage-8S: STAGE8R_PREDICTIVE_STATIC_FLOOR is behaviourally identical
+                    # to HYSTERESIS_PREDICTIVE (it exists as the frozen named baseline);
+                    # the two USEFUL_FLOOR modes add the useful-work-aware target and (for
+                    # the second) work-conserving coarse suffix repartition.
+                    "STAGE8R_PREDICTIVE_STATIC_FLOOR",
+                    "USEFUL_FLOOR_ONLY", "USEFUL_FLOOR_COARSE_REASSIGNMENT")
+PREDICTIVE_MODES = ("HYSTERESIS_PREDICTIVE", "HYSTERESIS_PREDICTIVE_REASSIGNMENT",
+                    "STAGE8R_PREDICTIVE_STATIC_FLOOR",
+                    "USEFUL_FLOOR_ONLY", "USEFUL_FLOOR_COARSE_REASSIGNMENT")
+USEFUL_FLOOR_MODES = ("USEFUL_FLOOR_ONLY", "USEFUL_FLOOR_COARSE_REASSIGNMENT")
 
 EPISODE_STATUSES = ("OPEN", "RECOVERY_IN_PROGRESS", "RECOVERED", "ROUND_CLOSED",
                     "UNATTAINABLE")
@@ -80,6 +89,12 @@ class ControllerPolicy:
 
     def is_predictive(self) -> bool:
         return self.mode in PREDICTIVE_MODES
+
+    def is_useful_floor(self) -> bool:
+        return self.mode in USEFUL_FLOOR_MODES
+
+    def is_coarse(self) -> bool:
+        return self.mode == "USEFUL_FLOOR_COARSE_REASSIGNMENT"
 
     def trigger_rate(self, minimum_active_hash_rate: float) -> float:
         return minimum_active_hash_rate * self.reactive_trigger_ratio / self.central_target_ratio
@@ -170,6 +185,77 @@ class PredictionRecord:
     prediction_error: Optional[float] = None
     false_positive_wake: Optional[bool] = None
     late_wake: bool = False
+
+
+@dataclass
+class CoarseRequest:
+    """S8S-4: one immutable coarse-reassignment chunk request.
+
+    The donor's accepted remaining suffix is partitioned into deterministic contiguous
+    near-equal chunks; the donor retains the first chunk and each receiver gets at most one
+    chunk.  One repartition per donor lineage per breach episode; one live chunk per
+    receiver; the chunk union equals the original suffix exactly and chunks are pairwise
+    disjoint by construction."""
+
+    CoarseRequestID: Any
+    RoundID: Any
+    TemplateID: Any
+    BreachEpisodeID: Any
+    DonorMinerID: Any
+    DonorAssignmentID: Any
+    ReceiverMinerID: Any
+    AssignmentID: Any
+    chunk_start: int
+    chunk_end: int                      # exclusive
+    seated_at: float
+    status: str = "SEATED"              # SEATED | ACTIVE | COMPLETED | CANCELLED
+    started_at: Optional[float] = None
+    completed_at: Optional[float] = None
+
+    def size(self) -> int:
+        return self.chunk_end - self.chunk_start
+
+
+def h_useful_available(run_ctx: Any, rc: Any, include_receivers: bool) -> Tuple[float, dict]:
+    """S8S-2: the maximum ACTUAL capacity assignable useful, non-overlapping nonce work now.
+
+    Includes ONLY (1) ACTIVE_HASHING miners on a non-empty accepted range and (2) — when
+    the coarse-reassignment mechanism exists to deliver work (``include_receivers``) —
+    already-awake eligible receivers, bounded by the spare whole batches that active donors
+    could cede while keeping one batch each.  WAKING miners, reserves, stale assignments
+    and any future-solution information are excluded; live wake requests belong to
+    H_pipeline only.
+    """
+    from .security import compute_h_effective            # local import (no cycle at load)
+    h_eff, _n, _ids = compute_h_effective(run_ctx, rc)
+    cfg = run_ctx.config
+    spare_units = 0
+    for mid, st in getattr(rc, "search_states", {}).items():
+        if st.completed:
+            continue
+        m = run_ctx.miners.get(mid)
+        if m is None or m.state != "ACTIVE_HASHING":
+            continue
+        remaining = max(0, st.range_end - st.cursor)
+        spare_units += max(0, remaining // cfg.batch_size - 1)
+    receivers = []
+    if include_receivers:
+        live = getattr(run_ctx, "coarse_live_by_receiver", {})
+        for mid, st in getattr(rc, "search_states", {}).items():
+            if not st.completed or getattr(st, "completion_kind", None) != "EXHAUSTED":
+                continue
+            m = run_ctx.miners.get(mid)
+            if m is None or m.state != "LOW_POWER_LISTEN":
+                continue
+            if mid in live:
+                continue                                  # one live reassignment per receiver
+            receivers.append((float(st.hash_rate), str(mid), mid))
+        receivers.sort(key=lambda x: (-x[0], x[1]))       # deterministic: rate desc, then id
+    counted = receivers[:spare_units] if include_receivers else []
+    value = h_eff + sum(r for r, _s, _m in counted)
+    return value, {"h_effective": h_eff, "spare_batch_units": spare_units,
+                   "eligible_receivers": [m for _r, _s, m in receivers],
+                   "counted_receivers": [m for _r, _s, m in counted]}
 
 
 def predict_h_future(run_ctx: Any, rc: Any, now: float, lookahead: float,
@@ -274,4 +360,21 @@ def controller_stats_template() -> dict:
         "duration_pipeline_above_target_while_H_effective_below_target": 0.0,
         "controller_suffix_reassignment_count": 0,
         "controller_suffix_reassignment_skipped_in_flight": 0,
+        # ---- Stage-8S useful-floor metrics (independent of the static-floor metrics) ----
+        "duration_below_useful_floor": 0.0,
+        "useful_floor_deficit_area": 0.0,
+        "useful_floor_unattainable_count": 0,
+        "H_useful_available_time_integral": 0.0,
+        "H_useful_target_time_integral": 0.0,
+        # ---- Stage-8S coarse-reassignment metrics ----
+        "coarse_repartition_count": 0,
+        "coarse_reassignment_count": 0,
+        "sum_coarse_chunk_size": 0,
+        "minimum_coarse_chunk_size": 0,
+        "maximum_coarse_chunk_size": 0,
+        "donor_lineage_repartition_replay_count": 0,
+        "duplicate_reassignment_prevented_count": 0,
+        # ---- Stage-8S reserve admission control ----
+        "reserve_wakes_rejected_no_useful_work": 0,
+        "reserve_wakes_with_bound_work": 0,
     }

@@ -911,7 +911,55 @@ def _controller_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
         "controller_suffix_reassignment_count": cs["controller_suffix_reassignment_count"],
         "controller_suffix_reassignment_skipped_in_flight":
             cs["controller_suffix_reassignment_skipped_in_flight"],
+        # ---- Stage-8S: static + useful floor metrics (BOTH reported in every run;
+        # independently computed — the static family from the accepted security stats, the
+        # useful family from the controller's piecewise trackers) ----
+        "duration_below_static_floor": run_ctx.security_stats["total_duration_below_floor"],
+        "static_floor_unattainable_count":
+            run_ctx.security_stats["floor_unattainable_count"],
+        "duration_below_useful_floor": cs["duration_below_useful_floor"],
+        "useful_floor_deficit_area": cs["useful_floor_deficit_area"],
+        "useful_floor_unattainable_count": cs["useful_floor_unattainable_count"],
+        "H_useful_available_time_weighted": (
+            cs["H_useful_available_time_integral"] / horizon if horizon else 0.0),
+        "H_useful_target_time_weighted": (
+            cs["H_useful_target_time_integral"] / horizon if horizon else 0.0),
+        # ---- Stage-8S: coarse-reassignment metrics ----
+        "coarse_repartition_count": cs["coarse_repartition_count"],
+        "coarse_reassignment_count": cs["coarse_reassignment_count"],
+        "mean_coarse_chunk_size": (
+            cs["sum_coarse_chunk_size"] / cs["coarse_reassignment_count"]
+            if cs["coarse_reassignment_count"] else 0.0),
+        "minimum_coarse_chunk_size": cs["minimum_coarse_chunk_size"],
+        "maximum_coarse_chunk_size": cs["maximum_coarse_chunk_size"],
+        "donor_lineage_repartition_replay_count":
+            cs["donor_lineage_repartition_replay_count"],
+        "duplicate_reassignment_prevented_count":
+            cs["duplicate_reassignment_prevented_count"],
+        "nonterminal_coarse_request_count": sum(
+            1 for q in run_ctx.coarse_requests.values()
+            if q.status not in ("COMPLETED", "CANCELLED")),
+        "coarse_requests_completed": sum(
+            1 for q in run_ctx.coarse_requests.values() if q.status == "COMPLETED"),
+        # ---- Stage-8S: reserve admission control (S8S-5) ----
+        "reserve_wakes_rejected_no_useful_work":
+            cs["reserve_wakes_rejected_no_useful_work"],
+        "reserve_wakes_with_bound_work": cs["reserve_wakes_with_bound_work"],
+        "reserve_wakes_completed_with_useful_work": _useful_completions(run_ctx),
+        "reserve_wake_useful_completion_ratio": (
+            _useful_completions(run_ctx) / max(1, sum(
+                1 for q in run_ctx.activation_requests.values()
+                if q.status == "COMPLETED"))
+            if any(q.status == "COMPLETED" for q in run_ctx.activation_requests.values())
+            else 0.0),
     }
+
+
+def _useful_completions(run_ctx: Any) -> int:
+    """Completed reserve wakes whose miner actually committed useful evaluation work."""
+    return sum(1 for q in run_ctx.activation_requests.values()
+               if q.status == "COMPLETED"
+               and run_ctx.final_searched.get((q.RoundID, q.MinerID), 0) > 0)
 
 
 def matched_identity_experiment_schema(n_miners: int = 8) -> Dict[str, Any]:

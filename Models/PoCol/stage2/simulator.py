@@ -47,9 +47,14 @@ from .leases import (RangeLease, RangeProgress, RangeReassignmentDecision,
 # coalition-resistance, common-prefix, chain-quality or PoW-equivalent security claim.
 from . import adversarial_runtime as _adv
 from .adversarial import ADVERSARIAL_COVERAGE_GAP_NO_BLOCK
-from .refinement import (ActivationBatch, BreachEpisode, PredictionRecord,
+from .refinement import (ActivationBatch, BreachEpisode, CoarseRequest, PredictionRecord,
                          TERMINAL_EPISODE_STATUSES, h_pipeline as _r5_h_pipeline,
+                         h_useful_available as _s8s_h_useful_available,
                          predict_h_future as _r4_predict_h_future)
+
+#: S8S-4 evaluation-ledger kind for coarse-reassigned receiver work (a PRIMARY-domain
+#: suffix taken over by an already-awake finished miner; never reserve-domain work).
+COARSE_REASSIGNED_WORK = "COARSE_REASSIGNED_WORK"
 
 _TERMINAL_ROUND = ("ROUND_ACCEPTED", "ROUND_ABORTED")
 
@@ -740,6 +745,9 @@ def _handle_range_exhaust(run_ctx: RunContext, payload: Dict[str, Any],
     t = run_ctx.event_queue.current_event_time
     if m is not None and m.state == "ACTIVE_HASHING":
         run_ctx.apply_miner_state_transition(mid, "LOW_POWER_LISTEN", t)   # idle policy
+    # Stage-8S: a receiver exhausting its coarse chunk terminalises its request.
+    if run_ctx.config.controller.is_coarse():
+        _coarse_note_completion(run_ctx, rc, mid, t)
     # S4A-9: a reassignee that exhausts its suffix ends its reassigned ACTIVE_HASHING interval.
     if run_ctx.config.range_lease.enabled:
         _stamp_reassignee_active_end(run_ctx, rc, mid, t)
@@ -2483,6 +2491,8 @@ def _update_pipeline_stats(run_ctx: RunContext, rc: RoundContext, now: float):
     run_ctx._pipe_last_h_effective = h_eff
     if pipe > cs["maximum_H_pipeline"]:
         cs["maximum_H_pipeline"] = pipe
+    # Stage-8S: the useful-floor reporting quantities share the same touchpoints.
+    _update_useful_stats(run_ctx, rc, now)
     return h_eff, pipe
 
 
@@ -2514,6 +2524,10 @@ def _refined_on_not_breached(run_ctx: RunContext, rc: RoundContext, now: float,
     ep = _current_episode(run_ctx, rc)
     if ep is None:
         return
+    if run_ctx.config.controller.is_useful_floor():
+        # USEFUL modes: recovery is judged against the CURRENT useful-work-aware reference.
+        _m, _t, rec_now = _decision_reference(run_ctx, rc)
+        ep.recovery_hash_rate = rec_now
     if h_eff >= ep.recovery_hash_rate and _live_batch(run_ctx, ep) is None:
         ep.status = "RECOVERED"
         ep.recovered_at = now
@@ -2538,8 +2552,9 @@ def _refined_floor_decide(run_ctx: RunContext, rc: RoundContext, obs: Any, now: 
     nothing.  One live activation batch per episode (R1/R3); deterministic cooldown (R3)."""
     ctrl = run_ctx.config.controller
     pol = run_ctx.config.security_floor
-    min_rate = pol.minimum_active_hash_rate
-    trigger = ctrl.trigger_rate(min_rate)
+    # Stage-8S: USEFUL modes reference the useful-work-aware target; static modes keep the
+    # exact Stage-8R numbers (the reference equals the static floor there).
+    min_rate, trigger, _rec = _decision_reference(run_ctx, rc)
     _update_pipeline_stats(run_ctx, rc, now)
     _resolve_due_predictions(run_ctx, rc, now)
     covered = h_eff + inflight + pending_rate
@@ -2570,19 +2585,20 @@ def _refined_floor_decide(run_ctx: RunContext, rc: RoundContext, obs: Any, now: 
         return None
     return _seat_refined_batch(run_ctx, rc, ep, obs, now, covered, active_count,
                                inflight_count, pending_count, origin="REACTIVE",
-                               seat_h_effective=h_eff)
+                               seat_h_effective=h_eff, min_ref=min_rate)
 
 
 def _seat_refined_batch(run_ctx: RunContext, rc: RoundContext, ep: Any, obs: Any,
                         now: float, covered: float, active_count: int, inflight_count: int,
                         pending_count: int, origin: str,
-                        seat_h_effective: float = 0.0) -> Optional[Outcome]:
+                        seat_h_effective: float = 0.0,
+                        min_ref: Optional[float] = None) -> Optional[Outcome]:
     """R3: seat ONE activation batch sized to the capacity still missing from the target,
     using the accepted minimum-cardinality selection and the accepted all-or-none seating
     transaction.  Stale/cancelled/terminal requests never count toward sufficiency."""
     ctrl = run_ctx.config.controller
     pol = run_ctx.config.security_floor
-    min_rate = pol.minimum_active_hash_rate
+    min_rate = pol.minimum_active_hash_rate if min_ref is None else min_ref
     min_count = pol.minimum_active_miner_count
     need = min_rate - covered
     need_count = 0 if min_count is None else max(
@@ -2596,6 +2612,12 @@ def _seat_refined_batch(run_ctx: RunContext, rc: RoundContext, ep: Any, obs: Any
                  if sl.status == "UNCLAIMED"]
     cap = min(len(eligible), len(unclaimed), max(0, remaining))
     cs = run_ctx.controller_stats
+    if ctrl.is_useful_floor() and eligible and not unclaimed:
+        # S8S-5 reserve admission control: eligible reserves exist but no useful work can
+        # be atomically bound to a wake — record the rejection, wake nothing.
+        cs["reserve_wakes_rejected_no_useful_work"] += len(eligible)
+        run_ctx.log.append(Outcome("activation_rejected_no_useful_work",
+                                   RoundID=rc.RoundID, eligible=len(eligible)))
     if cap <= 0:
         # the reserve pool of this round is spent: the episode terminalises UNATTAINABLE
         # and no further episode opens this round (the pool cannot refill inside a round).
@@ -2607,6 +2629,10 @@ def _seat_refined_batch(run_ctx: RunContext, rc: RoundContext, ep: Any, obs: Any
         cs["episode_unattainable_count"] += 1
         _record_decision(run_ctx, obs, [], [], covered, max(0.0, min_rate - covered),
                          "FLOOR_UNATTAINABLE")
+        if ctrl.is_useful_floor():
+            # the USEFUL counter is independent of the historical static counter.
+            cs["useful_floor_unattainable_count"] += 1
+            return None
         return _apply_floor_unattainable(run_ctx, rc, now)
     top = sorted((r.hash_rate for r in eligible), reverse=True)[:cap]
     max_projected = covered + sum(top)
@@ -2651,6 +2677,8 @@ def _seat_refined_batch(run_ctx: RunContext, rc: RoundContext, ep: Any, obs: Any
     if ep.status == "OPEN":
         ep.status = "RECOVERY_IN_PROGRESS"
     cs["activation_batches_seated"] += 1
+    if ctrl.is_useful_floor():
+        cs["reserve_wakes_with_bound_work"] += len(batch.request_ids)
     cs["predictive_batches_seated" if origin == "PREDICTIVE"
        else "reactive_batches_seated"] += 1
     cs["requested_reserve_hash_rate_total"] += batch.requested_hash_rate
@@ -2715,6 +2743,10 @@ def _refined_predictive_check(run_ctx: RunContext, rc: RoundContext,
     cfg = run_ctx.config
     ctrl = cfg.controller
     pol = cfg.security_floor
+    if ctrl.is_useful_floor():
+        # Stage-8S: USEFUL modes take their own path; the Stage-8R static-floor path below
+        # stays byte-identical for STAGE8R_PREDICTIVE_STATIC_FLOOR / HYSTERESIS_PREDICTIVE.
+        return _useful_predictive_check(run_ctx, rc, now)
     if rc is None or rc.round_state in _TERMINAL_ROUND:
         return None
     h_eff, _pipe = _update_pipeline_stats(run_ctx, rc, now)
@@ -2849,6 +2881,351 @@ def _refined_close_round(run_ctx: RunContext, rc: RoundContext, t: float) -> Non
         if batch.RoundID == rc.RoundID and batch.status != "TERMINAL":
             batch.status = "TERMINAL"
     rc.current_episode_id = None
+    # ---- Stage-8S: terminalise every coarse-reassignment request of this round --------
+    ctrl = run_ctx.config.controller
+    if ctrl.is_coarse():
+        for req in run_ctx.coarse_requests.values():
+            if req.RoundID != rc.RoundID or req.status in ("COMPLETED", "CANCELLED"):
+                continue
+            st = rc.search_states.get(req.ReceiverMinerID)
+            if st is not None and st.AssignmentID == req.AssignmentID and st.completed:
+                req.status = "COMPLETED"
+                req.completed_at = t
+            else:
+                req.status = "CANCELLED"
+            run_ctx.coarse_live_by_receiver.pop(req.ReceiverMinerID, None)
+            m = run_ctx.miners.get(req.ReceiverMinerID)
+            if m is not None and m.state == "WAKING":
+                run_ctx.apply_miner_state_transition(req.ReceiverMinerID,
+                                                     "LOW_POWER_LISTEN", t)
+    if ctrl.is_useful_floor():
+        _update_useful_stats(run_ctx, rc, t)
+
+
+# ============================================================ Stage-8S useful-work floor
+# The useful-work-aware idle and reserve-control policy within PoCol.  Everything below is
+# inert unless the controller mode is USEFUL_FLOOR_ONLY or USEFUL_FLOOR_COARSE_REASSIGNMENT;
+# STAGE8R_PREDICTIVE_STATIC_FLOOR shares the unchanged Stage-8R code path exactly.
+def _useful_target(run_ctx: RunContext, rc: RoundContext):
+    """S8S-2: H_useful_target(t) = min(0.80 x H0, H_useful_available(t)).  The static floor
+    is NEVER redefined — it stays reported as the historical secondary metric."""
+    pol = run_ctx.config.security_floor
+    avail, det = _s8s_h_useful_available(run_ctx, rc,
+                                         run_ctx.config.controller.is_coarse())
+    return min(pol.minimum_active_hash_rate, avail), avail, det
+
+
+def _decision_reference(run_ctx: RunContext, rc: RoundContext):
+    """The controller's decision reference: the static floor for static modes, the
+    useful-work-aware target for USEFUL modes.  Measurement (observations, below-static-
+    floor accounting) always stays on the static floor in every mode."""
+    ctrl = run_ctx.config.controller
+    pol = run_ctx.config.security_floor
+    if not ctrl.is_useful_floor():
+        m = pol.minimum_active_hash_rate
+        return m, ctrl.trigger_rate(m), ctrl.recovery_rate(m)
+    target, _avail, _det = _useful_target(run_ctx, rc)
+    return target, ctrl.trigger_rate(target), ctrl.recovery_rate(target)
+
+
+def _update_useful_stats(run_ctx: RunContext, rc: RoundContext, now: float) -> None:
+    """S8S-2 reporting: piecewise-constant tracking of H_useful_available / H_useful_target
+    and the useful-floor deficit.  Reporting only; never substituted into any integrity
+    check.  Tracked in every refined mode with the floor enabled (zeros under LEGACY).
+
+    The REPORTED availability always counts already-awake eligible receivers (the
+    counterfactual "capacity that COULD usefully work"), so the useful-floor deficit is
+    comparable across modes; the DECISION reference (`_useful_target`) counts receivers
+    only when the mode's mechanism can actually deliver work to them."""
+    if not run_ctx.config.security_floor.enabled:
+        return
+    pol = run_ctx.config.security_floor
+    avail, det = _s8s_h_useful_available(run_ctx, rc, True)
+    target = min(pol.minimum_active_hash_rate, avail)
+    h_eff = det["h_effective"]
+    cs = run_ctx.controller_stats
+    last_t = run_ctx._useful_last_time
+    if last_t is not None and now > last_t:
+        dt = now - last_t
+        cs["H_useful_available_time_integral"] += run_ctx._useful_last_available * dt
+        cs["H_useful_target_time_integral"] += run_ctx._useful_last_target * dt
+        if run_ctx._useful_last_h_effective < run_ctx._useful_last_target:
+            cs["duration_below_useful_floor"] += dt
+            cs["useful_floor_deficit_area"] += (
+                run_ctx._useful_last_target - run_ctx._useful_last_h_effective) * dt
+    run_ctx._useful_last_time = now
+    run_ctx._useful_last_available = avail
+    run_ctx._useful_last_target = target
+    run_ctx._useful_last_h_effective = h_eff
+
+
+def _coarse_note_completion(run_ctx: RunContext, rc: RoundContext, mid: Any,
+                            t: float) -> None:
+    """Mark a receiver's live coarse request COMPLETED when its chunk state completes."""
+    crid = run_ctx.coarse_live_by_receiver.get(mid)
+    if crid is None:
+        return
+    req = run_ctx.coarse_requests.get(crid)
+    st = rc.search_states.get(mid)
+    if req is not None and req.status == "ACTIVE" and st is not None and st.completed:
+        req.status = "COMPLETED"
+        req.completed_at = t
+        del run_ctx.coarse_live_by_receiver[mid]
+
+
+def _maybe_coarse_repartition(run_ctx: RunContext, rc: RoundContext, ep: Any,
+                              now: float) -> float:
+    """S8S-3/S8S-4: work-conserving deterministic coarse suffix repartition, receiver-first.
+
+    Selects already-awake finished receivers FIRST; only then picks the donor with the
+    LARGEST accepted unsearched suffix; partitions that suffix into deterministic,
+    contiguous, near-equal chunks via the accepted integer apportionment rule (donor keeps
+    the first chunk; at most one chunk per receiver; no non-final chunk below one batch —
+    enforced by deterministic part-count reduction).  One repartition per donor lineage per
+    breach episode; the chunk union equals the donor's accepted remaining suffix exactly
+    and chunks are pairwise disjoint by construction.  Returns the receiver capacity added.
+    """
+    cfg = run_ctx.config
+    batch = cfg.batch_size
+    cs = run_ctx.controller_stats
+    elig = []
+    for mid, st in rc.search_states.items():
+        if not st.completed or getattr(st, "completion_kind", None) != "EXHAUSTED":
+            continue
+        m = run_ctx.miners.get(mid)
+        if m is None or m.state != "LOW_POWER_LISTEN":
+            continue
+        if mid in run_ctx.coarse_live_by_receiver:
+            cs["duplicate_reassignment_prevented_count"] += 1     # one live per receiver
+            continue
+        elig.append((float(st.hash_rate), str(mid), mid))
+    elig.sort(key=lambda x: (-x[0], x[1]))
+    if not elig:
+        return 0.0
+    best = None
+    for mid, st in rc.search_states.items():
+        if st.completed:
+            continue
+        m = run_ctx.miners.get(mid)
+        if m is None or m.state != "ACTIVE_HASHING":
+            continue
+        a = rc.assignments.get(st.AssignmentID)
+        if a is None or a.get("assignment_version") != st.assignment_version:
+            continue
+        remaining = st.range_end - st.cursor
+        if remaining < 2 * batch:
+            continue                       # donor must keep one batch and cede >= one
+        key = (remaining, str(mid))
+        if best is None or key > best[0]:
+            best = (key, mid, st)
+    if best is None:
+        return 0.0
+    _key, dmid, st_d = best
+    lineage = (ep.BreachEpisodeID, st_d.AssignmentID)
+    if lineage in run_ctx.coarse_lineage_by_episode:
+        cs["donor_lineage_repartition_replay_count"] += 1         # exact replay: no effect
+        return 0.0
+    remaining = st_d.range_end - st_d.cursor
+    part_count = min(1 + len(elig), -(-remaining // batch))       # ceil bound (S8S-4)
+    while part_count > 1 and remaining // part_count < batch:
+        part_count -= 1                    # no non-final chunk below one batch
+    if part_count < 2:
+        return 0.0
+    base, rem = divmod(remaining, part_count)
+    sizes = [base + (1 if i < rem else 0) for i in range(part_count)]
+    bounds = []
+    c = st_d.cursor
+    for s in sizes:
+        bounds.append((c, c + s))
+        c += s
+    assert c == st_d.range_end, "coarse chunk union must equal the accepted remaining suffix"
+    # S8S-5 spirit — deterministic BENEFIT gate: repartition only when the post-split
+    # makespan strictly beats the donor finishing alone (all inputs observable: rates,
+    # chunk sizes; receivers start immediately because they are ALREADY AWAKE).
+    donor_rate = float(st_d.hash_rate)
+    alone = remaining / donor_rate if donor_rate > 0 else 0.0
+    makespan = sizes[0] / donor_rate if donor_rate > 0 else 0.0
+    for (c0, c1), (rate, _s, _m) in zip(bounds[1:], elig):
+        makespan = max(makespan, (c1 - c0) / rate if rate > 0 else 0.0)
+    if makespan >= alone:
+        return 0.0                          # no useful speedup: leave the donor alone
+    # -------- ATOMIC apply: receivers commit FIRST, the donor shrinks LAST; ANY seat
+    # failure unwinds everything so a partial repartition can never orphan a chunk.
+    # (Seating a receiver before the donor shrink is overlap-safe: the donor's queued
+    # planned batch ends at most one batch past its cursor, inside its retained first
+    # chunk, whose size is at least one batch.)
+    committed = []
+    added = 0.0
+    ok = True
+    for (c0, c1), (rate, _s, rmid) in zip(bounds[1:], elig):
+        run_ctx.coarse_seq += 1
+        crid = (run_ctx.RunID, "COARSE", run_ctx.coarse_seq)
+        aid = f"CS-{rc.RoundID}-{rmid}"
+        st_r = MinerSearchState(MinerID=rmid, AssignmentID=aid, assignment_version=1,
+                                hash_rate=rate, range_start=c0, range_end=c1,
+                                active_power=cfg.P_hash, idle_power=cfg.P_listen)
+        prev_state = rc.search_states.get(rmid)
+        prev_kind = run_ctx.search_assignment_kind.get((rc.RoundID, rmid))
+        rc.search_states[rmid] = st_r
+        rc.assignments[aid] = {"MinerID": rmid, "AssignmentID": aid,
+                               "assignment_version": 1, "range": (c0, c1),
+                               "RoundID": rc.RoundID,
+                               "TemplateID": rc.TemplateID_committed,
+                               "coverage_state": "OPEN"}
+        run_ctx.search_assignment_kind[(rc.RoundID, rmid)] = COARSE_REASSIGNED_WORK
+        # S8S-3 "immediately receive": the receiver is ALREADY AWAKE (LOW_POWER_LISTEN),
+        # so it starts hashing its bound chunk synchronously — no wake transient, no
+        # WAKING residency.  (A reserve, by contrast, always pays the accepted wake.)
+        run_ctx.apply_miner_state_transition(rmid, "ACTIVE_HASHING", now)
+        st_r.active_start = now
+        r = _seat_hash_work(run_ctx, rc, st_r, at_time=now)
+        if r.kind != "scheduled":
+            if prev_state is not None:
+                rc.search_states[rmid] = prev_state
+            else:
+                rc.search_states.pop(rmid, None)
+            del rc.assignments[aid]
+            if prev_kind is None:
+                run_ctx.search_assignment_kind.pop((rc.RoundID, rmid), None)
+            else:
+                run_ctx.search_assignment_kind[(rc.RoundID, rmid)] = prev_kind
+            run_ctx.apply_miner_state_transition(rmid, "LOW_POWER_LISTEN", now)
+            ok = False
+            break
+        req = CoarseRequest(CoarseRequestID=crid, RoundID=rc.RoundID,
+                            TemplateID=rc.TemplateID_committed,
+                            BreachEpisodeID=ep.BreachEpisodeID, DonorMinerID=dmid,
+                            DonorAssignmentID=st_d.AssignmentID, ReceiverMinerID=rmid,
+                            AssignmentID=aid, chunk_start=c0, chunk_end=c1, seated_at=now,
+                            status="ACTIVE", started_at=now)
+        run_ctx.coarse_requests[crid] = req
+        run_ctx.coarse_live_by_receiver[rmid] = crid
+        committed.append((rmid, prev_state, prev_kind, req, aid))
+        added += rate
+    if ok:
+        # donor retains the FIRST chunk: shrink under a fresh assignment version, cancel
+        # the superseded planned batch and re-plan inside the new bound.
+        prev_end = st_d.range_end
+        prev_ver = st_d.assignment_version
+        prev_gen = st_d.search_generation
+        a = rc.assignments[st_d.AssignmentID]
+        _cancel_queued_hash_events(run_ctx, dmid)
+        st_d.range_end = bounds[0][1]
+        st_d.assignment_version += 1
+        st_d.search_generation += 1
+        a["assignment_version"] = st_d.assignment_version
+        a["range"] = (a["range"][0], st_d.range_end)
+        rd = _seat_hash_work(run_ctx, rc, st_d, at_time=now)
+        if rd.kind != "scheduled":
+            st_d.range_end = prev_end
+            st_d.assignment_version = prev_ver
+            st_d.search_generation = prev_gen
+            a["assignment_version"] = prev_ver
+            a["range"] = (a["range"][0], prev_end)
+            _seat_hash_work(run_ctx, rc, st_d, at_time=now)     # restore the donor's plan
+            ok = False
+    if not ok:
+        for rmid, prev_state, prev_kind, req, aid in committed:
+            _cancel_queued_hash_events(run_ctx, rmid)
+            if prev_state is not None:
+                rc.search_states[rmid] = prev_state
+            else:
+                rc.search_states.pop(rmid, None)
+            rc.assignments.pop(aid, None)
+            if prev_kind is None:
+                run_ctx.search_assignment_kind.pop((rc.RoundID, rmid), None)
+            else:
+                run_ctx.search_assignment_kind[(rc.RoundID, rmid)] = prev_kind
+            run_ctx.coarse_requests.pop(req.CoarseRequestID, None)
+            run_ctx.coarse_live_by_receiver.pop(rmid, None)
+            m = run_ctx.miners.get(rmid)
+            if m is not None and m.state == "ACTIVE_HASHING":
+                run_ctx.apply_miner_state_transition(rmid, "LOW_POWER_LISTEN", now)
+        return 0.0
+    # -------- COMMIT: only a fully-applied repartition marks the lineage and counters.
+    run_ctx.coarse_lineage_by_episode.add(lineage)
+    cs["coarse_repartition_count"] += 1
+    for _rmid, _pstate, _pkind, req, _aid in committed:
+        cs["coarse_reassignment_count"] += 1
+        size = req.chunk_end - req.chunk_start
+        cs["sum_coarse_chunk_size"] += size
+        if cs["minimum_coarse_chunk_size"] == 0 or size < cs["minimum_coarse_chunk_size"]:
+            cs["minimum_coarse_chunk_size"] = size
+        if size > cs["maximum_coarse_chunk_size"]:
+            cs["maximum_coarse_chunk_size"] = size
+    donor_size = bounds[0][1] - bounds[0][0]
+    if cs["minimum_coarse_chunk_size"] == 0 or donor_size < cs["minimum_coarse_chunk_size"]:
+        cs["minimum_coarse_chunk_size"] = donor_size
+    if donor_size > cs["maximum_coarse_chunk_size"]:
+        cs["maximum_coarse_chunk_size"] = donor_size
+    return added
+
+
+def _useful_predictive_check(run_ctx: RunContext, rc: RoundContext,
+                             now: float) -> Optional[Outcome]:
+    """S8S-2/3/5: the USEFUL-mode predictive path — coarse reassignment FIRST, reserve wake
+    only when already-awake reassignment cannot fill the useful deficit, and never a
+    reserve wake without atomically bindable useful work."""
+    cfg = run_ctx.config
+    ctrl = cfg.controller
+    pol = cfg.security_floor
+    if rc is None or rc.round_state in _TERMINAL_ROUND:
+        return None
+    h_eff, _pipe = _update_pipeline_stats(run_ctx, rc, now)
+    _resolve_due_predictions(run_ctx, rc, now)
+    min_ref, trigger_ref, _rec = _decision_reference(run_ctx, rc)
+    look = ctrl.lookahead(pol.activation_wake_latency)
+    h_future, det = _r4_predict_h_future(run_ctx, rc, now, look, min_ref)
+    if h_future + pol.floor_tolerance >= min_ref:
+        return None
+    ep = _current_episode(run_ctx, rc)
+    live = _live_batch(run_ctx, ep) if ep is not None else None
+    if live is not None:
+        return None                                  # one live batch per episode (R3)
+    if ep is not None and now < ep.cooldown_until and h_future >= trigger_ref:
+        return None                                  # cooldown (R3)
+    if ep is None:
+        ep = _open_episode(run_ctx, rc, now, h_eff, "PREDICTIVE")
+    added = 0.0
+    if ctrl.is_coarse():
+        added = _maybe_coarse_repartition(run_ctx, rc, ep, now)    # S8S-3: receivers first
+    still_deficit = min_ref - (h_future + added)
+    if still_deficit <= pol.floor_tolerance:
+        return None                                  # already-awake reassignment filled it
+    # reserve admission control (S8S-5): a reserve wake needs atomically bindable useful
+    # work — an UNCLAIMED reserve-domain slice.  The accepted seating transaction claims
+    # the slice and binds it to the wake request atomically; without one, no wake.
+    eligible = [rr for rr in _reserve_records_for(run_ctx, rc)
+                if rr.reserve_status == "AVAILABLE"]
+    unclaimed = [sl for sl in run_ctx.reserve_slices.get(rc.RoundID, [])
+                 if sl.status == "UNCLAIMED" and sl.size() > 0]
+    if not eligible or not unclaimed:
+        if eligible and not unclaimed:
+            run_ctx.controller_stats["reserve_wakes_rejected_no_useful_work"] += len(eligible)
+            run_ctx.log.append(Outcome("activation_rejected_no_useful_work",
+                                       RoundID=rc.RoundID, eligible=len(eligible)))
+        run_ctx.controller_stats["useful_floor_unattainable_count"] += 1
+        return None
+    run_ctx.prediction_seq += 1
+    pid = (run_ctx.RunID, "PRED", run_ctx.prediction_seq)
+    obs = _record_predictive_observation(run_ctx, rc, now, ("PREDICTIVE", pid))
+    pr = PredictionRecord(
+        PredictionID=pid, RoundID=rc.RoundID, decision_time=now, lookahead=look,
+        current_h_effective=h_eff, predicted_h_future=h_future,
+        predicted_expiring_miners=list(det["expiring"]),
+        live_incoming_capacity=det["live_incoming"],
+        predicted_deficit=max(0.0, min_ref - h_future))
+    run_ctx.prediction_records.append(pr)
+    run_ctx.controller_stats["prediction_decision_count"] += 1
+    _, active_count, _ids = compute_h_effective(run_ctx, rc)
+    out = _seat_refined_batch(run_ctx, rc, ep, obs, now, h_future + added, active_count,
+                              0, 0, origin="PREDICTIVE", seat_h_effective=h_eff,
+                              min_ref=min_ref)
+    pr.seated_batch_id = ep.live_activation_batch_id
+    if pr.seated_batch_id is not None:
+        pr.selected_reserve_set = list(
+            run_ctx.activation_batches[pr.seated_batch_id].miner_ids)
+    return out
 
 
 def SeatReserveActivationTransaction(run_ctx: RunContext, rc: RoundContext, rr: Any, sl: Any,

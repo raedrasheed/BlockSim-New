@@ -256,6 +256,15 @@ class RunContext:
         self._pipe_last_time: Optional[float] = None       # H_pipeline piecewise tracking
         self._pipe_last_value: float = 0.0
         self._pipe_last_h_effective: float = 0.0
+        # Stage-8S useful-floor + coarse-reassignment state (inert unless a USEFUL mode).
+        self.coarse_requests: Dict[Any, Any] = {}          # CoarseRequestID -> CoarseRequest
+        self.coarse_seq: int = 0
+        self.coarse_live_by_receiver: Dict[Any, Any] = {}  # receiver -> CoarseRequestID
+        self.coarse_lineage_by_episode: set = set()        # (BreachEpisodeID, DonorAssignmentID)
+        self._useful_last_time: Optional[float] = None     # useful-floor piecewise tracking
+        self._useful_last_available: float = 0.0
+        self._useful_last_target: float = 0.0
+        self._useful_last_h_effective: float = 0.0
         # S4A-4: the ONE authoritative, auditable list of range-lease observations, plus its
         # immutable-key replay registry and monotone sequence.
         self.lease_observations: List[Any] = []
