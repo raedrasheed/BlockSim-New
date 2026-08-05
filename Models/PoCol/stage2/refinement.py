@@ -31,17 +31,27 @@ CONTROLLER_MODES = ("LEGACY_REACTIVE", "HYSTERESIS_ONLY", "HYSTERESIS_PREDICTIVE
                     # the two USEFUL_FLOOR modes add the useful-work-aware target and (for
                     # the second) work-conserving coarse suffix repartition.
                     "STAGE8R_PREDICTIVE_STATIC_FLOOR",
-                    "USEFUL_FLOOR_ONLY", "USEFUL_FLOOR_COARSE_REASSIGNMENT")
+                    "USEFUL_FLOOR_ONLY", "USEFUL_FLOOR_COARSE_REASSIGNMENT",
+                    # Stage-8U: the single-handoff useful-work policy within PoCol — at
+                    # most ONE donor->receiver handoff per round plus at most ONE
+                    # reserve-wake fallback per round (U1..U5).
+                    "USEFUL_FLOOR_SINGLE_HANDOFF")
 PREDICTIVE_MODES = ("HYSTERESIS_PREDICTIVE", "HYSTERESIS_PREDICTIVE_REASSIGNMENT",
                     "STAGE8R_PREDICTIVE_STATIC_FLOOR",
-                    "USEFUL_FLOOR_ONLY", "USEFUL_FLOOR_COARSE_REASSIGNMENT")
-USEFUL_FLOOR_MODES = ("USEFUL_FLOOR_ONLY", "USEFUL_FLOOR_COARSE_REASSIGNMENT")
+                    "USEFUL_FLOOR_ONLY", "USEFUL_FLOOR_COARSE_REASSIGNMENT",
+                    "USEFUL_FLOOR_SINGLE_HANDOFF")
+USEFUL_FLOOR_MODES = ("USEFUL_FLOOR_ONLY", "USEFUL_FLOOR_COARSE_REASSIGNMENT",
+                      "USEFUL_FLOOR_SINGLE_HANDOFF")
 
 EPISODE_STATUSES = ("OPEN", "RECOVERY_IN_PROGRESS", "RECOVERED", "ROUND_CLOSED",
                     "UNATTAINABLE")
 TERMINAL_EPISODE_STATUSES = ("RECOVERED", "ROUND_CLOSED", "UNATTAINABLE")
 
 BATCH_STATUSES = ("LIVE", "TERMINAL")
+
+HANDOFF_STATUSES = ("OPEN", "COMMITTED", "COMPLETED", "CANCELLED", "FAILED",
+                    "ROUND_CLOSED")
+TERMINAL_HANDOFF_STATUSES = ("COMPLETED", "CANCELLED", "FAILED", "ROUND_CLOSED")
 
 
 @dataclass(frozen=True)
@@ -95,6 +105,14 @@ class ControllerPolicy:
 
     def is_coarse(self) -> bool:
         return self.mode == "USEFUL_FLOOR_COARSE_REASSIGNMENT"
+
+    def is_single_handoff(self) -> bool:
+        return self.mode == "USEFUL_FLOOR_SINGLE_HANDOFF"
+
+    def can_reassign_to_receivers(self) -> bool:
+        """True when the mode's mechanism can actually deliver ceded suffix work to an
+        already-awake receiver (coarse repartition or the single handoff)."""
+        return self.is_coarse() or self.is_single_handoff()
 
     def trigger_rate(self, minimum_active_hash_rate: float) -> float:
         return minimum_active_hash_rate * self.reactive_trigger_ratio / self.central_target_ratio
@@ -216,7 +234,39 @@ class CoarseRequest:
         return self.chunk_end - self.chunk_start
 
 
-def h_useful_available(run_ctx: Any, rc: Any, include_receivers: bool) -> Tuple[float, dict]:
+@dataclass
+class RoundHandoffEpoch:
+    """U1: the per-round single-handoff authority — at most ONE handoff epoch per round.
+
+    The epoch opens when a concrete (donor, receiver, split) proposal exists; exact replay
+    returns the existing epoch and performs no second reassignment in the round.  Round
+    closure terminalises the epoch; an epoch never crosses rounds.  Statuses: OPEN (proposal
+    made), COMMITTED (the atomic split applied), COMPLETED (the receiver's chunk finished
+    before round close), CANCELLED (the deterministic benefit gate refused the split),
+    FAILED (the atomic apply failed and was fully unwound), ROUND_CLOSED (still live at
+    closure)."""
+
+    RoundHandoffEpochID: Any
+    RoundID: Any
+    TemplateID: Any
+    generation: int
+    opened_at: float
+    donor_miner_id: Optional[Any] = None
+    receiver_miner_id: Optional[Any] = None
+    source_assignment_id: Optional[Any] = None
+    receiver_assignment_id: Optional[Any] = None
+    original_suffix: Optional[Tuple[int, int]] = None
+    donor_chunk: Optional[Tuple[int, int]] = None
+    receiver_chunk: Optional[Tuple[int, int]] = None
+    predicted_makespan_before: float = 0.0
+    predicted_makespan_after: float = 0.0
+    status: str = "OPEN"
+    terminal_time: Optional[float] = None
+    disposition: Any = None
+
+
+def h_useful_available(run_ctx: Any, rc: Any, include_receivers: bool,
+                       max_receivers: Optional[int] = None) -> Tuple[float, dict]:
     """S8S-2: the maximum ACTUAL capacity assignable useful, non-overlapping nonce work now.
 
     Includes ONLY (1) ACTIVE_HASHING miners on a non-empty accepted range and (2) — when
@@ -251,7 +301,8 @@ def h_useful_available(run_ctx: Any, rc: Any, include_receivers: bool) -> Tuple[
                 continue                                  # one live reassignment per receiver
             receivers.append((float(st.hash_rate), str(mid), mid))
         receivers.sort(key=lambda x: (-x[0], x[1]))       # deterministic: rate desc, then id
-    counted = receivers[:spare_units] if include_receivers else []
+    cap = spare_units if max_receivers is None else min(spare_units, max_receivers)
+    counted = receivers[:cap] if include_receivers else []
     value = h_eff + sum(r for r, _s, _m in counted)
     return value, {"h_effective": h_eff, "spare_batch_units": spare_units,
                    "eligible_receivers": [m for _r, _s, m in receivers],
@@ -377,4 +428,18 @@ def controller_stats_template() -> dict:
         # ---- Stage-8S reserve admission control ----
         "reserve_wakes_rejected_no_useful_work": 0,
         "reserve_wakes_with_bound_work": 0,
+        # ---- Stage-8U single-handoff metrics (U1) ----
+        "handoff_epoch_count": 0,
+        "handoff_committed_count": 0,
+        "handoff_completed_count": 0,
+        "handoff_failed_count": 0,
+        "handoff_cancelled_count": 0,
+        "duplicate_handoff_prevented_count": 0,
+        # ---- Stage-8U single reserve-wake fallback (U4) ----
+        "single_reserve_requests_seated": 0,
+        "single_reserve_requests_completed": 0,
+        "single_reserve_requests_incomplete": 0,
+        "reserve_wake_rejected_short_useful_window": 0,
+        "reserve_wake_rejected_awake_receiver_available": 0,
+        "reserve_wake_rejected_no_bound_work": 0,
     }

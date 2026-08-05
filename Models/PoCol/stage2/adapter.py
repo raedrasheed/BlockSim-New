@@ -20,6 +20,7 @@ from .config import Stage2Config, a1_continuous_control_kwh
 from .simulator import run_simulation
 from .search import SUCCESS_MODEL
 from .security import SecurityFloorPolicy, FLOOR_UNATTAINABLE_POLICIES
+from .refinement import TERMINAL_HANDOFF_STATUSES as _TERMINAL_HANDOFF
 from .leases import RangeLeasePolicy, REASSIGNED_PRIMARY_WORK, REASSIGNED_RESERVE_WORK
 from .adversarial import (AdversarialPolicy, IncentivePolicy, ACTOR_CLASSES, BEHAVIOUR_FLAGS,
                           SOLUTION_RELEASE_POLICIES, ACCOUNTING_MODES,
@@ -952,6 +953,25 @@ def _controller_results(run_ctx: Any, cfg: Stage2Config) -> Dict[str, Any]:
                 if q.status == "COMPLETED"))
             if any(q.status == "COMPLETED" for q in run_ctx.activation_requests.values())
             else 0.0),
+        # ---- Stage-8U: single-handoff metrics (U1) ----
+        "handoff_epoch_count": cs["handoff_epoch_count"],
+        "handoff_committed_count": cs["handoff_committed_count"],
+        "handoff_completed_count": cs["handoff_completed_count"],
+        "handoff_failed_count": cs["handoff_failed_count"],
+        "handoff_cancelled_count": cs["handoff_cancelled_count"],
+        "duplicate_handoff_prevented_count": cs["duplicate_handoff_prevented_count"],
+        "nonterminal_handoff_epoch_count": sum(
+            1 for e in run_ctx.handoff_epochs.values()
+            if e.status not in _TERMINAL_HANDOFF),
+        # ---- Stage-8U: single reserve-wake fallback (U4) ----
+        "single_reserve_requests_seated": cs["single_reserve_requests_seated"],
+        "single_reserve_requests_completed": cs["single_reserve_requests_completed"],
+        "single_reserve_requests_incomplete": cs["single_reserve_requests_incomplete"],
+        "reserve_wake_rejected_short_useful_window":
+            cs["reserve_wake_rejected_short_useful_window"],
+        "reserve_wake_rejected_awake_receiver_available":
+            cs["reserve_wake_rejected_awake_receiver_available"],
+        "reserve_wake_rejected_no_bound_work": cs["reserve_wake_rejected_no_bound_work"],
     }
 
 

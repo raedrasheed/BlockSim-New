@@ -48,7 +48,8 @@ from .leases import (RangeLease, RangeProgress, RangeReassignmentDecision,
 from . import adversarial_runtime as _adv
 from .adversarial import ADVERSARIAL_COVERAGE_GAP_NO_BLOCK
 from .refinement import (ActivationBatch, BreachEpisode, CoarseRequest, PredictionRecord,
-                         TERMINAL_EPISODE_STATUSES, h_pipeline as _r5_h_pipeline,
+                         RoundHandoffEpoch, TERMINAL_EPISODE_STATUSES,
+                         TERMINAL_HANDOFF_STATUSES, h_pipeline as _r5_h_pipeline,
                          h_useful_available as _s8s_h_useful_available,
                          predict_h_future as _r4_predict_h_future)
 
@@ -748,6 +749,9 @@ def _handle_range_exhaust(run_ctx: RunContext, payload: Dict[str, Any],
     # Stage-8S: a receiver exhausting its coarse chunk terminalises its request.
     if run_ctx.config.controller.is_coarse():
         _coarse_note_completion(run_ctx, rc, mid, t)
+    # Stage-8U: a receiver exhausting its handoff chunk completes the round's epoch.
+    elif run_ctx.config.controller.is_single_handoff():
+        _handoff_note_completion(run_ctx, rc, mid, t)
     # S4A-9: a reassignee that exhausts its suffix ends its reassigned ACTIVE_HASHING interval.
     if run_ctx.config.range_lease.enabled:
         _stamp_reassignee_active_end(run_ctx, rc, mid, t)
@@ -2583,6 +2587,25 @@ def _refined_floor_decide(run_ctx: RunContext, rc: RoundContext, obs: Any, now: 
         # allowed only when the terminal batch left capacity below the frozen trigger.
         _record_decision(run_ctx, obs, [], [], covered, deficit, "NO_ACTIVATION_REQUIRED")
         return None
+    if ctrl.is_single_handoff():
+        # U4 (reactive path too): try the handoff FIRST; only then the single reserve wake.
+        added = _maybe_single_handoff(run_ctx, rc, ep, now)
+        if covered + added + pol.floor_tolerance >= min_rate:
+            _record_decision(run_ctx, obs, [], [], covered + added, 0.0,
+                             "NO_ACTIVATION_REQUIRED")
+            return None
+        reason = _single_reserve_admission(run_ctx, rc, now)
+        if reason is not None:
+            if reason in ("no_eligible_reserve", "no_bound_useful_work"):
+                run_ctx.controller_stats["useful_floor_unattainable_count"] += 1
+            _record_decision(run_ctx, obs, [], [], covered + added,
+                             max(0.0, min_rate - covered - added),
+                             "NO_ACTIVATION_REQUIRED")
+            return None
+        return _seat_refined_batch(run_ctx, rc, ep, obs, now, covered + added,
+                                   active_count, inflight_count, pending_count,
+                                   origin="REACTIVE", seat_h_effective=h_eff,
+                                   min_ref=min_rate, max_batch_reserves=1)
     return _seat_refined_batch(run_ctx, rc, ep, obs, now, covered, active_count,
                                inflight_count, pending_count, origin="REACTIVE",
                                seat_h_effective=h_eff, min_ref=min_rate)
@@ -2592,7 +2615,8 @@ def _seat_refined_batch(run_ctx: RunContext, rc: RoundContext, ep: Any, obs: Any
                         now: float, covered: float, active_count: int, inflight_count: int,
                         pending_count: int, origin: str,
                         seat_h_effective: float = 0.0,
-                        min_ref: Optional[float] = None) -> Optional[Outcome]:
+                        min_ref: Optional[float] = None,
+                        max_batch_reserves: Optional[int] = None) -> Optional[Outcome]:
     """R3: seat ONE activation batch sized to the capacity still missing from the target,
     using the accepted minimum-cardinality selection and the accepted all-or-none seating
     transaction.  Stale/cancelled/terminal requests never count toward sufficiency."""
@@ -2612,6 +2636,13 @@ def _seat_refined_batch(run_ctx: RunContext, rc: RoundContext, ep: Any, obs: Any
                  if sl.status == "UNCLAIMED"]
     cap = min(len(eligible), len(unclaimed), max(0, remaining))
     cs = run_ctx.controller_stats
+    if ctrl.is_single_handoff():
+        # U4: never a multi-reserve batch, and at most ONE reserve wake request per round.
+        if rc.RoundID in run_ctx.handoff_reserve_by_round:
+            _record_decision(run_ctx, obs, [], [], covered,
+                             max(0.0, min_rate - covered), "NO_ACTIVATION_REQUIRED")
+            return None
+        cap = min(cap, 1)
     if ctrl.is_useful_floor() and eligible and not unclaimed:
         # S8S-5 reserve admission control: eligible reserves exist but no useful work can
         # be atomically bound to a wake — record the rejection, wake nothing.
@@ -2677,6 +2708,12 @@ def _seat_refined_batch(run_ctx: RunContext, rc: RoundContext, ep: Any, obs: Any
     if ep.status == "OPEN":
         ep.status = "RECOVERY_IN_PROGRESS"
     cs["activation_batches_seated"] += 1
+    if ctrl.is_single_handoff():
+        # U4: register the round's single fallback wake request for the per-round guard
+        # and its dedicated lifecycle accounting.
+        run_ctx.handoff_reserve_by_round[rc.RoundID] = batch.request_ids[0]
+        run_ctx.handoff_reserve_requests.update(batch.request_ids)
+        cs["single_reserve_requests_seated"] += len(batch.request_ids)
     if ctrl.is_useful_floor():
         cs["reserve_wakes_with_bound_work"] += len(batch.request_ids)
     cs["predictive_batches_seated" if origin == "PREDICTIVE"
@@ -2898,6 +2935,33 @@ def _refined_close_round(run_ctx: RunContext, rc: RoundContext, t: float) -> Non
             if m is not None and m.state == "WAKING":
                 run_ctx.apply_miner_state_transition(req.ReceiverMinerID,
                                                      "LOW_POWER_LISTEN", t)
+    # ---- Stage-8U: round closure terminalises the round's single handoff epoch and
+    # settles the U4 fallback-request accounting; nothing crosses into the next round.
+    if ctrl.is_single_handoff():
+        eid = run_ctx.handoff_by_round.get(rc.RoundID)
+        if eid is not None:
+            epoch = run_ctx.handoff_epochs.get(eid)
+            if epoch is not None:
+                if epoch.status not in TERMINAL_HANDOFF_STATUSES:
+                    st = rc.search_states.get(epoch.receiver_miner_id)
+                    if epoch.status == "COMMITTED" and st is not None \
+                            and st.AssignmentID == epoch.receiver_assignment_id \
+                            and st.completed:
+                        epoch.status = "COMPLETED"
+                        epoch.disposition = "receiver_chunk_completed_at_round_close"
+                        cs["handoff_completed_count"] += 1
+                    else:
+                        epoch.status = "ROUND_CLOSED"
+                        epoch.disposition = "terminalised_at_round_close"
+                    epoch.terminal_time = t
+                run_ctx.coarse_live_by_receiver.pop(epoch.receiver_miner_id, None)
+        req_id = run_ctx.handoff_reserve_by_round.pop(rc.RoundID, None)
+        if req_id is not None:
+            req = run_ctx.activation_requests.get(req_id)
+            if req is not None and req.status == "COMPLETED":
+                cs["single_reserve_requests_completed"] += 1
+            else:
+                cs["single_reserve_requests_incomplete"] += 1
     if ctrl.is_useful_floor():
         _update_useful_stats(run_ctx, rc, t)
 
@@ -2910,8 +2974,14 @@ def _useful_target(run_ctx: RunContext, rc: RoundContext):
     """S8S-2: H_useful_target(t) = min(0.80 x H0, H_useful_available(t)).  The static floor
     is NEVER redefined — it stays reported as the historical secondary metric."""
     pol = run_ctx.config.security_floor
-    avail, det = _s8s_h_useful_available(run_ctx, rc,
-                                         run_ctx.config.controller.is_coarse())
+    ctrl = run_ctx.config.controller
+    if ctrl.is_single_handoff():
+        # Stage-8U: the mechanism can deliver work to at most ONE receiver per round, and
+        # to none once the round's single handoff epoch is consumed.
+        maxr = 0 if rc.RoundID in run_ctx.handoff_by_round else 1
+        avail, det = _s8s_h_useful_available(run_ctx, rc, True, max_receivers=maxr)
+    else:
+        avail, det = _s8s_h_useful_available(run_ctx, rc, ctrl.is_coarse())
     return min(pol.minimum_active_hash_rate, avail), avail, det
 
 
@@ -3161,6 +3231,264 @@ def _maybe_coarse_repartition(run_ctx: RunContext, rc: RoundContext, ep: Any,
     return added
 
 
+# ============================================================ Stage-8U single handoff
+# The single-handoff useful-work policy within PoCol (U1..U5).  Everything below is inert
+# unless the controller mode is USEFUL_FLOOR_SINGLE_HANDOFF.
+
+
+def _handoff_eligible_receiver(run_ctx: RunContext, rc: RoundContext):
+    """U2: the FASTEST eligible already-awake primary — LOW_POWER_LISTEN, completed its own
+    accepted range (EXHAUSTED), no live reassignment, same round/template (its search state
+    belongs to this round by construction).  Deterministic tie-break: rate desc, MinerID."""
+    cand = []
+    for mid, st in rc.search_states.items():
+        if not st.completed or getattr(st, "completion_kind", None) != "EXHAUSTED":
+            continue
+        m = run_ctx.miners.get(mid)
+        if m is None or m.state != "LOW_POWER_LISTEN":
+            continue
+        if mid in run_ctx.coarse_live_by_receiver:
+            continue                                      # one live reassignment per miner
+        cand.append((-float(st.hash_rate), str(mid), mid, st))
+    if not cand:
+        return None
+    cand.sort(key=lambda x: (x[0], x[1]))
+    return cand[0][2], cand[0][3]
+
+
+def _handoff_eligible_donor(run_ctx: RunContext, rc: RoundContext):
+    """U2: the active miner with the LARGEST accepted unsearched suffix of at least two
+    whole batches, holding its own live assignment (identity-checked) and no live
+    reassignment.  Deterministic tie-break by MinerID."""
+    batch = run_ctx.config.batch_size
+    best = None
+    for mid, st in rc.search_states.items():
+        if st.completed:
+            continue
+        m = run_ctx.miners.get(mid)
+        if m is None or m.state != "ACTIVE_HASHING":
+            continue
+        a = rc.assignments.get(st.AssignmentID)
+        if a is None or a.get("assignment_version") != st.assignment_version:
+            continue
+        remaining = st.range_end - st.cursor
+        if remaining < 2 * batch:
+            continue                       # donor must keep one batch and cede >= one
+        key = (remaining, str(mid))
+        if best is None or key > best[0]:
+            best = (key, mid, st)
+    if best is None:
+        return None
+    return best[1], best[2]
+
+
+def _handoff_note_completion(run_ctx: RunContext, rc: RoundContext, mid: Any,
+                             t: float) -> None:
+    """Mark the round's handoff epoch COMPLETED when its receiver's chunk completes."""
+    eid = run_ctx.handoff_by_round.get(rc.RoundID)
+    if eid is None:
+        return
+    epoch = run_ctx.handoff_epochs.get(eid)
+    if epoch is None or epoch.status != "COMMITTED" or epoch.receiver_miner_id != mid:
+        return
+    st = rc.search_states.get(mid)
+    if st is not None and st.AssignmentID == epoch.receiver_assignment_id and st.completed:
+        epoch.status = "COMPLETED"
+        epoch.terminal_time = t
+        epoch.disposition = "receiver_chunk_completed"
+        run_ctx.controller_stats["handoff_completed_count"] += 1
+        run_ctx.coarse_live_by_receiver.pop(mid, None)
+
+
+def _maybe_single_handoff(run_ctx: RunContext, rc: RoundContext, ep: Any,
+                          now: float) -> float:
+    """U1/U2/U3: at most ONE donor->receiver handoff per round.
+
+    Opens the round's single RoundHandoffEpoch when a concrete (donor, receiver, split)
+    proposal exists; a second attempt in the round is an exact replay that returns the
+    existing epoch and performs no reassignment.  The split is ONE proportional contiguous
+    two-chunk partition of the donor's accepted remaining suffix (donor keeps the first
+    chunk), sized by the accepted integer apportionment on the actual rates, applied
+    ATOMICALLY with an exact before-image restore on any failure.  No rewind, no overlap,
+    no post-round evaluation, no future-solution information.  Returns the receiver
+    capacity added (0.0 when no handoff commits)."""
+    cfg = run_ctx.config
+    batch = cfg.batch_size
+    cs = run_ctx.controller_stats
+    if rc.RoundID in run_ctx.handoff_by_round:
+        cs["duplicate_handoff_prevented_count"] += 1      # U1: exact replay, no second one
+        return 0.0
+    recv = _handoff_eligible_receiver(run_ctx, rc)
+    if recv is None:
+        return 0.0
+    rmid, st_r = recv
+    donor = _handoff_eligible_donor(run_ctx, rc)
+    if donor is None:
+        return 0.0
+    dmid, st_d = donor
+    # ---- U3: one proportional contiguous split of the donor's accepted suffix ---------
+    remaining = st_d.range_end - st_d.cursor
+    h_d = float(st_d.hash_rate)
+    h_r = float(st_r.hash_rate)
+    total = h_d + h_r
+    # accepted integer apportionment (floor + largest remainder; donor first on ties)
+    q_d = remaining * h_d / total
+    q_r = remaining * h_r / total
+    s_d, s_r = int(q_d), int(q_r)
+    for _ in range(remaining - s_d - s_r):
+        if (q_d - s_d) >= (q_r - s_r):
+            s_d += 1
+        else:
+            s_r += 1
+    # each chunk at least one whole batch (remaining >= 2*batch guarantees feasibility)
+    s_r = max(batch, min(s_r, remaining - batch))
+    s_d = remaining - s_r
+    c_split = st_d.cursor + s_d
+    alone = remaining / h_d if h_d > 0 else 0.0
+    makespan = max(s_d / h_d if h_d > 0 else 0.0, s_r / h_r if h_r > 0 else 0.0)
+    run_ctx.handoff_seq += 1
+    eid = (run_ctx.RunID, "HANDOFF", run_ctx.handoff_seq)
+    epoch = RoundHandoffEpoch(
+        RoundHandoffEpochID=eid, RoundID=rc.RoundID,
+        TemplateID=rc.TemplateID_committed, generation=run_ctx.handoff_seq,
+        opened_at=now, donor_miner_id=dmid, receiver_miner_id=rmid,
+        source_assignment_id=st_d.AssignmentID,
+        original_suffix=(st_d.cursor, st_d.range_end),
+        donor_chunk=(st_d.cursor, c_split), receiver_chunk=(c_split, st_d.range_end),
+        predicted_makespan_before=alone, predicted_makespan_after=makespan)
+    run_ctx.handoff_epochs[eid] = epoch
+    run_ctx.handoff_by_round[rc.RoundID] = eid            # U1: the round is now consumed
+    cs["handoff_epoch_count"] += 1
+    if makespan >= alone:
+        # U3 benefit gate: the predicted post-split makespan must STRICTLY beat the donor
+        # finishing alone; otherwise the proposal is cancelled and nothing is reassigned.
+        epoch.status = "CANCELLED"
+        epoch.terminal_time = now
+        epoch.disposition = "benefit_gate_no_predicted_makespan_improvement"
+        cs["handoff_cancelled_count"] += 1
+        return 0.0
+    # ---- ATOMIC apply: the receiver commits FIRST, the donor shrinks LAST; any seat
+    # failure restores the exact before-image (same discipline as the coarse repartition).
+    aid = f"HO-{rc.RoundID}-{rmid}"
+    st_new = MinerSearchState(MinerID=rmid, AssignmentID=aid, assignment_version=1,
+                              hash_rate=h_r, range_start=c_split,
+                              range_end=st_d.range_end,
+                              active_power=cfg.P_hash, idle_power=cfg.P_listen)
+    prev_state = rc.search_states.get(rmid)
+    prev_kind = run_ctx.search_assignment_kind.get((rc.RoundID, rmid))
+    rc.search_states[rmid] = st_new
+    rc.assignments[aid] = {"MinerID": rmid, "AssignmentID": aid,
+                           "assignment_version": 1, "range": (c_split, st_d.range_end),
+                           "RoundID": rc.RoundID, "TemplateID": rc.TemplateID_committed,
+                           "coverage_state": "OPEN"}
+    run_ctx.search_assignment_kind[(rc.RoundID, rmid)] = COARSE_REASSIGNED_WORK
+    run_ctx.apply_miner_state_transition(rmid, "ACTIVE_HASHING", now)
+    st_new.active_start = now
+    r = _seat_hash_work(run_ctx, rc, st_new, at_time=now)
+
+    def _unwind_receiver() -> None:
+        _cancel_queued_hash_events(run_ctx, rmid)
+        if prev_state is not None:
+            rc.search_states[rmid] = prev_state
+        else:
+            rc.search_states.pop(rmid, None)
+        rc.assignments.pop(aid, None)
+        if prev_kind is None:
+            run_ctx.search_assignment_kind.pop((rc.RoundID, rmid), None)
+        else:
+            run_ctx.search_assignment_kind[(rc.RoundID, rmid)] = prev_kind
+        m = run_ctx.miners.get(rmid)
+        if m is not None and m.state == "ACTIVE_HASHING":
+            run_ctx.apply_miner_state_transition(rmid, "LOW_POWER_LISTEN", now)
+
+    if r.kind != "scheduled":
+        _unwind_receiver()
+        epoch.status = "FAILED"
+        epoch.terminal_time = now
+        epoch.disposition = "receiver_seat_failed_fully_unwound"
+        cs["handoff_failed_count"] += 1
+        return 0.0
+    prev_end = st_d.range_end
+    prev_ver = st_d.assignment_version
+    prev_gen = st_d.search_generation
+    a = rc.assignments[st_d.AssignmentID]
+    _cancel_queued_hash_events(run_ctx, dmid)
+    st_d.range_end = c_split
+    st_d.assignment_version += 1
+    st_d.search_generation += 1
+    a["assignment_version"] = st_d.assignment_version
+    a["range"] = (a["range"][0], c_split)
+    rd = _seat_hash_work(run_ctx, rc, st_d, at_time=now)
+    if rd.kind != "scheduled":
+        st_d.range_end = prev_end
+        st_d.assignment_version = prev_ver
+        st_d.search_generation = prev_gen
+        a["assignment_version"] = prev_ver
+        a["range"] = (a["range"][0], prev_end)
+        _seat_hash_work(run_ctx, rc, st_d, at_time=now)    # restore the donor's plan
+        _unwind_receiver()
+        epoch.status = "FAILED"
+        epoch.terminal_time = now
+        epoch.disposition = "donor_shrink_failed_fully_unwound"
+        cs["handoff_failed_count"] += 1
+        return 0.0
+    epoch.status = "COMMITTED"
+    epoch.receiver_assignment_id = aid
+    run_ctx.coarse_live_by_receiver[rmid] = eid           # live-reassignment index
+    cs["handoff_committed_count"] += 1
+    return h_r
+
+
+def _single_reserve_admission(run_ctx: RunContext, rc: RoundContext,
+                              now: float) -> Optional[str]:
+    """U4: admission checks for the SINGLE reserve-wake fallback.  Returns None when a
+    wake may be seated, else the rejection reason (with its counter recorded).
+
+    Checks, in order: at most one reserve request per round; an eligible reserve exists;
+    an UNCLAIMED non-empty reserve slice exists (the accepted seating transaction then
+    claims it and binds it to the wake atomically); no awake primary could take ceded
+    work through a handoff instead; the productive window exceeds the wake latency plus
+    one batch-completion time.  Given a bound non-empty slice and a sufficient window,
+    the wake strictly reduces the predicted useful makespan: the slice is otherwise
+    unowned and stays outstanding at every observable horizon — the makespan-reduction
+    requirement is therefore implied by (and recorded with) these checks."""
+    cfg = run_ctx.config
+    pol = cfg.security_floor
+    cs = run_ctx.controller_stats
+    if rc.RoundID in run_ctx.handoff_reserve_by_round:
+        return "single_reserve_already_requested_this_round"
+    eligible = sorted([rr for rr in _reserve_records_for(run_ctx, rc)
+                       if rr.reserve_status == "AVAILABLE"],
+                      key=lambda r: (r.activation_priority, str(r.MinerID)))
+    if not eligible:
+        return "no_eligible_reserve"
+    unclaimed = [sl for sl in run_ctx.reserve_slices.get(rc.RoundID, [])
+                 if sl.status == "UNCLAIMED" and sl.size() > 0]
+    if not unclaimed:
+        cs["reserve_wake_rejected_no_bound_work"] += 1
+        return "no_bound_useful_work"
+    if _handoff_eligible_receiver(run_ctx, rc) is not None \
+            and _handoff_eligible_donor(run_ctx, rc) is not None:
+        cs["reserve_wake_rejected_awake_receiver_available"] += 1
+        return "awake_receiver_available"
+    window = 0.0
+    for mid, st in rc.search_states.items():
+        if st.completed:
+            continue
+        m = run_ctx.miners.get(mid)
+        if m is None or m.state != "ACTIVE_HASHING":
+            continue
+        remaining = max(0, st.range_end - st.cursor)
+        if st.hash_rate > 0:
+            window = max(window, remaining / float(st.hash_rate))
+    rr = eligible[0]
+    one_batch = cfg.batch_size / float(rr.hash_rate) if rr.hash_rate > 0 else 0.0
+    if window <= pol.activation_wake_latency + one_batch:
+        cs["reserve_wake_rejected_short_useful_window"] += 1
+        return "short_useful_window"
+    return None
+
+
 def _useful_predictive_check(run_ctx: RunContext, rc: RoundContext,
                              now: float) -> Optional[Outcome]:
     """S8S-2/3/5: the USEFUL-mode predictive path — coarse reassignment FIRST, reserve wake
@@ -3189,23 +3517,38 @@ def _useful_predictive_check(run_ctx: RunContext, rc: RoundContext,
     added = 0.0
     if ctrl.is_coarse():
         added = _maybe_coarse_repartition(run_ctx, rc, ep, now)    # S8S-3: receivers first
+    elif ctrl.is_single_handoff():
+        added = _maybe_single_handoff(run_ctx, rc, ep, now)        # U1..U3: handoff first
     still_deficit = min_ref - (h_future + added)
     if still_deficit <= pol.floor_tolerance:
         return None                                  # already-awake reassignment filled it
-    # reserve admission control (S8S-5): a reserve wake needs atomically bindable useful
-    # work — an UNCLAIMED reserve-domain slice.  The accepted seating transaction claims
-    # the slice and binds it to the wake request atomically; without one, no wake.
-    eligible = [rr for rr in _reserve_records_for(run_ctx, rc)
-                if rr.reserve_status == "AVAILABLE"]
-    unclaimed = [sl for sl in run_ctx.reserve_slices.get(rc.RoundID, [])
-                 if sl.status == "UNCLAIMED" and sl.size() > 0]
-    if not eligible or not unclaimed:
-        if eligible and not unclaimed:
-            run_ctx.controller_stats["reserve_wakes_rejected_no_useful_work"] += len(eligible)
-            run_ctx.log.append(Outcome("activation_rejected_no_useful_work",
-                                       RoundID=rc.RoundID, eligible=len(eligible)))
-        run_ctx.controller_stats["useful_floor_unattainable_count"] += 1
-        return None
+    if ctrl.is_single_handoff():
+        # U4: the single reserve-wake fallback — at most one per round, admission-checked.
+        reason = _single_reserve_admission(run_ctx, rc, now)
+        if reason is not None:
+            if reason in ("no_eligible_reserve", "no_bound_useful_work"):
+                if reason == "no_bound_useful_work":
+                    run_ctx.log.append(Outcome("activation_rejected_no_useful_work",
+                                               RoundID=rc.RoundID, reason=reason))
+                run_ctx.controller_stats["useful_floor_unattainable_count"] += 1
+            return None
+    else:
+        # reserve admission control (S8S-5): a reserve wake needs atomically bindable
+        # useful work — an UNCLAIMED reserve-domain slice.  The accepted seating
+        # transaction claims the slice and binds it to the wake request atomically;
+        # without one, no wake.
+        eligible = [rr for rr in _reserve_records_for(run_ctx, rc)
+                    if rr.reserve_status == "AVAILABLE"]
+        unclaimed = [sl for sl in run_ctx.reserve_slices.get(rc.RoundID, [])
+                     if sl.status == "UNCLAIMED" and sl.size() > 0]
+        if not eligible or not unclaimed:
+            if eligible and not unclaimed:
+                run_ctx.controller_stats["reserve_wakes_rejected_no_useful_work"] += \
+                    len(eligible)
+                run_ctx.log.append(Outcome("activation_rejected_no_useful_work",
+                                           RoundID=rc.RoundID, eligible=len(eligible)))
+            run_ctx.controller_stats["useful_floor_unattainable_count"] += 1
+            return None
     run_ctx.prediction_seq += 1
     pid = (run_ctx.RunID, "PRED", run_ctx.prediction_seq)
     obs = _record_predictive_observation(run_ctx, rc, now, ("PREDICTIVE", pid))
@@ -3220,7 +3563,8 @@ def _useful_predictive_check(run_ctx: RunContext, rc: RoundContext,
     _, active_count, _ids = compute_h_effective(run_ctx, rc)
     out = _seat_refined_batch(run_ctx, rc, ep, obs, now, h_future + added, active_count,
                               0, 0, origin="PREDICTIVE", seat_h_effective=h_eff,
-                              min_ref=min_ref)
+                              min_ref=min_ref,
+                              max_batch_reserves=(1 if ctrl.is_single_handoff() else None))
     pr.seated_batch_id = ep.live_activation_batch_id
     if pr.seated_batch_id is not None:
         pr.selected_reserve_set = list(

@@ -265,6 +265,12 @@ class RunContext:
         self._useful_last_available: float = 0.0
         self._useful_last_target: float = 0.0
         self._useful_last_h_effective: float = 0.0
+        # Stage-8U single-handoff state (inert unless mode USEFUL_FLOOR_SINGLE_HANDOFF).
+        self.handoff_epochs: Dict[Any, Any] = {}           # EpochID -> RoundHandoffEpoch
+        self.handoff_seq: int = 0
+        self.handoff_by_round: Dict[Any, Any] = {}         # RoundID -> EpochID (<= one/round)
+        self.handoff_reserve_by_round: Dict[Any, Any] = {}  # RoundID -> fallback request id
+        self.handoff_reserve_requests: set = set()         # all U4 fallback request ids
         # S4A-4: the ONE authoritative, auditable list of range-lease observations, plus its
         # immutable-key replay registry and monotone sequence.
         self.lease_observations: List[Any] = []
