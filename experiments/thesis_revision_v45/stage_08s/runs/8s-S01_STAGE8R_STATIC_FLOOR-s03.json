@@ -1,0 +1,200 @@
+{
+ "E_idle_kwh": 0.015399543217592392,
+ "E_power_null_kwh": 0.035833333333333314,
+ "H_useful_available_time_weighted": 688.440833333333,
+ "H_useful_target_time_weighted": 622.9686111111106,
+ "a1_continuous_control_kwh": 0.035833333333333335,
+ "absolute_reduction_kwh": 0.020433790115740924,
+ "accepted_blocks_per_closed_round": 0.8,
+ "activated_reserve_energy_kwh": 0.0004313636574074092,
+ "activation_batches_seated": 150,
+ "activation_requests_cancelled": 392,
+ "activation_requests_completed": 208,
+ "activation_requests_seated": 600,
+ "activations_per_closed_round": 3.1578947368421053,
+ "adversarial_action_total": 0,
+ "all_integrity_gates_pass": true,
+ "breach_episode_count": 339,
+ "breach_episode_recovered_count": 189,
+ "coarse_chunks_contiguous": true,
+ "coarse_chunks_pairwise_disjoint": true,
+ "coarse_donor_never_in_ceded_chunk": true,
+ "coarse_lineage_count": 0,
+ "coarse_reassignment_count": 0,
+ "coarse_repartition_count": 0,
+ "coarse_requests_completed": 0,
+ "config_sha256": "95b7b9e8edd88f8ce99d5fd4483cde3a052b5a04d130e377d3f23c6d7dd1af6d",
+ "controller_mode": "STAGE8R_PREDICTIVE_STATIC_FLOOR",
+ "controller_mode_configured": "STAGE8R_PREDICTIVE_STATIC_FLOOR",
+ "donor_lineage_repartition_replay_count": 0,
+ "duplicate_activation_batch_prevented_count": 1297,
+ "duplicate_nonce_count": 0,
+ "duplicate_reassignment_prevented_count": 0,
+ "duration_below_static_floor": 273.2566666666624,
+ "duration_below_useful_floor": 42.570833333333866,
+ "energy_ACTIVATED_RESERVE_HASHING_kwh": 0.0004313636574074092,
+ "energy_COORDINATION_AND_VERIFICATION_kwh": 0.009030756481481241,
+ "energy_OFFLINE_kwh": 0.0,
+ "energy_PRIMARY_ACTIVE_HASHING_kwh": 0.003952735185185181,
+ "energy_PRIMARY_LOW_POWER_LISTEN_kwh": 0.0006652418518518996,
+ "energy_RESERVE_STANDBY_kwh": 0.0005120513657407408,
+ "energy_RESERVE_WAKING_kwh": 0.0008073946759259247,
+ "engine_sha256": "3116582ebea8ffd8ed4a0bb69d1e5132683f8bb96a88f955d3d5511b4dc0d158",
+ "episode_unattainable_count": 52,
+ "evaluation_ledger_entries": 6548,
+ "evaluation_missing_terminal_time_count": 0,
+ "false_positive_wake_count": 0,
+ "incomplete_activation_request_count": 392,
+ "integrity_gates": [
+  {
+   "gate": "maximum_energy_identity_residual_j <= 1e-8",
+   "pass": true
+  },
+  {
+   "gate": "maximum_residency_partition_residual_s <= 1e-9",
+   "pass": true
+  },
+  {
+   "gate": "duplicate_nonce_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "post_round_evaluation_record_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "post_round_evaluation_nonce_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "evaluation_missing_terminal_time_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "physical_frontier_rewind_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "work_reward_union_residual == 0",
+   "pass": true
+  },
+  {
+   "gate": "nonterminal_lease_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "nonterminal_reassignment_request_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "adversarial_action_total == 0",
+   "pass": true
+  },
+  {
+   "gate": "nonterminal_activation_request_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "nonterminal_episode_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "live_batch_after_close_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "nonterminal_coarse_request_count == 0",
+   "pass": true
+  },
+  {
+   "gate": "coarse_chunks_pairwise_disjoint",
+   "pass": true
+  },
+  {
+   "gate": "coarse_chunks_contiguous",
+   "pass": true
+  },
+  {
+   "gate": "coarse_donor_never_in_ceded_chunk",
+   "pass": true
+  },
+  {
+   "gate": "residency_reconciles",
+   "pass": true
+  },
+  {
+   "gate": "round_terminal_times_strictly_increasing",
+   "pass": true
+  }
+ ],
+ "late_wake_count": 189,
+ "live_batch_after_close_count": 0,
+ "master_seed": 18075326756669610819,
+ "maximum_H_pipeline": 5000.0,
+ "maximum_coarse_chunk_size": 0,
+ "maximum_energy_identity_residual_j": 0.0,
+ "maximum_residency_partition_residual_s": 0.0,
+ "mean_coarse_chunk_size": 0.0,
+ "mean_round_duration": 1.5789473684210527,
+ "median_round_duration": 1.1933333333333351,
+ "minimum_coarse_chunk_size": 0,
+ "nonterminal_activation_request_count": 0,
+ "nonterminal_coarse_request_count": 0,
+ "nonterminal_episode_count": 0,
+ "nonterminal_lease_count": 0,
+ "nonterminal_reassignment_request_count": 0,
+ "offline_residency_s": 0.0,
+ "p95_round_duration": 2.86250000000004,
+ "peak_rss_mb": 59.015625,
+ "physical_frontier_rewind_count": 0,
+ "post_round_evaluation_nonce_count": 0,
+ "post_round_evaluation_record_count": 0,
+ "power_null_difference_ACTIVATED_RESERVE_HASHING_kwh": 0.0,
+ "power_null_difference_COORDINATION_AND_VERIFICATION_kwh": 0.009030756481481241,
+ "power_null_difference_OFFLINE_kwh": 0.0,
+ "power_null_difference_PRIMARY_ACTIVE_HASHING_kwh": 0.0,
+ "power_null_difference_PRIMARY_LOW_POWER_LISTEN_kwh": 0.005987176666667097,
+ "power_null_difference_RESERVE_STANDBY_kwh": 0.004608462291666667,
+ "power_null_difference_RESERVE_WAKING_kwh": 0.0008073946759259247,
+ "prediction_decision_count": 150,
+ "predictive_batches_seated": 150,
+ "python_version": "3.11.15",
+ "range_idle_energy_difference_kwh": 0.005987176666667097,
+ "reactive_batches_seated": 0,
+ "reassignments_per_closed_round": 0.0,
+ "record_sha256": "1f59432e761fd5e3fcf714c85ed0de9149434cfddbbf80d2f89de49859984237",
+ "relative_reduction": 0.570245305555561,
+ "reserve_standby_energy_difference_kwh": 0.004608462291666667,
+ "reserve_wake_useful_completion_ratio": 0.9086538461538461,
+ "reserve_wakes_completed_with_useful_work": 189,
+ "reserve_wakes_rejected_no_useful_work": 0,
+ "reserve_wakes_with_bound_work": 0,
+ "residency_ACTIVATED_RESERVE_HASHING_s": 72.22833333333364,
+ "residency_COORDINATION_AND_VERIFICATION_s": 3024.253333333254,
+ "residency_OFFLINE_s": 0.0,
+ "residency_PRIMARY_ACTIVE_HASHING_s": 661.8533333333329,
+ "residency_PRIMARY_LOW_POWER_LISTEN_s": 1113.8933333334132,
+ "residency_RESERVE_STANDBY_s": 857.3883333333334,
+ "residency_RESERVE_WAKING_s": 270.3833333333329,
+ "residency_reconciles": true,
+ "role": "CONFIRMATORY_BASELINE",
+ "round_terminal_times_strictly_increasing": true,
+ "rounds_accepted": 152,
+ "rounds_executed": 190,
+ "run_id": "8s-S01_STAGE8R_STATIC_FLOOR-s03",
+ "run_status": "COMPLETED",
+ "scenario_id": "S01_STAGE8R_STATIC_FLOOR",
+ "seed_class": "CONFIRMATORY_8S",
+ "seed_index": 3,
+ "static_floor_deficit_area_hash_s": 826183.1666666513,
+ "static_floor_unattainable_count": 52,
+ "time_weighted_H_pipeline": 1037.4402777777852,
+ "total_low_power_state_difference_kwh": 0.02043379011574093,
+ "unclosed_final_tail_s": 0.0,
+ "useful_floor_deficit_area": 54137.666666666904,
+ "useful_floor_unattainable_count": 0,
+ "wake_energy_difference_kwh": 0.0008073946759259247,
+ "wall_clock_seconds": 2.2038159370422363,
+ "work_reward_union_residual": 0.0,
+ "zero_block_indicator": 0
+}

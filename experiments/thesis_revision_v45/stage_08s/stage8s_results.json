@@ -1,0 +1,392 @@
+{
+ "H_S1": {
+  "ci95_difference": [
+   9.083333333333334,
+   12.083333333333334
+  ],
+  "control_mean": 150.25,
+  "direction_expected": "greater",
+  "exact_p_one_sided": 0.000244140625,
+  "field": "rounds_accepted",
+  "holm": {
+   "holm_threshold": 0.016666666666666666,
+   "p": 0.000244140625,
+   "reject_null": true
+  },
+  "paired_mean_difference": 10.583333333333334,
+  "paired_median_difference": 11.0,
+  "per_seed_difference": [
+   11.0,
+   8.0,
+   14.0,
+   12.0,
+   15.0,
+   12.0,
+   6.0,
+   8.0,
+   12.0,
+   7.0,
+   11.0,
+   11.0
+  ],
+  "treatment_mean": 160.83333333333334
+ },
+ "H_S2": {
+  "blocks_ratio_per_seed": [
+   0.921875,
+   0.8944444444444445,
+   0.9190751445086706,
+   0.9213483146067416,
+   0.9139784946236559,
+   0.8983050847457628,
+   0.936046511627907,
+   0.8806818181818182,
+   0.8895027624309392,
+   0.8793103448275862,
+   0.9080459770114943,
+   0.8837209302325582
+  ],
+  "checks": {
+   "duplicate_nonce_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   },
+   "mean_accepted_blocks_ratio_S03_over_S00_ge_0.90": {
+    "pass": true,
+    "value": 0.9038612356034649
+   },
+   "mean_duration_below_useful_floor_le_15s": {
+    "pass": false,
+    "value": 28.707847222221925
+   },
+   "mean_median_round_duration_ratio_le_1.10": {
+    "pass": true,
+    "value": 1.0005367541932675
+   },
+   "nonterminal_activation_request_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   },
+   "nonterminal_lease_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   },
+   "nonterminal_reassignment_request_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   },
+   "physical_frontier_rewind_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   },
+   "post_round_evaluation_record_count_zero_every_run": {
+    "pass": true,
+    "value": 0
+   }
+  },
+  "decision": "FAIL"
+ },
+ "H_S3": {
+  "checks": {
+   "holm_reject_activation_requests_contrast": {
+    "pass": false,
+    "value": 1.0
+   },
+   "holm_reject_incomplete_requests_contrast": {
+    "pass": false,
+    "value": 1.0
+   },
+   "mean_activation_requests_seated_lt_S01": {
+    "pass": false,
+    "value": 642.3333333333334
+   },
+   "mean_incomplete_requests_lt_S01": {
+    "pass": false,
+    "value": 414.0
+   },
+   "mean_reassignments_per_closed_round_le_1.0": {
+    "pass": false,
+    "value": 1.7482492046185716
+   }
+  },
+  "decision": "FAIL",
+  "incomplete_contrast": {
+   "ci95_difference": [
+    22.333333333333332,
+    33.0
+   ],
+   "control_mean": 386.6666666666667,
+   "direction_expected": "less",
+   "exact_p_one_sided": 1.0,
+   "field": "incomplete_activation_request_count",
+   "paired_mean_difference": 27.333333333333332,
+   "paired_median_difference": 26.0,
+   "per_seed_difference": [
+    24.0,
+    24.0,
+    48.0,
+    40.0,
+    28.0,
+    36.0,
+    16.0,
+    16.0,
+    24.0,
+    16.0,
+    28.0,
+    28.0
+   ],
+   "treatment_mean": 414.0
+  },
+  "requests_contrast": {
+   "ci95_difference": [
+    42.333333333333336,
+    49.333333333333336
+   ],
+   "control_mean": 596.6666666666666,
+   "direction_expected": "less",
+   "exact_p_one_sided": 1.0,
+   "field": "activation_requests_seated",
+   "paired_mean_difference": 45.666666666666664,
+   "paired_median_difference": 44.0,
+   "per_seed_difference": [
+    40.0,
+    44.0,
+    60.0,
+    52.0,
+    40.0,
+    52.0,
+    40.0,
+    44.0,
+    40.0,
+    40.0,
+    48.0,
+    48.0
+   ],
+   "treatment_mean": 642.3333333333334
+  },
+  "reserve_wakes_rejected_no_useful_work_mean": 0.0
+ },
+ "H_S4": {
+  "components_mean_kwh": {
+   "activated_reserve_energy_kwh": 0.00019119820601849576,
+   "range_idle_energy_difference_kwh": 0.004420950190972582,
+   "reserve_standby_energy_difference_kwh": 0.0047241554340278,
+   "wake_energy_difference_kwh": 0.000863203433641975
+  },
+  "decision": "PASS",
+  "mean_absolute_kwh": {
+   "ci95_lower": 0.019692876060957015,
+   "ci95_upper": 0.01976273658661296,
+   "mean": 0.019727407283950858,
+   "median": 0.01972775674189846
+  },
+  "mean_relative": {
+   "ci95_lower": 0.549543453703712,
+   "ci95_upper": 0.5515347048611169,
+   "mean": 0.5505322962963031,
+   "median": 0.5505420486111198
+  }
+ },
+ "analysis_seed_root": 16767666002914861861,
+ "bootstrap_resamples": 10000,
+ "harness": "analyze_8s.py",
+ "holm_family": {
+  "H-S1(accepted_blocks)": {
+   "holm_threshold": 0.016666666666666666,
+   "p": 0.000244140625,
+   "reject_null": true
+  },
+  "H-S3(activation_requests_seated)": {
+   "holm_threshold": 0.025,
+   "p": 1.0,
+   "reject_null": false
+  },
+  "H-S3(incomplete_requests)": {
+   "holm_threshold": 0.05,
+   "p": 1.0,
+   "reject_null": false
+  }
+ },
+ "input_dataset_sha256": "4046e056907a4ec7ced6a07042452b73deb5e5028dbf5380ea850d9e6d1ff044",
+ "integrity_all_pass": true,
+ "n_seeds": 12,
+ "scenario_means_descriptive": {
+  "S00_NO_FLOOR": {
+   "E_idle_kwh": 0.016545386049382504,
+   "H_useful_available_time_weighted": 0.0,
+   "H_useful_target_time_weighted": 0.0,
+   "accepted_blocks_per_closed_round": 0.7949699384216067,
+   "activated_reserve_energy_kwh": 0.0,
+   "activation_batches_seated": 0.0,
+   "activation_requests_completed": 0.0,
+   "activation_requests_seated": 0.0,
+   "activations_per_closed_round": 0.0,
+   "breach_episode_count": 0.0,
+   "coarse_reassignment_count": 0.0,
+   "coarse_repartition_count": 0.0,
+   "donor_lineage_repartition_replay_count": 0.0,
+   "duplicate_activation_batch_prevented_count": 0.0,
+   "duplicate_reassignment_prevented_count": 0.0,
+   "duration_below_static_floor": 0.0,
+   "duration_below_useful_floor": 0.0,
+   "incomplete_activation_request_count": 0.0,
+   "maximum_H_pipeline": 0.0,
+   "maximum_coarse_chunk_size": 0.0,
+   "mean_coarse_chunk_size": 0.0,
+   "mean_round_duration": 1.3409992877040269,
+   "median_round_duration": 1.1770833333333501,
+   "minimum_coarse_chunk_size": 0.0,
+   "p95_round_duration": 2.0000000000000284,
+   "prediction_decision_count": 0.0,
+   "range_idle_energy_difference_kwh": 0.0021737515277782293,
+   "reassignments_per_closed_round": 0.0,
+   "relative_reduction": 0.5382682962963022,
+   "reserve_standby_energy_difference_kwh": 0.00645,
+   "reserve_wake_useful_completion_ratio": 0.0,
+   "reserve_wakes_rejected_no_useful_work": 0.0,
+   "reserve_wakes_with_bound_work": 0.0,
+   "rounds_accepted": 177.91666666666666,
+   "rounds_executed": 223.75,
+   "static_floor_deficit_area_hash_s": 0.0,
+   "static_floor_unattainable_count": 0.0,
+   "time_weighted_H_pipeline": 0.0,
+   "unclosed_final_tail_s": 0.0,
+   "useful_floor_deficit_area": 0.0,
+   "useful_floor_unattainable_count": 0.0,
+   "wake_energy_difference_kwh": 0.0
+  },
+  "S01_STAGE8R_STATIC_FLOOR": {
+   "E_idle_kwh": 0.015330024891975118,
+   "H_useful_available_time_weighted": 676.2834490740697,
+   "H_useful_target_time_weighted": 612.7004398148097,
+   "accepted_blocks_per_closed_round": 0.791521055356048,
+   "activated_reserve_energy_kwh": 0.00043745864197530923,
+   "activation_batches_seated": 149.16666666666666,
+   "activation_requests_completed": 210.0,
+   "activation_requests_seated": 596.6666666666666,
+   "activations_per_closed_round": 3.1448604910130236,
+   "breach_episode_count": 338.5833333333333,
+   "coarse_reassignment_count": 0.0,
+   "coarse_repartition_count": 0.0,
+   "donor_lineage_repartition_replay_count": 0.0,
+   "duplicate_activation_batch_prevented_count": 1256.5833333333333,
+   "duplicate_reassignment_prevented_count": 0.0,
+   "duration_below_static_floor": 273.752986111107,
+   "duration_below_useful_floor": 42.25013888888898,
+   "incomplete_activation_request_count": 386.6666666666667,
+   "maximum_H_pipeline": 5000.0,
+   "maximum_coarse_chunk_size": 0.0,
+   "mean_coarse_chunk_size": 0.0,
+   "mean_round_duration": 1.5817988605832998,
+   "median_round_duration": 1.1778472222222494,
+   "minimum_coarse_chunk_size": 0.0,
+   "p95_round_duration": 2.86250000000004,
+   "prediction_decision_count": 149.75,
+   "range_idle_energy_difference_kwh": 0.006047669305555955,
+   "reassignments_per_closed_round": 0.0,
+   "relative_reduction": 0.5721853518518571,
+   "reserve_standby_energy_difference_kwh": 0.004622017743055556,
+   "reserve_wake_useful_completion_ratio": 0.9102233755530517,
+   "reserve_wakes_rejected_no_useful_work": 0.0,
+   "reserve_wakes_with_bound_work": 0.0,
+   "rounds_accepted": 150.25,
+   "rounds_executed": 189.75,
+   "static_floor_deficit_area_hash_s": 828653.1805555419,
+   "static_floor_unattainable_count": 53.083333333333336,
+   "time_weighted_H_pipeline": 1018.9228009259308,
+   "unclosed_final_tail_s": 0.0,
+   "useful_floor_deficit_area": 53514.749999999614,
+   "useful_floor_unattainable_count": 0.0,
+   "wake_energy_difference_kwh": 0.0007968163773148144
+  },
+  "S02_USEFUL_FLOOR": {
+   "E_idle_kwh": 0.015330024891975118,
+   "H_useful_available_time_weighted": 676.2834490740697,
+   "H_useful_target_time_weighted": 612.7004398148097,
+   "accepted_blocks_per_closed_round": 0.791521055356048,
+   "activated_reserve_energy_kwh": 0.00043745864197530923,
+   "activation_batches_seated": 149.16666666666666,
+   "activation_requests_completed": 210.0,
+   "activation_requests_seated": 596.6666666666666,
+   "activations_per_closed_round": 3.1448604910130236,
+   "breach_episode_count": 149.75,
+   "coarse_reassignment_count": 0.0,
+   "coarse_repartition_count": 0.0,
+   "donor_lineage_repartition_replay_count": 0.0,
+   "duplicate_activation_batch_prevented_count": 1256.5833333333333,
+   "duplicate_reassignment_prevented_count": 0.0,
+   "duration_below_static_floor": 273.752986111107,
+   "duration_below_useful_floor": 42.25013888888898,
+   "incomplete_activation_request_count": 386.6666666666667,
+   "maximum_H_pipeline": 5000.0,
+   "maximum_coarse_chunk_size": 0.0,
+   "mean_coarse_chunk_size": 0.0,
+   "mean_round_duration": 1.5817988605832998,
+   "median_round_duration": 1.1778472222222494,
+   "minimum_coarse_chunk_size": 0.0,
+   "p95_round_duration": 2.86250000000004,
+   "prediction_decision_count": 149.16666666666666,
+   "range_idle_energy_difference_kwh": 0.006047669305555955,
+   "reassignments_per_closed_round": 0.0,
+   "relative_reduction": 0.5721853518518571,
+   "reserve_standby_energy_difference_kwh": 0.004622017743055556,
+   "reserve_wake_useful_completion_ratio": 0.9102233755530517,
+   "reserve_wakes_rejected_no_useful_work": 0.0,
+   "reserve_wakes_with_bound_work": 596.6666666666666,
+   "rounds_accepted": 150.25,
+   "rounds_executed": 189.75,
+   "static_floor_deficit_area_hash_s": 828653.1805555419,
+   "static_floor_unattainable_count": 0.0,
+   "time_weighted_H_pipeline": 1018.9228009259308,
+   "unclosed_final_tail_s": 0.0,
+   "useful_floor_deficit_area": 53514.749999999614,
+   "useful_floor_unattainable_count": 541.5,
+   "wake_energy_difference_kwh": 0.0007968163773148144
+  },
+  "S03_USEFUL_FLOOR_COARSE_REASSIGNMENT": {
+   "E_idle_kwh": 0.016105926049382473,
+   "H_useful_available_time_weighted": 675.3902777777546,
+   "H_useful_target_time_weighted": 606.701273148126,
+   "accepted_blocks_per_closed_round": 0.7893809834753726,
+   "activated_reserve_energy_kwh": 0.00019119820601849576,
+   "activation_batches_seated": 160.58333333333334,
+   "activation_requests_completed": 228.33333333333334,
+   "activation_requests_seated": 642.3333333333334,
+   "activations_per_closed_round": 3.1543314013837294,
+   "breach_episode_count": 262.9166666666667,
+   "coarse_reassignment_count": 355.5833333333333,
+   "coarse_repartition_count": 201.83333333333334,
+   "donor_lineage_repartition_replay_count": 0.0,
+   "duplicate_activation_batch_prevented_count": 1360.9166666666667,
+   "duplicate_reassignment_prevented_count": 0.0,
+   "duration_below_static_floor": 271.8088194444413,
+   "duration_below_useful_floor": 28.707847222221925,
+   "incomplete_activation_request_count": 414.0,
+   "maximum_H_pipeline": 5000.0,
+   "maximum_coarse_chunk_size": 28.0,
+   "mean_coarse_chunk_size": 26.567591546832073,
+   "mean_round_duration": 1.47345821822575,
+   "median_round_duration": 1.177500000000023,
+   "minimum_coarse_chunk_size": 26.0,
+   "p95_round_duration": 2.3325000000000387,
+   "prediction_decision_count": 160.58333333333334,
+   "range_idle_energy_difference_kwh": 0.004420950190972582,
+   "reassignments_per_closed_round": 1.7482492046185716,
+   "relative_reduction": 0.5505322962963031,
+   "reserve_standby_energy_difference_kwh": 0.0047241554340278,
+   "reserve_wake_useful_completion_ratio": 0.8771186412906739,
+   "reserve_wakes_rejected_no_useful_work": 0.0,
+   "reserve_wakes_with_bound_work": 642.3333333333334,
+   "rounds_accepted": 160.83333333333334,
+   "rounds_executed": 203.66666666666666,
+   "static_floor_deficit_area_hash_s": 820048.3819444353,
+   "static_floor_unattainable_count": 0.0,
+   "time_weighted_H_pipeline": 1093.564814814808,
+   "unclosed_final_tail_s": 0.0,
+   "useful_floor_deficit_area": 42806.70138888727,
+   "useful_floor_unattainable_count": 672.0,
+   "wake_energy_difference_kwh": 0.000863203433641975
+  }
+ },
+ "structural_policy_claim_licensed": false
+}

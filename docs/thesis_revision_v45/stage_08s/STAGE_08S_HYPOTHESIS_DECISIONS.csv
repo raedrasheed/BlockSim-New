@@ -1,0 +1,23 @@
+hypothesis,criterion,value,pass
+H-S1,accepted_blocks S03 > S01 (Holm),"+10.583 (CI [9.083333333333334, 12.083333333333334]), p=0.000244",True
+H-S2,mean_accepted_blocks_ratio_S03_over_S00_ge_0.90,0.9039,True
+H-S2,mean_median_round_duration_ratio_le_1.10,1.0005,True
+H-S2,mean_duration_below_useful_floor_le_15s,28.7078,False
+H-S2,nonterminal_activation_request_count_zero_every_run,0,True
+H-S2,nonterminal_reassignment_request_count_zero_every_run,0,True
+H-S2,nonterminal_lease_count_zero_every_run,0,True
+H-S2,duplicate_nonce_count_zero_every_run,0,True
+H-S2,post_round_evaluation_record_count_zero_every_run,0,True
+H-S2,physical_frontier_rewind_count_zero_every_run,0,True
+H-S2,DECISION,FAIL,False
+H-S3,mean_reassignments_per_closed_round_le_1.0,1.7482,False
+H-S3,mean_activation_requests_seated_lt_S01,642.3333,False
+H-S3,holm_reject_activation_requests_contrast,1.0000,False
+H-S3,mean_incomplete_requests_lt_S01,414.0000,False
+H-S3,holm_reject_incomplete_requests_contrast,1.0000,False
+H-S3,reserve_wakes_rejected_no_useful_work (reported),mean 0.00,
+H-S3,DECISION,FAIL,False
+H-S4,mean relative low-power-state difference >= 0.20,"0.5505 (CI [0.5495, 0.5515])",True
+H-S4,bootstrap lower bound of mean absolute difference > 0,0.019693 kWh,True
+H-S4,DECISION,PASS,True
+OVERALL,structural-policy claim (H-S2 AND H-S3 AND H-S4 AND integrity),NOT LICENSED,False

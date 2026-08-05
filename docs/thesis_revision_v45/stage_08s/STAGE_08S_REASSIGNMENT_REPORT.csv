@@ -1,0 +1,5 @@
+scenario_id,coarse_repartition_count,coarse_reassignment_count,reassignments_per_closed_round,mean_coarse_chunk_size,minimum_coarse_chunk_size,maximum_coarse_chunk_size,donor_lineage_repartition_replay_count,duplicate_reassignment_prevented_count,activation_requests_seated,incomplete_activation_request_count,reserve_wakes_rejected_no_useful_work,reserve_wake_useful_completion_ratio
+S00_NO_FLOOR,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+S01_STAGE8R_STATIC_FLOOR,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,596.6666666666666,386.6666666666667,0.0,0.9102233755530517
+S02_USEFUL_FLOOR,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,596.6666666666666,386.6666666666667,0.0,0.9102233755530517
+S03_USEFUL_FLOOR_COARSE_REASSIGNMENT,201.83333333333334,355.5833333333333,1.7482492046185716,26.567591546832073,26.0,28.0,0.0,0.0,642.3333333333334,414.0,0.0,0.8771186412906739
