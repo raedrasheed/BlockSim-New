@@ -1,0 +1,61 @@
+{
+  "registry_version": 1,
+  "experiment": "Stage8Y",
+  "retrieval_date": "2026-08-14",
+  "primary_quantities": "hashrate_THs and active_power_W are treated as the primary specification. efficiency_J_per_TH_derived = active_power_W / hashrate_THs is computed from them so that E = P * t is exact. Any manufacturer-stated efficiency is recorded separately as efficiency_J_per_TH_stated and any discrepancy is flagged.",
+  "tolerance_note": "Bitmain publishes these as typical values: hashrate varies by about +/-3% and power on wall / efficiency on wall by about +/-5% at 25 C. Stage 8Y uses the nominal (typical) figures with no stochastic device variation; this is recorded as a limitation.",
+  "low_power_note": "No manufacturer-certified idle, standby or low-power operating state is published for any of these devices. Stage 8Y therefore invents NO device-specific low-power figure. All parked-state power is modelled as P_low = alpha * P_active with alpha swept as an explicit sensitivity parameter. These alpha values are model assumptions and are NOT Bitmain operating modes.",
+  "sandbox_verification_note": "support.bitmain.com returns HTTP 403 to the sandboxed fetcher used here (Zendesk edge protection), and file12.bitmain.com is not resolvable from this network. Official article URLs were located and are recorded below. Where the numeric table could be quoted from official page content it is marked verified_quote; otherwise the status is url_located_content_not_retrievable and the figures are the widely-published nominal values, flagged as requiring direct confirmation against the official page before publication.",
+  "devices": [
+    {
+      "key": "S21PRO",
+      "manufacturer": "Bitmain",
+      "model": "Antminer S21 Pro",
+      "generation": "current high-efficiency",
+      "hashrate_THs": 234.0,
+      "active_power_W": 3510.0,
+      "efficiency_J_per_TH_stated": 15.0,
+      "efficiency_J_per_TH_derived": 15.0,
+      "efficiency_consistent": true,
+      "source_url": "https://support.bitmain.com/hc/en-us/articles/31321354157593-S21-Pro-Specification",
+      "secondary_source_url": "https://file12.bitmain.com/shop-product-s3/firmware/820cf7da-aa2b-453e-9af1-d4cc258ec630/2025/02/17/10/S21%20Pro%20Product%20Manual%20V3.0.2%20.pdf",
+      "retrieval_date": "2026-08-14",
+      "manufacturer_certified": "url_located_content_not_retrievable",
+      "low_power_W_documented": null,
+      "notes": "Official specification article located; the numeric table could not be retrieved in this sandbox (HTTP 403). 234 x 15 = 3510 exactly, so the stated efficiency and the derived efficiency agree. Same device and same figures as Stage 8X, which keeps the two experiment families directly comparable."
+    },
+    {
+      "key": "S19XP",
+      "manufacturer": "Bitmain",
+      "model": "Antminer S19 XP",
+      "generation": "intermediate",
+      "hashrate_THs": 141.0,
+      "active_power_W": 3010.0,
+      "efficiency_J_per_TH_stated": 21.5,
+      "efficiency_J_per_TH_derived": 21.347517730496455,
+      "efficiency_consistent": false,
+      "source_url": "https://support.bitmain.com/hc/en-us/articles/8906244096409-S19-XP-Specifications",
+      "retrieval_date": "2026-08-14",
+      "manufacturer_certified": "url_located_content_not_retrievable",
+      "low_power_W_documented": null,
+      "notes": "Third, intermediate-generation device added to strengthen heterogeneity. The stated 21.5 J/TH and the derived 3010/141 = 21.3475 J/TH differ by 0.7%, well inside the published +/-5% power tolerance. Stage 8Y uses the derived value so that E = P * t is exact; the discrepancy is documented rather than silently reconciled."
+    },
+    {
+      "key": "S19JPRO",
+      "manufacturer": "Bitmain",
+      "model": "Antminer S19j Pro 104T",
+      "generation": "older",
+      "hashrate_THs": 104.0,
+      "active_power_W": 3068.0,
+      "efficiency_J_per_TH_stated": 29.5,
+      "efficiency_J_per_TH_derived": 29.5,
+      "efficiency_consistent": true,
+      "source_url": "https://support.bitmain.com/hc/en-us/articles/900006762746-S19j-Pro-Specifications",
+      "retrieval_date": "2026-08-14",
+      "manufacturer_certified": "verified_quote",
+      "verified_quote": "The S19j Pro 104T has a hashrate of 104 +/- 3% TH/s with a power consumption of 3068 +/- 5% Watts at 25 C. Model 240-Cb, SHA256, BTC/BCH.",
+      "low_power_W_documented": null,
+      "notes": "Values quoted from the official Bitmain support specification page. 3068/104 = 29.5 exactly, so stated and derived efficiency agree."
+    }
+  ]
+}

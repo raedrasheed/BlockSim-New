@@ -1,0 +1,16 @@
+protocol,alpha_case,alpha,is_idealized_alpha,P_low_note,n,EnergySaving_mean,EnergySaving_ci95_low,EnergySaving_ci95_high,exceeds_50pct_mean,exceeds_50pct_ci_lower,configs_exceeding_50pct
+P0_ALL,alpha_0,0.0,True,model assumption; not a manufacturer-certified mode,270,0.002264405054893672,0.0021992310668218005,0.002329579042965543,False,False,0
+P0_ALL,alpha_005,0.05,False,model assumption; not a manufacturer-certified mode,270,0.0021511848021489844,0.0020892695134807062,0.0022131000908172625,False,False,0
+P0_ALL,alpha_010,0.1,False,model assumption; not a manufacturer-certified mode,270,0.0020379645494042974,0.0019793079601396124,0.0020966211386689824,False,False,0
+P0_ALL,alpha_025,0.25,False,model assumption; not a manufacturer-certified mode,270,0.0016983037911702512,0.0016494233001163475,0.001747184282224155,False,False,0
+P0_ALL,alpha_050,0.5,False,model assumption; not a manufacturer-certified mode,270,0.0011322025274468222,0.0010996155334108853,0.0011647895214827592,False,False,0
+P3_ENERGY,alpha_0,0.0,True,model assumption; not a manufacturer-certified mode,270,0.4853951063665185,0.4781684955533476,0.4926217171796894,False,False,6
+P3_ENERGY,alpha_005,0.05,False,model assumption; not a manufacturer-certified mode,270,0.4611253510481926,0.45426007077568026,0.4679906313207049,False,False,3
+P3_ENERGY,alpha_010,0.1,False,model assumption; not a manufacturer-certified mode,270,0.43685559572986665,0.43035164599801284,0.44335954546172046,False,False,0
+P3_ENERGY,alpha_025,0.25,False,model assumption; not a manufacturer-certified mode,270,0.3640463297748889,0.3586263716650107,0.36946628788476704,False,False,0
+P3_ENERGY,alpha_050,0.5,False,model assumption; not a manufacturer-certified mode,270,0.2426975531832592,0.23908424777667375,0.24631085858984464,False,False,0
+P4_RESERVE,alpha_0,0.0,True,model assumption; not a manufacturer-certified mode,270,0.450204435068844,0.4445131918917671,0.4558956782459209,False,False,0
+P4_RESERVE,alpha_005,0.05,False,model assumption; not a manufacturer-certified mode,270,0.4276942133154017,0.4222875322971786,0.4331008943336248,False,False,0
+P4_RESERVE,alpha_010,0.1,False,model assumption; not a manufacturer-certified mode,270,0.40518399156195956,0.4000618727025903,0.4103061104213288,False,False,0
+P4_RESERVE,alpha_025,0.25,False,model assumption; not a manufacturer-certified mode,270,0.33765332630163297,0.33338489391882525,0.3419217586844407,False,False,0
+P4_RESERVE,alpha_050,0.5,False,model assumption; not a manufacturer-certified mode,270,0.22510221753442197,0.2222565959458835,0.22794783912296043,False,False,0

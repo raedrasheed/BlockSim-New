@@ -1,0 +1,5 @@
+phase,classification,physical_runs,protocols,compositions,network_sizes,seeds,horizon_s,alpha_observations
+pilot,Pilot - excluded from all inference,378,"P0_ALL, P1_EQUAL, P2_HASHPROP, P3_ENERGY, P4_RESERVE, POW, POW_CT","H0, H2, H4","100, 300, 500",6,10000,1350
+primary,Primary confirmatory,1080,"P0_ALL, P3_ENERGY, P4_RESERVE, POW","H0, H2, H4","100, 300, 500",30,10000,4050
+secondary,Secondary / exploratory sensitivity,2880,"P0_ALL, P1_EQUAL, P2_HASHPROP, P3_ENERGY, P4_RESERVE, POW, POW_CT","H0, H1, H2, H3, H4","100, 200, 300, 400, 500",30,10000,13200
+longhorizon,Long-horizon confirmatory,360,"P0_ALL, P3_ENERGY, P4_RESERVE, POW","H0, H2, H4",300,30,100000,1350
