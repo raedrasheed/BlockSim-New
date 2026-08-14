@@ -1,0 +1,37 @@
+{
+  "100": {
+    "t_active_equal_across_pow_arms": true,
+    "energy_equal_across_pow_arms": true,
+    "pc_t_active_deficit_s": 0.0009313225746154785,
+    "pc_energy_saving_alpha0": 9.313225746154785e-10,
+    "nonce_reuse_differs_while_energy_equal": true
+  },
+  "200": {
+    "t_active_equal_across_pow_arms": true,
+    "energy_equal_across_pow_arms": true,
+    "pc_t_active_deficit_s": 0.048428772715851665,
+    "pc_energy_saving_alpha0": 2.4214386273868627e-08,
+    "nonce_reuse_differs_while_energy_equal": true
+  },
+  "300": {
+    "t_active_equal_across_pow_arms": true,
+    "energy_equal_across_pow_arms": true,
+    "pc_t_active_deficit_s": 0.07264315895736217,
+    "pc_energy_saving_alpha0": 2.4214386273868627e-08,
+    "nonce_reuse_differs_while_energy_equal": true
+  },
+  "400": {
+    "t_active_equal_across_pow_arms": true,
+    "energy_equal_across_pow_arms": true,
+    "pc_t_active_deficit_s": 0.2831220426596701,
+    "pc_energy_saving_alpha0": 7.078051067477276e-08,
+    "nonce_reuse_differs_while_energy_equal": true
+  },
+  "500": {
+    "t_active_equal_across_pow_arms": true,
+    "energy_equal_across_pow_arms": true,
+    "pc_t_active_deficit_s": 0.23748724535107613,
+    "pc_energy_saving_alpha0": 4.7497449084943355e-08,
+    "nonce_reuse_differs_while_energy_equal": true
+  }
+}

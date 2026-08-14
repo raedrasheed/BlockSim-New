@@ -1,0 +1,139 @@
+{
+  "experiment": "stage8xnr",
+  "frozen_after": "pilot PASS (see STAGE_8X_NR_PILOT_REPORT.md)",
+  "config_hash": "36b2bd9617fcf33ca2a0be2c2c74b76d90797cd572915fc5a550fec767cf244c",
+  "config": {
+    "experiment": "stage8xnr",
+    "S_nonce": 4294967296,
+    "hashrate_hps": 234000000000000,
+    "active_power_w": 3510.0,
+    "efficiency_j_per_th": 15.0,
+    "n_grid": [
+      100,
+      200,
+      300,
+      400,
+      500
+    ],
+    "t_run_s": 10000.0,
+    "i_target_s": 600.0,
+    "alpha_cases": {
+      "LP0": 0.0,
+      "LP10": 0.1,
+      "LP25": 0.25,
+      "LP50": 0.5
+    },
+    "arms": [
+      "XNR-PW-CONV-ZERO",
+      "XNR-PW-CONV-OFFSET",
+      "XNR-PW-MT-ZERO",
+      "XNR-PW-MT-OFFSET",
+      "XNR-PC"
+    ],
+    "primary_arms": [
+      "XNR-PW-CONV-OFFSET",
+      "XNR-PW-MT-OFFSET",
+      "XNR-PC"
+    ],
+    "subsweep_window": {
+      "100": 21474836,
+      "200": 10737418,
+      "300": 7158278,
+      "400": 5368709,
+      "500": 4294967
+    },
+    "difficulty": {
+      "100": {
+        "q": 7.122507122507123e-20,
+        "D": 3268942236.9003296,
+        "target_hex": "0x00000000000000015059d3de1c28ab2fd76c4c7278659dd554855b5237a863f3"
+      },
+      "200": {
+        "q": 3.5612535612535614e-20,
+        "D": 6537884473.800659,
+        "target_hex": "0x0000000000000000a82ce9ef0e145597ebb626393c32ceeaaa42ada91bd431f9"
+      },
+      "300": {
+        "q": 2.3741690408357075e-20,
+        "D": 9806826710.700989,
+        "target_hex": "0x0000000000000000701df14a0962e3ba9d24197b7d77349c7181c91b67e2cbfb"
+      },
+      "400": {
+        "q": 1.7806267806267807e-20,
+        "D": 13075768947.601318,
+        "target_hex": "0x0000000000000000541674f7870a2acbf5db131c9e196775552156d48dea18fc"
+      },
+      "500": {
+        "q": 1.4245014245014244e-20,
+        "D": 16344711184.501648,
+        "target_hex": "0x000000000000000043452a5f9f3b556ff7e275b07e7ab92aaa811243a4bb4730"
+      }
+    },
+    "partition": {
+      "100": {
+        "n": 100,
+        "size_min": 42949672,
+        "size_max": 42949673,
+        "n_long_ranges": 96,
+        "n_short_ranges": 4,
+        "total": 4294967296
+      },
+      "200": {
+        "n": 200,
+        "size_min": 21474836,
+        "size_max": 21474837,
+        "n_long_ranges": 96,
+        "n_short_ranges": 104,
+        "total": 4294967296
+      },
+      "300": {
+        "n": 300,
+        "size_min": 14316557,
+        "size_max": 14316558,
+        "n_long_ranges": 196,
+        "n_short_ranges": 104,
+        "total": 4294967296
+      },
+      "400": {
+        "n": 400,
+        "size_min": 10737418,
+        "size_max": 10737419,
+        "n_long_ranges": 96,
+        "n_short_ranges": 304,
+        "total": 4294967296
+      },
+      "500": {
+        "n": 500,
+        "size_min": 8589934,
+        "size_max": 8589935,
+        "n_long_ranges": 296,
+        "n_short_ranges": 204,
+        "total": 4294967296
+      }
+    },
+    "n_primary_seeds": 30,
+    "n_pilot_seeds": 2,
+    "pilot_n_grid": [
+      100,
+      300,
+      500
+    ]
+  },
+  "seed_registry_sha256": "43c6e9b068215af51fd74eff64883b602b4252d539d26b22a61b6077f61a7bd8",
+  "code_checksums": {
+    "experiments/stage8xnr/config/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "experiments/stage8xnr/config/nr_config.py": "38ad3a59b5727c2b0ff4a0ee624cee49348d3a40ea2c98d9e3532c6cf6d1dc0d",
+    "experiments/stage8xnr/config/seeds.py": "d1936d494e0c026935fa9b692df6011ba82613091d5a199b53ef69c32cf06a98",
+    "experiments/stage8xnr/src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "experiments/stage8xnr/src/engine_nr.py": "283fec75b7e6175ffc137eb46491f5ca8c8faf20e1bf95578a234a6884ed91e8",
+    "experiments/stage8xnr/src/metrics_nr.py": "b6f213a722f15b4ce9dde5130289ffb8ce5aca16c29954a818888aa913b8011c",
+    "experiments/stage8xnr/src/noncedomain.py": "a230b27624daeaf9dc8b3536d2707e3bdc46eaee7556fe0ee33a625b9acab35a",
+    "experiments/stage8xnr/src/run_matrix.py": "dc2edbcb547ff850ab908dd76ddd23f6382b9da2db0b7c0f89e75764ce01e4f4",
+    "experiments/stage8xnr/src/traversal.py": "47042446d6512cf883b8f11cee4a059e341e14d66e68981798b7e051c1ffc292",
+    "experiments/stage8xnr/tests/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "experiments/stage8xnr/tests/test_stage8xnr.py": "aff5a16c0c2a39f19796de1fc0ef06f56c157ffcb4af7d65898b3bdc0b9868d9"
+  },
+  "git_commit_at_freeze": "e20457fd27385090f394ca9ec8a107701152d875",
+  "protected_baseline_sha256": "8f45fbf5d989bb65d0a16a8eaf06c2159928360c255c1aa7d491f5220ff8e396",
+  "protected_file_count": 390
+}

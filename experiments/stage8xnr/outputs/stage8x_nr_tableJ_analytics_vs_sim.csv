@@ -1,0 +1,56 @@
+N,quantity,predicted,measured,rel_error,within_tolerance,tolerance,note
+100,rho_nonce_round CONV-OFFSET,0.9999999967418444,0.9999999967418444,0.0,True,1e-09,"interval geometry, per-round exact"
+100,rho_nonce_epoch MT,0.99,0.99,0.0,True,1e-12,
+100,rho_exact_epoch MT,0.99,0.99,0.0,True,1e-12,
+100,rho_nonce_epoch PC,0.0,0.0,0.0,True,0.0,exact zero required
+100,rho_exact CONV (any scope),0.0,0.0,0.0,True,0.0,exact zero required
+100,subsweep pairwise O_mean OFFSET,107374.17760000005,108994.70655892257,0.0150923526973073,True,0.05,E[O_ij]=W^2/S for independent uniform offsets
+100,subsweep rho_nonce OFFSET,0.21154086896608626,0.2129762494887815,0.006785357976974895,True,0.05,E[U]=S(1-(1-W/S)^N) coverage model
+100,subsweep rho_nonce ZERO,0.99,0.99,0.0,True,1e-12,
+100,PC F_low_time,9.313225737481168e-10,9.313225736022793e-10,1.5659185074330258e-10,True,0.05,straggler gap (N_short*(hi-lo))/(N*hi)
+100,MT blocks per run,0.16666666666666666,0.06666666666666667,0.6,True,1.0,30-seed Poisson sampling; compared with wide tolerance
+100,CONV blocks per run,16.666666666666668,16.133333333333333,0.0320000000000001,True,0.1,
+200,rho_nonce_round CONV-OFFSET,0.9999999983709221,0.9999999983709221,0.0,True,1e-09,"interval geometry, per-round exact"
+200,rho_nonce_epoch MT,0.995,0.995,0.0,True,1e-12,
+200,rho_exact_epoch MT,0.995,0.995,0.0,True,1e-12,
+200,rho_nonce_epoch PC,0.0,0.0,0.0,True,0.0,exact zero required
+200,rho_exact CONV (any scope),0.0,0.0,0.0,True,0.0,exact zero required
+200,subsweep pairwise O_mean OFFSET,26843.544400000013,26335.604644891122,0.01892223126499238,True,0.05,E[O_ij]=W^2/S for independent uniform offsets
+200,subsweep rho_nonce OFFSET,0.2123021237654822,0.20991612480765862,0.011238695664011563,True,0.05,E[U]=S(1-(1-W/S)^N) coverage model
+200,subsweep rho_nonce ZERO,0.995,0.9949999999999999,1.1158020347991522e-16,True,1e-12,
+200,PC F_low_time,2.421438635366592e-08,2.421438635182963e-08,7.583472495279503e-11,True,0.05,straggler gap (N_short*(hi-lo))/(N*hi)
+200,MT blocks per run,0.08333333333333333,0.03333333333333333,0.6,True,1.0,30-seed Poisson sampling; compared with wide tolerance
+200,CONV blocks per run,16.666666666666668,16.133333333333333,0.0320000000000001,True,0.1,
+300,rho_nonce_round CONV-OFFSET,0.9999999989139481,0.9999999989139481,0.0,True,1e-09,"interval geometry, per-round exact"
+300,rho_nonce_epoch MT,0.9966666666666667,0.9966666666666667,0.0,True,1e-12,
+300,rho_exact_epoch MT,0.9966666666666667,0.9966666666666667,0.0,True,1e-12,
+300,rho_nonce_epoch PC,0.0,0.0,0.0,True,0.0,exact zero required
+300,rho_exact CONV (any scope),0.0,0.0,0.0,True,0.0,exact zero required
+300,subsweep pairwise O_mean OFFSET,11930.461955555715,11999.303106651801,0.005770199959778527,True,0.05,E[O_ij]=W^2/S for independent uniform offsets
+300,subsweep rho_nonce OFFSET,0.21255539961866232,0.21410528644831434,0.007291684108861068,True,0.05,E[U]=S(1-(1-W/S)^N) coverage model
+300,subsweep rho_nonce ZERO,0.9966666666666667,0.9966666666666665,2.2278722902177054e-16,True,1e-12,
+300,PC F_low_time,2.421438635366592e-08,2.4214386352355556e-08,5.411507270868631e-11,True,0.05,straggler gap (N_short*(hi-lo))/(N*hi)
+300,MT blocks per run,0.05555555555555555,0.03333333333333333,0.39999999999999997,True,1.0,30-seed Poisson sampling; compared with wide tolerance
+300,CONV blocks per run,16.666666666666668,16.133333333333333,0.0320000000000001,True,0.1,
+400,rho_nonce_round CONV-OFFSET,0.9999999991854611,0.9999999991854611,0.0,True,1e-09,"interval geometry, per-round exact"
+400,rho_nonce_epoch MT,0.9975,0.9975,0.0,True,1e-12,
+400,rho_exact_epoch MT,0.9975,0.9975,0.0,True,1e-12,
+400,rho_nonce_epoch PC,0.0,0.0,0.0,True,0.0,exact zero required
+400,rho_exact CONV (any scope),0.0,0.0,0.0,True,0.0,exact zero required
+400,subsweep pairwise O_mean OFFSET,6710.886100000003,6752.775522138681,0.006242010595095214,True,0.05,E[O_ij]=W^2/S for independent uniform offsets
+400,subsweep rho_nonce OFFSET,0.21268197686109547,0.21406268344338775,0.0064918833399504805,True,0.05,E[U]=S(1-(1-W/S)^N) coverage model
+400,subsweep rho_nonce ZERO,0.9975,0.9975000000000003,2.2260110769426696e-16,True,1e-12,
+400,PC F_low_time,7.078051066089533e-08,7.078051065813618e-08,3.898168613745599e-11,True,0.05,straggler gap (N_short*(hi-lo))/(N*hi)
+400,MT blocks per run,0.041666666666666664,0.03333333333333333,0.19999999999999996,True,1.0,30-seed Poisson sampling; compared with wide tolerance
+400,CONV blocks per run,16.666666666666668,16.133333333333333,0.0320000000000001,True,0.1,
+500,rho_nonce_round CONV-OFFSET,0.9999999993483689,0.9999999993483689,0.0,True,1e-09,"interval geometry, per-round exact"
+500,rho_nonce_epoch MT,0.998,0.998,0.0,True,1e-12,
+500,rho_exact_epoch MT,0.998,0.998,0.0,True,1e-12,
+500,rho_nonce_epoch PC,0.0,0.0,0.0,True,0.0,exact zero required
+500,rho_exact CONV (any scope),0.0,0.0,0.0,True,0.0,exact zero required
+500,subsweep pairwise O_mean OFFSET,4294.96670400002,4283.110789579158,0.0027604205661991106,True,0.05,E[O_ij]=W^2/S for independent uniform offsets
+500,subsweep rho_nonce OFFSET,0.2127578772994978,0.2122087886899558,0.0025808144756447964,True,0.05,E[U]=S(1-(1-W/S)^N) coverage model
+500,subsweep rho_nonce ZERO,0.998,0.998,0.0,True,1e-12,
+500,PC F_low_time,4.749744904938163e-08,4.7497449047854356e-08,3.215484676251875e-11,True,0.05,straggler gap (N_short*(hi-lo))/(N*hi)
+500,MT blocks per run,0.03333333333333333,0.03333333333333333,0.0,True,1.0,30-seed Poisson sampling; compared with wide tolerance
+500,CONV blocks per run,16.666666666666668,16.133333333333333,0.0320000000000001,True,0.1,
