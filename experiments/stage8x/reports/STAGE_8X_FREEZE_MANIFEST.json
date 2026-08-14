@@ -1,0 +1,256 @@
+{
+  "config_hash": "b871c98ea1c612cdbd5a2223ff017610d908ae78fe08d509113f86983218cebf",
+  "environment": {
+    "dependencies": {
+      "matplotlib": "3.11.1",
+      "numpy": "2.4.6",
+      "pandas": "3.0.5",
+      "scipy": "1.17.1"
+    },
+    "implementation": "CPython",
+    "machine": "x86_64",
+    "platform": "Linux-6.18.5-fc-v20-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "python": "3.11.15"
+  },
+  "experiment": "Stage8X",
+  "frozen_at_utc": "2026-08-14T17:07:50Z",
+  "frozen_code_sha256": {
+    "experiments/stage8x/analysis/figures.py": "0df33813c2c4a4545cc2fceb755f938d1bee1f938ce211c6894e87564b0e4b6b",
+    "experiments/stage8x/analysis/stats.py": "979e5c2710593408071179330b10af839935d26e8e95b1d7e7a033500fff46fe",
+    "experiments/stage8x/analysis/tables.py": "2b09b029c053b7efee54edbb2f3b0070623bb2632ee2aa17d5e2e1e2fc59cd48",
+    "experiments/stage8x/analyze.py": "84cdc7e3bcb28ae6191516acbf4560bd6aeb385aacf24e8b96fa1c985652a3c6",
+    "experiments/stage8x/config/asic.py": "588fa9953d0d87ed8538d1ae68b76e6177bb90ae5569115c5c603ccd0bf2b812",
+    "experiments/stage8x/config/difficulty.py": "ed97fa46c89d62f85e216a32fb661b197812eb992b03a01992c4bf69e6be0d44",
+    "experiments/stage8x/config/seeds.py": "643330ce75ecb68de50c16ef25eb2f10d0b87f6a4c312ad18ea1580198fed1fb",
+    "experiments/stage8x/config/stage8x_config.py": "9cc52a1c45820f00779ad6404963593cdcb81d9af0ac19d3289f0455767787fc",
+    "experiments/stage8x/freeze.py": "7c0cca42f839943fd5c34ea9ac54a50af754cc0fb574af5ddec0d26465a6d4ca",
+    "experiments/stage8x/run.py": "62d4167e21277162cf5151f2bbab0d1f2187825507b1c1a62aa079db7828e963",
+    "experiments/stage8x/simulator/energy.py": "372e1ec0052fc8f6a0bd15487cbcd1b7e0d64ea14dbcf78ff4c39279ce9321de",
+    "experiments/stage8x/simulator/engine.py": "07ef462ca18824164666e508cf292fdf3db9a9ab78acce26b2bd2cc78c8a0580",
+    "experiments/stage8x/simulator/hashing.py": "c756dd675f0315708e20cce800c3fc4d8a8db816e005fef967785f6f43d4a16e",
+    "experiments/stage8x/simulator/powerstate.py": "7afc6fe6226f24e7793f4e1a80e29e87ffb16c56d312d085ecfdccfca5951495",
+    "experiments/stage8x/tests/test_stage8x.py": "72adace7daddc21eb3d9d36f6030a5b08a1a3dddcf837d2e0b0851a78588cac9",
+    "experiments/stage8x/validate.py": "ab7a4ed0822842d39a43985ff17ba53ff340bf453b5773504bc4aed638933c02"
+  },
+  "frozen_parameters": {
+    "alpha_cases": {
+      "LP0": 0.0,
+      "LP10": 0.1,
+      "LP25": 0.25,
+      "LP50": 0.5
+    },
+    "asic": {
+      "active_power_W": 3510.0,
+      "efficiency_J_per_TH": 15.0,
+      "hashrate_THs": 234.0,
+      "name": "Bitmain Antminer S21 Pro",
+      "source_note": "Active values are the official Bitmain Antminer S21 Pro nominal specification. Low-power values are experimental sensitivity assumptions, not vendor-certified modes."
+    },
+    "difficulty_rule": "D_N = H_N * I_target / 2**32 ; q_N = 1/(H_N*I_target)",
+    "difficulty_table": [
+      {
+        "N": 100,
+        "aggregate_hashrate_Hps": 2.34e+16,
+        "difficulty": 3268942236.9003296,
+        "expected_hashes_per_block": 1.404e+19,
+        "expected_winners_per_epoch": 1.0,
+        "nonce_domain": 14040000000000000000,
+        "p_epoch_exhaustion_predicted": 0.36787944117144233,
+        "q_per_candidate": 7.122507122507123e-20,
+        "range_per_miner": 140400000000000000,
+        "target_hex": "0x00000000000000015059d3de1c28ab2fd76c4c7278659dd554855b5237a863f3"
+      },
+      {
+        "N": 200,
+        "aggregate_hashrate_Hps": 4.68e+16,
+        "difficulty": 6537884473.800659,
+        "expected_hashes_per_block": 2.808e+19,
+        "expected_winners_per_epoch": 1.0,
+        "nonce_domain": 28080000000000000000,
+        "p_epoch_exhaustion_predicted": 0.36787944117144233,
+        "q_per_candidate": 3.5612535612535614e-20,
+        "range_per_miner": 140400000000000000,
+        "target_hex": "0x0000000000000000a82ce9ef0e145597ebb626393c32ceeaaa42ada91bd431f9"
+      },
+      {
+        "N": 300,
+        "aggregate_hashrate_Hps": 7.02e+16,
+        "difficulty": 9806826710.700989,
+        "expected_hashes_per_block": 4.212e+19,
+        "expected_winners_per_epoch": 1.0,
+        "nonce_domain": 42120000000000000000,
+        "p_epoch_exhaustion_predicted": 0.36787944117144233,
+        "q_per_candidate": 2.3741690408357075e-20,
+        "range_per_miner": 140400000000000000,
+        "target_hex": "0x0000000000000000701df14a0962e3ba9d24197b7d77349c7181c91b67e2cbfb"
+      },
+      {
+        "N": 400,
+        "aggregate_hashrate_Hps": 9.36e+16,
+        "difficulty": 13075768947.601318,
+        "expected_hashes_per_block": 5.616e+19,
+        "expected_winners_per_epoch": 1.0,
+        "nonce_domain": 56160000000000000000,
+        "p_epoch_exhaustion_predicted": 0.36787944117144233,
+        "q_per_candidate": 1.7806267806267807e-20,
+        "range_per_miner": 140400000000000000,
+        "target_hex": "0x0000000000000000541674f7870a2acbf5db131c9e196775552156d48dea18fc"
+      },
+      {
+        "N": 500,
+        "aggregate_hashrate_Hps": 1.17e+17,
+        "difficulty": 16344711184.501648,
+        "expected_hashes_per_block": 7.02e+19,
+        "expected_winners_per_epoch": 0.9999999999999999,
+        "nonce_domain": 70200000000000000000,
+        "p_epoch_exhaustion_predicted": 0.3678794411714424,
+        "q_per_candidate": 1.4245014245014244e-20,
+        "range_per_miner": 140400000000000000,
+        "target_hex": "0x000000000000000043452a5f9f3b556ff7e275b07e7ab92aaa811243a4bb4730"
+      }
+    ],
+    "epoch_sweep_s": 600.0,
+    "experiment": "Stage8X",
+    "horizon_s": 10000.0,
+    "matched_difficulty": "D^PoW_N == D^PoCol_N (single D_N per N)",
+    "n_primary_seeds": 30,
+    "network_sizes": [
+      100,
+      200,
+      300,
+      400,
+      500
+    ],
+    "nonce_domain_rule": "S_N = H_N * tau_epoch ; L = S_N / N = h * tau_epoch",
+    "pilot": {
+      "excluded_from_primary_dataset": true,
+      "n_seeds": 5,
+      "network_sizes": [
+        100,
+        300,
+        500
+      ],
+      "protocols": [
+        "POW",
+        "POCOL",
+        "POWMT"
+      ]
+    },
+    "primary_protocols": [
+      "POW",
+      "POCOL"
+    ],
+    "prop_delay_mean_s": 0.42,
+    "revision": 1,
+    "secondary": {
+      "S1_matched_template_network_sizes": [
+        100,
+        200,
+        300,
+        400,
+        500
+      ],
+      "S2_epoch_sweeps_s": [
+        300.0,
+        60.0,
+        6.0
+      ],
+      "S2_network_sizes": [
+        100,
+        300,
+        500
+      ],
+      "reported_separately_from_primary": true
+    },
+    "seed_namespace": "BlockSim-New/Stage8X/PoCol-vs-PoW/AntminerS21Pro/rev1",
+    "target_interval_s": 600.0
+  },
+  "git": {
+    "branch": "claude/stage-8x-pocol-energy-osz8ot",
+    "commit": "2d3c243b36e904ca04bf391b0a4adc73c8cbe273",
+    "dirty_files": [
+      "?? experiments/__init__.py",
+      "?? experiments/stage8x/"
+    ]
+  },
+  "missing_frozen_files": [],
+  "post_freeze_amendments": [
+    {
+      "date": "2026-08-14",
+      "defect": "Table H's reference column `theoretical_duplicate_ratio` used 1-(1-1/N)^N, which is the expected *coverage* fraction, not the expected duplicate ratio.",
+      "file": "experiments/stage8x/analysis/tables.py",
+      "fix": "Corrected to (1-1/N)^N -> e^-1 = 0.3679, the expected duplicate ratio for N miners scanning L candidates at independent uniform offsets in a shared domain S = N*L.",
+      "id": "A1",
+      "scope": "Display-only reference column in a declared SECONDARY diagnostic table. No physical run, no primary result, no frozen parameter and no config_hash is affected; no run was re-executed."
+    },
+    {
+      "date": "2026-08-14",
+      "defect": "ALPHA_LABELS repeated the phrase 'sensitivity assumption', which the report template already prefixes, producing 'experimental sensitivity assumption - sensitivity assumption, 10% of active power'.",
+      "file": "experiments/stage8x/config/asic.py",
+      "fix": "Trimmed the redundant prefix from the LP10/LP25/LP50 label strings.",
+      "id": "A2",
+      "scope": "Human-readable label strings only. No numeric value, no alpha, no frozen parameter and no config_hash is affected (config_hash covers ALPHA_CASES values, not ALPHA_LABELS text); no run was re-executed."
+    },
+    {
+      "date": "2026-08-14",
+      "defect": "The interpretation paragraph said 'the reduction in physical evaluations ... is zero', conflating the (zero) duplicate-work reduction with the (non-zero, 0.24%) reduction in total physical evaluations.",
+      "file": "experiments/stage8x/analyze.py",
+      "fix": "Reworded to state both quantities explicitly and to report the measured total-evaluation reduction alongside the energy reduction.",
+      "id": "A3",
+      "scope": "Report prose only. No data, no frozen parameter, no config_hash; no run was re-executed."
+    }
+  ],
+  "post_freeze_rule": "No scientific parameter may change after primary results are observed. A critical defect requires: stop, document, fix, increment REVISION, re-run ALL affected primary runs. Selective re-running of unfavourable seeds is prohibited.",
+  "revision": 1,
+  "run_matrix": {
+    "pilot_physical_runs": 45,
+    "pocol_alpha_observations": 600,
+    "primary_physical_runs": 300,
+    "secondary_physical_runs": 420
+  },
+  "seed_registry": {
+    "namespace": "BlockSim-New/Stage8X/PoCol-vs-PoW/AntminerS21Pro/rev1",
+    "path": "experiments/stage8x/outputs/stage8x_seeds.json",
+    "pilot_seeds": [
+      9214983839595262035,
+      6173363108739508102,
+      5143865312279076214,
+      1979658706891550875,
+      5064053482760469401
+    ],
+    "primary_seeds": [
+      5276648305985929199,
+      628757264142989241,
+      5212820311653467928,
+      1493634387465783589,
+      349906842534328690,
+      2558760955731327512,
+      7890926658382884983,
+      3687042657521687600,
+      5165136745342788261,
+      3156971904625785319,
+      8079052055583561862,
+      1478038051582526088,
+      431967532912089508,
+      3282352798337906545,
+      3447193969005866655,
+      3787989265829909659,
+      2197885266553486539,
+      2431420697959460063,
+      3695536046059844503,
+      8644301345824299180,
+      6968863412458885356,
+      1228799680501299399,
+      1913678187707743529,
+      4932121285862289456,
+      1808207741461098536,
+      5227458720195675600,
+      5875244136080589253,
+      4508414229999547955,
+      5719031026733889488,
+      1452385983224652643
+    ],
+    "sha256": "f1a8fbf884f2a38860670aacddf7b8c7acf5c5edd5a90fd59e51272f4a535041"
+  }
+}
