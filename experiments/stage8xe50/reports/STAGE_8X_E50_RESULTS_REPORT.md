@@ -31,7 +31,7 @@ reduced active sets). 50 cells × 30 seeds complete; zero identity violations;
 
 ## 2. Service (Tables E50-F/G)
 
-Pooled accepted blocks (30 runs per cell): MT100 produced 3/2/1/2/1 blocks at
+Pooled accepted blocks (30 runs per cell): MT100 produced 3/2/1/1/1 blocks at
 N = 100…500 (its rate is 1/(600N) s⁻¹ — the duplication cost); PoCol produced
 50·(k/10) blocks — e.g. PC10: 50, PC50: 250, PC100: 508 = CONV100 exactly.
 **Pooled BlockRetention = 16.7×…250× ≥ 0.90 everywhere.** Per-seed block ratios

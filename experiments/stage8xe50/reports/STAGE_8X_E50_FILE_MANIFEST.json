@@ -1,7 +1,7 @@
 {
  "experiment": "stage8xe50",
  "generated": "2026-08-15",
- "file_count": 101,
+ "file_count": 102,
  "files": {
   "experiments/stage8xe50/__init__.py": {
    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -367,6 +367,10 @@
    "sha256": "3eca6a196e3d9ad083476180d5f40989621313ade6b5def15ff1f1b668c736ee",
    "bytes": 8161
   },
+  "experiments/stage8xe50/reports/STAGE_8X_E50_FILE_MANIFEST.json": {
+   "sha256": "f897d8bbae5b26bf94433e6304700830aad995c1d478b2ac45aaabc651b794eb",
+   "bytes": 17312
+  },
   "experiments/stage8xe50/reports/STAGE_8X_E50_FREEZE_REPORT.md": {
    "sha256": "0f91e729e26783e4522ab90aceac3e8f4c12abb8d4ba08d0974ea589a3bb94fa",
    "bytes": 1542
@@ -388,7 +392,7 @@
    "bytes": 2349
   },
   "experiments/stage8xe50/reports/STAGE_8X_E50_RESULTS_REPORT.md": {
-   "sha256": "a5a9372c94a289485444ae49f371ce597f101e0f7f2e2420b38691746f61e5c4",
+   "sha256": "baa12c24aa8e2f6257bda6a2d27f1457fa322711149891feb6fd69a7521a1d32",
    "bytes": 5270
   },
   "experiments/stage8xe50/reports/STAGE_8X_E50_THEORY_REPORT.md": {
