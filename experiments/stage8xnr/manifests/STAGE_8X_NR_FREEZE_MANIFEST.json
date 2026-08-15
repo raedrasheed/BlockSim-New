@@ -135,5 +135,23 @@
   },
   "git_commit_at_freeze": "e20457fd27385090f394ca9ec8a107701152d875",
   "protected_baseline_sha256": "8f45fbf5d989bb65d0a16a8eaf06c2159928360c255c1aa7d491f5220ff8e396",
-  "protected_file_count": 390
+  "protected_file_count": 390,
+  "amendment_A1": {
+    "description": "additive metric extension (M_ge3, mean multiplicity, P95 pairwise, pairwise CSV, stage8xnr_* aliases, +3 tests, +2 figures); config_hash unchanged; bit-identity of all previously frozen columns verified (0 mismatches)",
+    "code_checksums_after_A1": {
+      "experiments/stage8xnr/config/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "experiments/stage8xnr/config/nr_config.py": "38ad3a59b5727c2b0ff4a0ee624cee49348d3a40ea2c98d9e3532c6cf6d1dc0d",
+      "experiments/stage8xnr/config/seeds.py": "d1936d494e0c026935fa9b692df6011ba82613091d5a199b53ef69c32cf06a98",
+      "experiments/stage8xnr/src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "experiments/stage8xnr/src/analysis_nr.py": "95992c1c367f94ac5a5fa489b47e0936b10045f6a5b061621339bdb43a7a79e3",
+      "experiments/stage8xnr/src/engine_nr.py": "d25b631f3c8755ed292c180dfafe563b2b17094c47b3f1303188f0bfc08e72a7",
+      "experiments/stage8xnr/src/figures_nr.py": "a9ee1e7bd824772b883abc1565b02660f05ab918a8ca0e10efba26af67d41b83",
+      "experiments/stage8xnr/src/metrics_nr.py": "416c0172a1bae8026e5484403db1b86fe1e57baaa5cbfc265857146bea49a874",
+      "experiments/stage8xnr/src/noncedomain.py": "bec0384d39f4eaaba0ad02a050ceb694edd3b8bddb429d4f36fc2efe99671f2b",
+      "experiments/stage8xnr/src/run_matrix.py": "0cd4f44cac42daea7272b0c1153cf249a0de5e542f78f1814bc1ffca6aa7f313",
+      "experiments/stage8xnr/src/traversal.py": "47042446d6512cf883b8f11cee4a059e341e14d66e68981798b7e051c1ffc292",
+      "experiments/stage8xnr/tests/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "experiments/stage8xnr/tests/test_stage8xnr.py": "838977b71c3c28b962853d3d069cb0888f36826a642b080df01d7b98caae3446"
+    }
+  }
 }

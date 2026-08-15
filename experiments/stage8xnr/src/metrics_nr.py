@@ -56,9 +56,12 @@ class ScopeMetrics:
     C_nonce: int = 0
     U_nonce: int = 0
     M_ge2: int = 0
+    M_ge3: int = 0
     m_max: int = 0
+    mean_mult_reused: float = 0.0   # mean miner multiplicity among reused values
     O_mean: float = 0.0
     O_median: float = 0.0
+    O_p95: float = 0.0
     O_max: int = 0
     C_exact: int = 0
     U_exact: int = 0
@@ -84,18 +87,26 @@ class ScopeMetrics:
             "scope": self.scope,
             "C_nonce": self.C_nonce, "U_nonce": self.U_nonce,
             "R_nonce": self.R_nonce, "rho_nonce": self.rho_nonce,
-            "M_ge2": self.M_ge2, "m_max": self.m_max,
-            "O_mean": self.O_mean, "O_median": self.O_median, "O_max": self.O_max,
+            "M_ge2": self.M_ge2, "M_ge3": self.M_ge3, "m_max": self.m_max,
+            "mean_mult_reused": self.mean_mult_reused,
+            "O_mean": self.O_mean, "O_median": self.O_median,
+            "O_p95": self.O_p95, "O_max": self.O_max,
             "C_exact": self.C_exact, "U_exact": self.U_exact,
             "R_exact": self.R_exact, "rho_exact": self.rho_exact,
         }
 
 
-def cross_miner_stats(coverage_arcs: Sequence[Arc]) -> Dict[str, int]:
-    """M_ge2 and m_max from one COVERAGE arc per miner (length clamped to S)."""
+def cross_miner_stats(coverage_arcs: Sequence[Arc]) -> Dict[str, float]:
+    """Cross-miner multiplicity statistics from one COVERAGE arc per miner
+    (length clamped to S): M_ge2, M_ge3, m_max, and the mean miner multiplicity
+    among reused (multiplicity >= 2) nonce values."""
     prof = multiplicity_profile(coverage_arcs)
-    return {"M_ge2": measure_covered_at_least(prof, 2),
-            "m_max": max_multiplicity(prof)}
+    reused = measure_covered_at_least(prof, 2)
+    weighted = sum(m * L for m, L in prof.items() if m >= 2)
+    return {"M_ge2": reused,
+            "M_ge3": measure_covered_at_least(prof, 3),
+            "m_max": max_multiplicity(prof),
+            "mean_mult_reused": (weighted / reused) if reused else 0.0}
 
 
 def scope_from_miners(
@@ -121,26 +132,30 @@ def scope_from_miners(
     m.C_nonce = int(sum(eval_counts))
     m.U_nonce = union_measure(coverage_arcs)
     cm = cross_miner_stats(coverage_arcs)
-    m.M_ge2, m.m_max = cm["M_ge2"], cm["m_max"]
+    m.M_ge2, m.m_max = int(cm["M_ge2"]), int(cm["m_max"])
+    m.M_ge3 = int(cm["M_ge3"])
+    m.mean_mult_reused = float(cm["mean_mult_reused"])
     if pair_summary is not None:
         m.O_mean = float(pair_summary["mean"])
         m.O_median = float(pair_summary["median"])
+        m.O_p95 = float(pair_summary.get("p95", pair_summary["max"]))
         m.O_max = int(pair_summary["max"])
     elif pairwise_zero:
-        m.O_mean = m.O_median = 0.0
+        m.O_mean = m.O_median = m.O_p95 = 0.0
         m.O_max = 0
     else:
         # generic exact fallback: equal-length arcs summary or full saturation
         lengths = {a[1] for a in coverage_arcs}
         if lengths == {S_NONCE}:
             n = len(coverage_arcs)
-            m.O_mean = m.O_median = float(S_NONCE)
+            m.O_mean = m.O_median = m.O_p95 = float(S_NONCE)
             m.O_max = S_NONCE
         elif len(lengths) == 1:
             summ = pairwise_overlap_summary(
                 [a[0] for a in coverage_arcs], lengths.pop())
-            m.O_mean, m.O_median, m.O_max = (
-                float(summ["mean"]), float(summ["median"]), int(summ["max"]))
+            m.O_mean, m.O_median, m.O_p95, m.O_max = (
+                float(summ["mean"]), float(summ["median"]),
+                float(summ["p95"]), int(summ["max"]))
         else:
             raise ValueError(
                 "pairwise summary for unequal partial arcs must be precomputed")

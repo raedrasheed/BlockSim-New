@@ -12,6 +12,7 @@ Internally an arc is split into at most two linear half-open intervals.
 
 from __future__ import annotations
 
+import math
 from typing import Dict, Iterable, List, Sequence, Tuple
 
 from experiments.stage8xnr.config.nr_config import S_NONCE
@@ -112,10 +113,11 @@ def pairwise_overlap_summary(
     n = len(starts)
     n_pairs = n * (n - 1) // 2
     if n < 2:
-        return {"mean": 0.0, "median": 0.0, "max": 0, "overlapping_pairs": 0,
-                "n_pairs": 0}
+        return {"mean": 0.0, "median": 0.0, "p95": 0.0, "max": 0,
+                "overlapping_pairs": 0, "n_pairs": 0}
     if length >= domain:
-        return {"mean": float(domain), "median": float(domain), "max": domain,
+        return {"mean": float(domain), "median": float(domain),
+                "p95": float(domain), "max": domain,
                 "overlapping_pairs": n_pairs, "n_pairs": n_pairs}
     if 2 * length > domain:
         raise ValueError("summary shortcut requires length <= S/2")
@@ -135,15 +137,19 @@ def pairwise_overlap_summary(
     overlaps.sort()
     k = len(overlaps)
     total = sum(overlaps)
-    # median over ALL n_pairs values (n_pairs - k zeros, then sorted overlaps)
-    mid = n_pairs // 2                       # upper-median index, 0-based
-    if mid < n_pairs - k:
-        median = 0.0
-    else:
-        median = float(overlaps[mid - (n_pairs - k)])
+    # order statistics over ALL n_pairs values (n_pairs - k zeros, then
+    # sorted overlaps): value at 0-based index i
+    def order_stat(i: int) -> float:
+        if i < n_pairs - k:
+            return 0.0
+        return float(overlaps[i - (n_pairs - k)])
+
+    median = order_stat(n_pairs // 2)                       # upper median
+    p95 = order_stat(max(0, math.ceil(0.95 * n_pairs) - 1))
     return {
         "mean": total / n_pairs,
         "median": median,
+        "p95": p95,
         "max": max(overlaps) if overlaps else 0,
         "overlapping_pairs": k,
         "n_pairs": n_pairs,

@@ -208,6 +208,9 @@ class TestT10IntervalModel:
             assert summ["n_pairs"] == len(ovs)
             assert summ["max"] == (ovs[-1] if ovs else 0)
             assert summ["mean"] == pytest.approx(sum(ovs) / len(ovs))
+            import math as _math
+            assert summ["p95"] == float(
+                ovs[max(0, _math.ceil(0.95 * len(ovs)) - 1)])
             import statistics
             # median definition: median over all pairs, zeros included
             want_med = float(sorted(ovs)[len(ovs) // 2])
@@ -312,6 +315,40 @@ class TestEngine:
         assert float(orow["subsweep_O_mean"]) < w / 10          # sparse overlap
         assert float(zrow["subsweep_rho_nonce"]) == pytest.approx(0.99)
         assert float(orow["subsweep_rho_nonce"]) < 0.30
+
+    def test_offsets_reproducible_by_seed(self):
+        # brief test 10/14: same configuration + same seed => identical run,
+        # including the independently seeded offsets.
+        a = run_one(ARM_CONV_OFF, 100, 999)
+        b = run_one(ARM_CONV_OFF, 100, 999)
+        assert a.C_total == b.C_total
+        assert a.intervals_s == b.intervals_s
+        assert a.round_rows == b.round_rows
+        assert a.scope_rows == b.scope_rows
+        c = run_one(ARM_CONV_OFF, 100, 998)
+        assert c.round_rows[0]["subsweep_U_nonce"] != \
+            a.round_rows[0]["subsweep_U_nonce"]   # different seed, different offsets
+
+    def test_template_renewal_after_exhaustion(self):
+        # brief test 11: every completed 2^32-tick sweep rolls the template.
+        r = run_one(ARM_CONV_OFF, 100, 555)
+        assert r.nonce_domain_exhaustions == r.template_epochs_completed
+        assert r.nonce_resets == 0                    # OFFSET never resets
+        z = run_one(ARM_CONV_ZERO, 100, 555)
+        assert z.nonce_resets > z.nonce_domain_exhaustions   # + round boundaries
+
+    def test_multiplicity_extensions_on_toy(self):
+        from experiments.stage8xnr.src.metrics_nr import cross_miner_stats
+        # domain 10: arcs [0,4), [2,6), [4,8): multiplicities 1/2 alternate
+        stats = cross_miner_stats([(0, 4), (2, 6), (4, 8)])
+        # explicit enumeration on Z_10 of [0,4),[2,8),[4,12 mod)... use exact:
+        # arcs: {0,1,2,3}, {2,3,4,5,6,7}, {4,5,6,7,8,9,10,11 -> mod S_NONCE}
+        # over the 2^32 domain these arcs don't wrap; counts:
+        # 2,3 covered by 2; 4,5,6,7 covered by 2; rest by 1
+        assert stats["M_ge2"] == 6 and stats["M_ge3"] == 0
+        assert stats["m_max"] == 2 and stats["mean_mult_reused"] == 2.0
+        stats3 = cross_miner_stats([(0, 5), (0, 5), (0, 5)])
+        assert stats3["M_ge3"] == 5 and stats3["mean_mult_reused"] == 3.0
 
     def test_paired_round_process(self):
         # same seed => identical round-duration draws for equal-rate arms

@@ -53,10 +53,14 @@ def _run_row(r: RunResult, tag: str) -> Dict[str, object]:
     # round-scope means from per-round rows
     if r.round_rows:
         for col in ("round_rho_nonce", "round_rho_exact", "round_U_nonce",
-                    "round_M_ge2", "round_m_max", "round_O_mean",
+                    "round_M_ge2", "round_M_ge3", "round_m_max",
+                    "round_mean_mult_reused", "round_O_mean", "round_O_median",
+                    "round_O_p95", "round_O_max",
                     "subsweep_rho_nonce", "subsweep_rho_exact",
-                    "subsweep_O_mean", "subsweep_O_median", "subsweep_O_max",
-                    "subsweep_U_nonce", "subsweep_C_nonce"):
+                    "subsweep_M_ge2", "subsweep_M_ge3", "subsweep_m_max",
+                    "subsweep_mean_mult_reused",
+                    "subsweep_O_mean", "subsweep_O_median", "subsweep_O_p95",
+                    "subsweep_O_max", "subsweep_U_nonce", "subsweep_C_nonce"):
             vals = [float(rr[col]) for rr in r.round_rows]
             row[f"mean_{col}"] = sum(vals) / len(vals)
     return row
@@ -128,6 +132,7 @@ def execute(tag: str, n_grid: List[int], seeds: List[int],
         "rounds": os.path.join(OUT, f"{prefix}_round_metrics.csv"),
         "nonce": os.path.join(OUT, f"{prefix}_nonce_reuse.csv"),
         "exact": os.path.join(OUT, f"{prefix}_exact_input_duplication.csv"),
+        "pairwise": os.path.join(OUT, f"{prefix}_pairwise_overlap.csv"),
         "energy": os.path.join(OUT, f"{prefix}_energy_sensitivity.csv"),
         "epochs": os.path.join(OUT, f"{prefix}_template_epochs.csv"),
     }
@@ -140,8 +145,32 @@ def execute(tag: str, n_grid: List[int], seeds: List[int],
                   "R_exact", "rho_exact")
     _write_csv(paths["nonce"], [{k: r[k] for k in nonce_cols} for r in scope_rows])
     _write_csv(paths["exact"], [{k: r[k] for k in exact_cols} for r in scope_rows])
+    # per-run pairwise-overlap / multiplicity table (round + subsweep scopes,
+    # averaged over the run's rounds; every quantity exact per round)
+    pair_rows = []
+    for r in run_rows:
+        for scope in ("round", "subsweep"):
+            pair_rows.append({
+                "tag": r["tag"], "arm": r["arm"], "N": r["N"],
+                "seed": r["seed"], "scope": scope,
+                "O_mean": r.get(f"mean_{scope}_O_mean", ""),
+                "O_median": r.get(f"mean_{scope}_O_median", ""),
+                "O_p95": r.get(f"mean_{scope}_O_p95", ""),
+                "O_max": r.get(f"mean_{scope}_O_max", ""),
+                "M_ge2": r.get(f"mean_{scope}_M_ge2", ""),
+                "M_ge3": r.get(f"mean_{scope}_M_ge3", ""),
+                "m_max": r.get(f"mean_{scope}_m_max", ""),
+                "mean_mult_reused": r.get(f"mean_{scope}_mean_mult_reused", ""),
+            })
+    _write_csv(paths["pairwise"], pair_rows)
     _write_csv(paths["energy"], energy_rows)
     _write_csv(paths["epochs"], epoch_rows)
+    # brief-canonical aliases (stage8xnr_*) alongside the original names
+    if tag == "primary":
+        import shutil
+        for key, src in paths.items():
+            dst = src.replace("stage8x_nr_", "stage8xnr_")
+            shutil.copyfile(src, dst)
     if log:
         log.close()
     return paths

@@ -142,10 +142,13 @@ def build_all() -> Dict[str, str]:
                     ("run_rho_nonce", "rho_nonce_global_run"),
                     ("mean_subsweep_rho_nonce", "rho_nonce_subsweep"),
                     ("mean_round_M_ge2", "M_ge2_round"),
+                    ("mean_round_M_ge3", "M_ge3_round"),
                     ("mean_round_m_max", "m_max_round"),
+                    ("mean_round_mean_mult_reused", "mean_mult_reused_round"),
                     ("mean_round_O_mean", "O_mean_round"),
                     ("mean_subsweep_O_mean", "O_mean_subsweep"),
                     ("mean_subsweep_O_median", "O_median_subsweep"),
+                    ("mean_subsweep_O_p95", "O_p95_subsweep"),
                     ("mean_subsweep_O_max", "O_max_subsweep")):
                 s = _summ(_cell(runs, arm, n, col))
                 row[f"{label}_mean"] = s["mean"]
@@ -349,6 +352,19 @@ def build_all() -> Dict[str, str]:
         add("CONV blocks per run", p["conv_expected_blocks_per_run"],
             _summ(_cell(runs, ARM_CONV_OFF, n, "accepted_blocks"))["mean"], 0.10)
     paths["NR-J"] = _write("stage8x_nr_tableJ_analytics_vs_sim.csv", j_rows)
+
+    # ---------------- NR-K: pairwise overlap / multiplicity ------------
+    k_rows = []
+    for n in N_GRID:
+        for arm in ARMS:
+            for scope in ("round", "subsweep"):
+                row = {"N": n, "arm": arm, "scope": scope}
+                for col in ("O_mean", "O_median", "O_p95", "O_max", "M_ge2",
+                            "M_ge3", "m_max", "mean_mult_reused"):
+                    s = _summ(_cell(runs, arm, n, f"mean_{scope}_{col}"))
+                    row[f"{col}_mean"] = s["mean"]
+                k_rows.append(row)
+    paths["NR-K"] = _write("stage8x_nr_tableK_pairwise_overlap.csv", k_rows)
 
     # ---------------- key-hypothesis + comparison summary (JSON) -------
     key = {}

@@ -34,4 +34,21 @@ outputs only.
 
 ## Amendments after freeze
 
-None.
+**A1 — additive metric extension (reporting only, no scientific change).**
+After the primary matrix and first analysis were complete, the refined brief
+required additional *derived* quantities: M_≥3, mean miner multiplicity among
+reused nonce values, P95 pairwise overlap, a dedicated
+`stage8xnr_pairwise_overlap.csv`, brief-canonical `stage8xnr_*` output aliases,
+three additional tests, and two additional figures. The metric recorder was
+extended and the deterministic engine re-run on the identical frozen seeds and
+configuration (config_hash unchanged:
+`36b2bd9617fcf33ca2a0be2c2c74b76d90797cd572915fc5a550fec767cf244c`).
+
+Proof that no frozen quantity changed: every shared column of all six primary
+output CSVs was compared cell-by-cell between the pre- and post-amendment files —
+**0 mismatches** across 750 physical-run rows (58 shared columns), 8 022
+round-metric rows (33), 1 500 nonce-reuse rows (14), 1 500 exact-input rows (9),
+3 000 energy rows (10) and 750 template-epoch rows (7). No parameter, seed,
+probability, or previously reported number was altered; A1 only added columns
+and files. Amended code files are checksummed in
+`manifests/STAGE_8X_NR_FREEZE_MANIFEST.json` under `amendment_A1`.

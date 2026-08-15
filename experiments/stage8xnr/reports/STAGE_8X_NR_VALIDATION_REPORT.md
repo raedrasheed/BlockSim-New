@@ -1,6 +1,6 @@
 # Stage 8X-NR — Validation Report
 
-## 1. Automated test suite — 58/58 pass
+## 1. Automated test suite — 61/61 pass
 
 `experiments/stage8xnr/tests/test_stage8xnr.py` implements all ten named tests of
 brief §30 plus engine-identity and saturation checks:
@@ -23,7 +23,19 @@ Additional: traversal decomposition exactness; difficulty semantics
 Stage 8X/8Y/8Z; engine identities < 1e-12 (measured 0.0); CONV round saturation
 (U = 2^32, m_max = N, ρ_exact = 0); PC cross-miner overlap 0 in every round;
 MT-ZERO co-discovery stale = (N−1)·blocks; energy equality at equal t_active
-(brief §17); sub-sweep ZERO vs OFFSET separation; paired round process.
+(brief §17/§20); sub-sweep ZERO vs OFFSET separation; paired round process;
+same-seed full-run reproducibility incl. offsets (brief tests 10/14); template
+renewal after every nonce-domain exhaustion, OFFSET resets = 0 vs ZERO resets >
+exhaustions (brief test 11); M_≥3 / mean-multiplicity / P95 extensions verified
+against explicit enumeration on toy domains.
+
+## 1a. Amendment A1 bit-identity proof
+
+The post-freeze metric extension (amendment A1, see the freeze report) re-ran
+the deterministic engine on identical seeds and configuration. Every shared
+column of all six primary CSVs is cell-for-cell identical between pre- and
+post-amendment outputs: **0 mismatches** over 750 + 8 022 + 1 500 + 1 500 +
+3 000 + 750 rows. The amendment is purely additive.
 
 ## 2. Analytical-vs-simulation (Table NR-J) — 55/55 within tolerance
 

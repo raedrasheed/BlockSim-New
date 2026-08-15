@@ -301,12 +301,17 @@ def main():
     # 13 — block latency vs N
     fig, ax = plt.subplots(figsize=(7, 4.4))
     for arm in ARMS:
-        ys, ns = [], []
+        ys, ms, ns = [], [], []
         for n in N_GRID:
             vals = _cell(runs, arm, n, "mean_interval_s")
+            meds = _cell(runs, arm, n, "median_interval_s")
             if vals:
-                ys.append(statistics.mean(vals)); ns.append(n)
+                ys.append(statistics.mean(vals))
+                ms.append(statistics.mean(meds))
+                ns.append(n)
         ax.plot(ns, ys, "o-", color=COLORS[arm], label=SHORT[arm])
+        ax.plot(ns, ms, "s--", color=COLORS[arm], alpha=0.6, ms=4,
+                label=f"{SHORT[arm]} (median)")
     ax.axhline(600.0, ls="--", color="grey", lw=1, label="600 s nominal")
     ax.set_yscale("log")
     ax.set_xlabel("network size N (miners)")
@@ -316,6 +321,41 @@ def main():
     ax.grid(alpha=0.3, which="both")
     ax.legend(fontsize=8)
     _save(fig, "fignr13_block_latency_vs_N")
+
+    # 14 — exact-input duplication vs N (epoch scope, all arms)
+    fig, ax = plt.subplots(figsize=(7, 4.4))
+    for arm in ARMS:
+        ys = [statistics.mean(_cell(runs, arm, n, "epoch_rho_exact"))
+              for n in N_GRID]
+        ax.plot(N_GRID, ys, "o-", color=COLORS[arm], label=SHORT[arm])
+    ax.plot(N_GRID, [(n - 1) / n for n in N_GRID], "k--", lw=1,
+            label="(N-1)/N (common-template prediction)")
+    ax.set_xlabel("network size N (miners)")
+    ax.set_ylabel(r"$\rho_{exact}$ (template-epoch scope)")
+    ax.set_title("Exact-input duplication: zero for CONV and PC;\n"
+                 "(N-1)/N for the common-template comparator", fontsize=10)
+    ax.set_ylim(-0.05, 1.05)
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize=8)
+    _save(fig, "fignr14_exact_duplication_vs_N")
+
+    # 15 — template / extranonce renewal counts vs N
+    ep = _rows("stage8x_nr_template_epochs.csv")
+    fig, ax = plt.subplots(figsize=(7, 4.4))
+    for arm in ARMS:
+        ys = [statistics.mean([float(r["template_epochs_completed"])
+                               for r in ep if r["arm"] == arm
+                               and int(r["N"]) == n]) for n in N_GRID]
+        ax.plot(N_GRID, ys, "o-", color=COLORS[arm], label=SHORT[arm])
+    ax.set_yscale("log")
+    ax.set_xlabel("network size N (miners)")
+    ax.set_ylabel("completed template epochs per run")
+    ax.set_title("Extranonce-induced template renewal: per-miner epochs for\n"
+                 "CONV/PC (N x 5.45e8), network epochs for MT (5.45e8)",
+                 fontsize=10)
+    ax.grid(alpha=0.3, which="both")
+    ax.legend(fontsize=8)
+    _save(fig, "fignr15_template_renewal_vs_N")
 
     # conceptual diagram
     conceptual()

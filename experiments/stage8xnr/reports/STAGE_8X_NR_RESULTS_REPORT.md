@@ -1,10 +1,15 @@
 # Stage 8X-NR — Results Report
 
-**Primary matrix:** N ∈ {100, 200, 300, 400, 500} × 5 arms × 30 fresh paired seeds
-= **750 physical runs**, T = 10 000 s each, S21 Pro hardware (234 TH/s, 3510 W,
-15 J/TH), one shared D_N per N. All 750 runs completed; 25 cells × 30 seeds audit
-exact; zero identity violations. Energy α-cases are derived observations, so no
-additional simulations were run for them. Pilot runs are excluded throughout.
+**Primary matrix:** N ∈ {100, 200, 300, 400, 500} × 3 primary arms
+(XNR-PW-CONV-OFFSET, XNR-PW-MT-OFFSET, XNR-PC) × 30 fresh paired seeds =
+**450 primary physical runs**, plus the two deliberately synchronized zero-start
+diagnostic arms (XNR-PW-CONV-ZERO, XNR-PW-MT-ZERO) on the same seeds =
+300 secondary diagnostic runs, **750 runs in total**, T = 10 000 s each, S21 Pro
+hardware (234 TH/s, 3510 W, 15 J/TH), one shared D_N per N. All runs completed;
+25 cells × 30 seeds audit exact; zero identity violations. Energy α-cases are
+derived observations, so no additional simulations were run for them. Pilot runs
+are excluded throughout. Zero-start results are reported separately and are never
+generalized to all PoW implementations.
 
 Four quantities are carried separately in every table, as required:
 **nonce-value reuse** ≠ **exact-input duplication** ≠ **physical work** ≠ **energy**.
@@ -120,6 +125,27 @@ failures** — including exact-zero requirements (PC epoch reuse, CONV ρ_exact)
 stochastic models (offset coverage, W²/S pairwise overlap, F_low), and the block
 counts.
 
+## 6a. Core conceptual table (verified by Tests 6–8 and the primary data)
+
+| Situation | Same nonce value? | Same header/template? | Exact duplicate? |
+|---|---|---|---|
+| Different templates, same nonce (CONV) | Yes | No | **No** |
+| Same template, same nonce (MT) | Yes | Yes | **Yes** |
+| Same template, different nonce (MT) | No | Yes | No |
+| PoCol disjoint ranges | No within epoch | Yes (common template) | No |
+
+## 6b. Extended cross-miner multiplicity and pairwise overlap (Table NR-K)
+
+Round scope: for every PoW arm, every nonce value is used by all N miners
+(M_≥2 = M_≥3 = 2^32, m_max = mean multiplicity = N, pairwise O mean = median =
+P95 = max = 2^32); PoCol: all of these are 0 (m_max = 1). Sub-sweep window
+(offset arms, N = 100): reused values are mostly pairwise collisions — mean
+multiplicity among reused values 2.19, m_max ≈ 3.9, M_≥2 = 3.86e8, M_≥3 =
+6.2e7; the pairwise distribution is heavy-tailed (mean 108 995, median 0,
+P95 = 0, max 2.1e7 — only ~1/N of pairs overlap at all, but two adjacent
+offsets can overlap almost fully). Zero-start: every pair overlaps completely
+(mean = median = P95 = max = W, multiplicity = N).
+
 ## 7. Findings mapped to brief §34
 
 1. **Finding 1 — confirmed:** conventional PoW: substantial nonce-value reuse
@@ -132,3 +158,39 @@ counts.
    of reuse pattern.
 5. **Finding 5 — confirmed in sign, negligible in size here:** PoCol's saving
    equals its measured low-power residency, ≤ 7.1e-8.
+
+## 8. Assessment for a future adaptive active-set experiment (brief §21–22)
+
+The next-step theorem check comes out as follows, from the measured semantics:
+
+* **Conventional independent-template PoW wastes nothing to duplication.** Its
+  nonce-value reuse is total (every value used by all N miners per round) yet its
+  exact-input duplication is zero: every one of the N·h·T evaluations is a fresh,
+  independent Bernoulli(q) attempt. There is **no work-removal opportunity in
+  conventional PoW that does not proportionally remove success probability** —
+  removing any fraction φ of active hashing removes exactly φ of the block rate.
+* **Common-template PoW wastes (N−1)/N to duplication**, and PoCol's disjoint
+  allocation recovers all of it (blocks ×N at equal energy). This is the only
+  regime where coordination removes work without removing useful probability —
+  but that baseline is a controlled comparator, not deployed Bitcoin practice.
+* **Consequently, for an adaptive active-set experiment on homogeneous S21 Pro
+  hardware:** block retention ≈ mean active-hash fraction (confirmed here and in
+  Stages 8Y/8Z), so at ≥90 % retention the active fraction must be ≥0.90 and the
+  maximum energy saving is ≈10 % (at α = 0; less for α > 0). **>50 % energy
+  saving with ≥90 % block production is not theoretically feasible under the
+  measured semantics with homogeneous hardware.** Stage 8Y measured exactly this
+  trade (53.9 % saving came with ≈60 % retention), and Stage 8Z's preregistered
+  ceiling showed that even a 1.97× heterogeneous efficiency spread caps the
+  90 %-retention saving at ~15 %. Reaching 50 % saving at 90 % retention would
+  require parking only units ≥ ~5.6× less efficient than those left running —
+  a hardware-fleet property, not a protocol property.
+* **Recommendation:** a further adaptive active-set experiment aimed at >50 %
+  saving with ≥90 % retention is **not scientifically justified** on this
+  hardware model; the linear energy-retention bound is now confirmed three
+  independent ways. A future experiment is justified only if it tests a different
+  mechanism: (i) strongly heterogeneous fleets (efficiency spread ≥ ~5.6× for the
+  50 %/90 % target), (ii) demand-following operation where retention below 90 %
+  is acceptable at off-peak times, or (iii) throughput/coordination claims
+  against a common-template baseline, where PoCol's ×N distinct-input advantage
+  is real and measured. This assessment is recorded before any such experiment is
+  designed, per the brief.

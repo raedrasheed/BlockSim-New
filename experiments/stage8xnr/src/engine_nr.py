@@ -113,12 +113,13 @@ def _round_scope_conv_mt(arm: str, n: int, n_t: int, phases: List[int]
     lengths = {a[1] for a in cover}
     if lengths == {S_NONCE}:
         pair = {"mean": float(S_NONCE), "median": float(S_NONCE),
-                "max": S_NONCE, "overlapping_pairs": n * (n - 1) // 2,
+                "p95": float(S_NONCE), "max": S_NONCE,
+                "overlapping_pairs": n * (n - 1) // 2,
                 "n_pairs": n * (n - 1) // 2}
     elif len(set(phases)) == 1:
         L = cover[0][1]
-        pair = {"mean": float(L), "median": float(L), "max": L,
-                "overlapping_pairs": n * (n - 1) // 2 if L else 0,
+        pair = {"mean": float(L), "median": float(L), "p95": float(L),
+                "max": L, "overlapping_pairs": n * (n - 1) // 2 if L else 0,
                 "n_pairs": n * (n - 1) // 2}
     elif 2 * cover[0][1] <= S_NONCE:
         pair = pairwise_overlap_summary(phases, cover[0][1])
@@ -128,7 +129,9 @@ def _round_scope_conv_mt(arm: str, n: int, n_t: int, phases: List[int]
         ovs = [arc_intersection_measure(cover[i], cover[j])
                for i in range(n) for j in range(i + 1, n)]
         ovs.sort()
+        import math as _math
         pair = {"mean": sum(ovs) / len(ovs), "median": float(ovs[len(ovs) // 2]),
+                "p95": float(ovs[max(0, _math.ceil(0.95 * len(ovs)) - 1)]),
                 "max": ovs[-1], "overlapping_pairs": sum(1 for o in ovs if o),
                 "n_pairs": len(ovs)}
     sm = scope_from_miners("NR-round", [n_t] * n, cover, exact_C, exact_U,
@@ -153,8 +156,9 @@ def _subsweep_scope(arm: str, n: int, n_t: int, phases: List[int],
     else:
         exact_C, exact_U = C, union_measure(cover)
     if len(set(phases)) == 1:
-        pair = {"mean": float(W), "median": float(W), "max": W,
-                "overlapping_pairs": n * (n - 1) // 2, "n_pairs": n * (n - 1) // 2}
+        pair = {"mean": float(W), "median": float(W), "p95": float(W),
+                "max": W, "overlapping_pairs": n * (n - 1) // 2,
+                "n_pairs": n * (n - 1) // 2}
     else:
         pair = pairwise_overlap_summary(phases, W)
     return scope_from_miners("NR-subsweep", [W] * n, cover, exact_C, exact_U,
@@ -330,8 +334,10 @@ def run_one(arm: str, n: int, seed: int, collect_rounds: bool = True) -> RunResu
             "R_nonce": res.C_total - U_run,
             "rho_nonce": (res.C_total - U_run) / res.C_total,
             "M_ge2": measure_covered_at_least(prof, 2),
+            "M_ge3": measure_covered_at_least(prof, 3),
             "m_max": max_multiplicity(prof),
-            "O_mean": 0.0, "O_median": 0.0, "O_max": 0,
+            "mean_mult_reused": 0.0,
+            "O_mean": 0.0, "O_median": 0.0, "O_p95": 0.0, "O_max": 0,
             "C_exact": res.C_total, "U_exact": res.C_total,
             "R_exact": 0, "rho_exact": 0.0,
         }
@@ -352,9 +358,14 @@ def run_one(arm: str, n: int, seed: int, collect_rounds: bool = True) -> RunResu
             "R_nonce": res.C_total - U_run,
             "rho_nonce": (res.C_total - U_run) / res.C_total,
             "M_ge2": measure_covered_at_least(prof, 2),
+            "M_ge3": measure_covered_at_least(prof, 3),
             "m_max": max_multiplicity(prof),
+            "mean_mult_reused": (
+                sum(m * L for m, L in prof.items() if m >= 2)
+                / max(1, measure_covered_at_least(prof, 2))),
             "O_mean": float(S_NONCE) if all(run_cover_full) else -1.0,
             "O_median": float(S_NONCE) if all(run_cover_full) else -1.0,
+            "O_p95": float(S_NONCE) if all(run_cover_full) else -1.0,
             "O_max": S_NONCE if all(run_cover_full) else -1,
             "C_exact": C_ex, "U_exact": U_ex, "R_exact": C_ex - U_ex,
             "rho_exact": (C_ex - U_ex) / C_ex if C_ex else 0.0,
@@ -364,21 +375,24 @@ def run_one(arm: str, n: int, seed: int, collect_rounds: bool = True) -> RunResu
     if arm in (ARM_CONV_ZERO, ARM_CONV_OFF):
         ep = {"C_nonce": S_NONCE, "U_nonce": S_NONCE, "rho_nonce": 0.0,
               "C_exact": S_NONCE, "U_exact": S_NONCE, "rho_exact": 0.0,
-              "M_ge2": 0, "m_max": 1}
+              "M_ge2": 0, "M_ge3": 0, "m_max": 1, "mean_mult_reused": 0.0}
     elif arm in (ARM_MT_ZERO, ARM_MT_OFF):
         ep = {"C_nonce": n * S_NONCE, "U_nonce": S_NONCE,
               "rho_nonce": (n - 1) / n,
               "C_exact": n * S_NONCE, "U_exact": S_NONCE,
-              "rho_exact": (n - 1) / n, "M_ge2": S_NONCE, "m_max": n}
+              "rho_exact": (n - 1) / n, "M_ge2": S_NONCE,
+              "M_ge3": S_NONCE if n >= 3 else 0, "m_max": n,
+              "mean_mult_reused": float(n)}
     else:
         ep = {"C_nonce": S_NONCE, "U_nonce": S_NONCE, "rho_nonce": 0.0,
               "C_exact": S_NONCE, "U_exact": S_NONCE, "rho_exact": 0.0,
-              "M_ge2": 0, "m_max": 1}
+              "M_ge2": 0, "M_ge3": 0, "m_max": 1, "mean_mult_reused": 0.0}
     ep["scope"] = "NR-template-epoch"
     ep["R_nonce"] = ep["C_nonce"] - ep["U_nonce"]
     ep["R_exact"] = ep["C_exact"] - ep["U_exact"]
     ep["O_mean"] = float(S_NONCE) if arm in (ARM_MT_ZERO, ARM_MT_OFF) else 0.0
     ep["O_median"] = ep["O_mean"]
+    ep["O_p95"] = ep["O_mean"]
     ep["O_max"] = int(ep["O_mean"])
 
     res.scope_rows = [run_scope, ep]
