@@ -1,0 +1,53 @@
+{
+  "experiment": "stage8xnd",
+  "master_label": "BlockSim-PoCol-stage8xnd-2026-nonce-domain-partitioning",
+  "primary_seeds": [
+    467376819415377580,
+    2704408835578762228,
+    11237067994138084197,
+    5926412735843326529,
+    5192363207272324882,
+    14936110819278713214,
+    15027284727339452496,
+    529132900484142986,
+    8583420154531566926,
+    16465068975321571430,
+    1580318165844385263,
+    860680765458012691,
+    405674777376978405,
+    5516199827559636311,
+    676253669661655881,
+    4902971022134724746,
+    7985863793510020389,
+    5259580605389323177,
+    14894895525097951974,
+    14255052758501613198,
+    14970427933435388700,
+    6530983822519173908,
+    16478255227937338382,
+    447822293856133746,
+    9364596802063509215,
+    6483795830361016413,
+    13726057523507487050,
+    592649121540029029,
+    13234303622947097637,
+    17788360996555233988
+  ],
+  "pilot_seeds": [
+    13119598877139152285,
+    18045328320792528348
+  ],
+  "disjointness": {
+    "checked_registries": [
+      "experiments/stage8x/outputs/stage8x_seeds.json",
+      "experiments/stage8y/config/stage8y_seeds.json",
+      "experiments/stage8xnr/outputs/stage8x_nr_seeds.json",
+      "experiments/stage8xe50/outputs/stage8xe50_seeds.json",
+      "experiments/stage8z/config/seeds.py (module)"
+    ],
+    "n_new_seeds": 32,
+    "n_earlier_values": 287,
+    "overlap": [],
+    "disjoint": true
+  }
+}
