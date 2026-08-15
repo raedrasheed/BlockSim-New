@@ -1,0 +1,5 @@
+alpha_case,max_block_retention_at_50,at_N,at_arm,saving_there,feasible_there
+LP0,250.0,300,E50-PC50,0.5000000121071931,True
+LP10,202.0,300,E50-PC40,0.540000008717179,True
+LP25,162.0,300,E50-PC30,0.5250000054482369,True
+LP50,NA (no scenario reaches 50% saving),,,,

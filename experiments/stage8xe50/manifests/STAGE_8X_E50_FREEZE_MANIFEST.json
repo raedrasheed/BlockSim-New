@@ -1,0 +1,98 @@
+{
+  "experiment": "stage8xe50",
+  "frozen_after": "pilot PASS",
+  "config_hash": "d74001f4e4b7628b056a536b2404c56ac62148699a212a5babe9a1f2434bd173",
+  "config": {
+    "experiment": "stage8xe50",
+    "S_nonce": 4294967296,
+    "hashrate_hps": 234000000000000,
+    "active_power_w": 3510.0,
+    "efficiency_j_per_th": 15.0,
+    "n_grid": [
+      100,
+      200,
+      300,
+      400,
+      500
+    ],
+    "t_run_s": 10000.0,
+    "i_target_s": 600.0,
+    "alpha_cases": {
+      "LP0": 0.0,
+      "LP10": 0.1,
+      "LP25": 0.25,
+      "LP50": 0.5
+    },
+    "arms": [
+      "E50-CONV100",
+      "E50-MT100",
+      "E50-PC10",
+      "E50-PC20",
+      "E50-PC30",
+      "E50-PC40",
+      "E50-PC50",
+      "E50-PC60",
+      "E50-PC80",
+      "E50-PC100"
+    ],
+    "active_fractions": {
+      "E50-PC10": 0.1,
+      "E50-PC20": 0.2,
+      "E50-PC30": 0.3,
+      "E50-PC40": 0.4,
+      "E50-PC50": 0.5,
+      "E50-PC60": 0.6,
+      "E50-PC80": 0.8,
+      "E50-PC100": 1.0
+    },
+    "constraints": {
+      "coverage": 0.95,
+      "blocks": 0.9,
+      "latency": 1.2
+    },
+    "difficulty": {
+      "100": 3268942236.9003296,
+      "200": 6537884473.800659,
+      "300": 9806826710.700989,
+      "400": 13075768947.601318,
+      "500": 16344711184.501648
+    },
+    "q": {
+      "100": 7.122507122507123e-20,
+      "200": 3.5612535612535614e-20,
+      "300": 2.3741690408357075e-20,
+      "400": 1.7806267806267807e-20,
+      "500": 1.4245014245014244e-20
+    },
+    "epoch_ticks_pc": {
+      "100": 42949673,
+      "200": 21474837,
+      "300": 14316558,
+      "400": 10737419,
+      "500": 8589935
+    },
+    "rotation": "sliding window, +1 slot per epoch, fixed run permutation",
+    "renewal_rule": "epoch ends when every ACTIVE miner completes its assigned traversal (MT: full domain; PC: own range)",
+    "n_primary_seeds": 30,
+    "n_pilot_seeds": 2,
+    "pilot_n_grid": [
+      100,
+      300,
+      500
+    ]
+  },
+  "seed_registry_sha256": "0e506b839a3a7589ed04bf1235a25cc7fc0a2f0161a53abbff481c91a79e875d",
+  "code_checksums": {
+    "experiments/stage8xe50/config/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "experiments/stage8xe50/config/e50_config.py": "445df9df32b7d52215d15b12a48b281eeb3ad7f51d709a43f6d19e5224e6045b",
+    "experiments/stage8xe50/config/seeds.py": "2994115b72079f08fc97718623acdaff0c44dc78f752e208e79ee48952898cb9",
+    "experiments/stage8xe50/src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "experiments/stage8xe50/src/engine_e50.py": "239ada3b504f6cf413befeb7ef18450a7946fdb218998dd91a8d4ba08915ead8",
+    "experiments/stage8xe50/src/run_matrix.py": "24e20513ad5602e4438c38aa28c5675632dda6d342cc458cf4400d11b673fd0c",
+    "experiments/stage8xe50/tests/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "experiments/stage8xe50/tests/test_stage8xe50.py": "3eca6a196e3d9ad083476180d5f40989621313ade6b5def15ff1f1b668c736ee"
+  },
+  "git_commit_at_freeze": "272e8a1bc99c3eb35e4a06dd06498629fcecf4d7",
+  "protected_baseline_sha256": "69576696669f4cac4fd364ddcae34de2df7959936d4d39c67e86cdddc11f056d",
+  "protected_file_count": 500
+}
