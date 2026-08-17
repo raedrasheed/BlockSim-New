@@ -17,10 +17,26 @@ silently completed.
 | File | Contents |
 |---|---|
 | `fig_5_5_pocol_complete.mmd` | Output 2 — complete Mermaid flowchart (paste into <https://mermaid.live>) |
-| `fig_5_5_pocol_complete.svg` / `.png` | Rendered complete figure (vector + 2× raster) |
+| `fig_5_5_pocol_complete.svg` / `.png` / `.pdf` | Rendered complete figure (vector, 2× raster, vector PDF at natural size) |
+| `fig_5_5_pocol_complete_A3.pdf` | Complete figure centred on a single A3 portrait page |
 | `fig_5_6_pocol_simplified.mmd` | Output 3 — simplified defence-slide Mermaid flowchart |
-| `fig_5_6_pocol_simplified.svg` / `.png` | Rendered simplified figure |
+| `fig_5_6_pocol_simplified.svg` / `.png` / `.pdf` | Rendered simplified figure (vector, 2× raster, vector PDF at natural size) |
+| `fig_5_6_pocol_simplified_A4.pdf` | Simplified figure centred on a single A4 portrait page |
 | `README.md` | Outputs 1, 4, 5 — specification, caption, defence script, traceability, validation |
+
+**PDF page sizes.** All PDFs are single-page, fully vector, with fonts embedded.
+
+| PDF | Page | Artwork |
+|---|---|---|
+| `fig_5_5_pocol_complete.pdf` | 600 × 1871 pt (212 × 660 mm) — page fitted to the diagram | full size, ~11 pt type |
+| `fig_5_5_pocol_complete_A3.pdf` | A3 portrait, 297 × 420 mm | 128 × 400 mm, scaled 0.61, ~7 pt type |
+| `fig_5_6_pocol_simplified.pdf` | 600 × 724 pt (212 × 256 mm) — page fitted to the diagram | full size |
+| `fig_5_6_pocol_simplified_A4.pdf` | A4 portrait, 210 × 297 mm | 190 × 230 mm, scaled 0.90 |
+
+The complete figure has a 1 : 3.1 aspect ratio, so it cannot fill a single A3 page: fitting its
+height leaves it 128 mm wide with roughly 7 pt type — legible in print, but tight. For a bound
+thesis prefer the natural-size PDF as a foldout plate, or split the figure into two plates
+(Phases 1–5 and Phases 6–9 plus the scope panel) if a standard page size is required.
 
 **Figure numbering.** Draft 42 contains Figures 5.1–5.4 only (round with an inactive miner;
 genesis round; reward distribution; miner leaving). There is no existing Figure 5.5, so the
@@ -506,7 +522,28 @@ Every diagram element maps to a chapter location.
 npm install @mermaid-js/mermaid-cli
 npx mmdc -i fig_5_5_pocol_complete.mmd -o fig_5_5_pocol_complete.svg -b white
 npx mmdc -i fig_5_6_pocol_simplified.mmd -o fig_5_6_pocol_simplified.png -b white -s 2
+npx mmdc -i fig_5_5_pocol_complete.mmd -o fig_5_5_pocol_complete.pdf -b white --pdfFit
 ```
 
-For thesis typesetting, insert the SVG (vector, scales to A3 without loss). If the printer
+`--pdfFit` sizes the PDF page to the diagram. The page-fitted A3/A4 variants are produced from
+those PDFs by centring the artwork on a standard page:
+
+```bash
+pip install pypdf
+python3 - <<'EOF'
+from pypdf import PdfReader, PdfWriter, Transformation, PageObject
+def place(src, out, pw, ph, margin=28):
+    p = PdfReader(src).pages[0]
+    w, h = float(p.mediabox.width), float(p.mediabox.height)
+    s = min((pw-2*margin)/w, (ph-2*margin)/h)
+    page = PageObject.create_blank_page(width=pw, height=ph)
+    p.add_transformation(Transformation().scale(s).translate((pw-w*s)/2, (ph-h*s)/2))
+    page.merge_page(p)
+    w_ = PdfWriter(); w_.add_page(page); w_.write(out)
+place('fig_5_5_pocol_complete.pdf',   'fig_5_5_pocol_complete_A3.pdf',   841.89, 1190.55)
+place('fig_5_6_pocol_simplified.pdf', 'fig_5_6_pocol_simplified_A4.pdf', 595.28,  841.89)
+EOF
+```
+
+For thesis typesetting insert the PDF or SVG (both vector, scale without loss). If the printer
 requires raster, the 2× PNG is 1568 px wide; re-render with `-s 4` for 300 dpi at A3 width.
