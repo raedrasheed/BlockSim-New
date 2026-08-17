@@ -1,0 +1,69 @@
+---
+title: "Figure 5.6 - PoCol Consensus Round (Simplified Presentation Version)"
+config:
+  theme: base
+  themeVariables:
+    fontFamily: "Times New Roman, Georgia, serif"
+    fontSize: "17px"
+    primaryColor: "#ffffff"
+    primaryTextColor: "#101010"
+    primaryBorderColor: "#101010"
+    lineColor: "#202020"
+    background: "#ffffff"
+  flowchart:
+    curve: linear
+    wrappingWidth: 620
+    nodeSpacing: 40
+    rankSpacing: 46
+---
+flowchart TB
+
+%% =====================================================================
+%%  Simplified PoCol round - defence-slide version
+%%  Source: Chapter 5, Sections 5.6, 5.8, 5.9 (same protocol, reduced detail)
+%% =====================================================================
+
+S(["START ROUND r"]):::se
+P1["Read committed state S(B_(r−1))<br/>h_(r−1) · M_r · balances · pending transactions"]:::proc
+P2["Build the COMMON canonical block template BlockTemplate_r<br/>+ nonce-free HeaderTemplate_r<br/>including the pre-committed reward transaction T_reward(r)"]:::key
+P3{"All miners agree on<br/>TemplateID_r?"}:::dec
+P3b["Reconcile transaction view · re-derive template<br/>mining does not begin"]:::proc
+P4["Round seed<br/>seed_r = H(“PoColNonce” ‖ h_(r−1) ‖ r ‖ TemplateID_r)"]:::key
+P5["Deterministic miner ordering<br/>ticket_r(mᵢ) = H(seed_r ‖ id(mᵢ)) → sorted list L_r"]:::key
+P6["Partition the permitted nonce domain N = 0 … N_max − 1<br/>start_r(i) = ⌊ i·N_max/n ⌋ , end_r(i) = ⌊ (i+1)·N_max/n ⌋ − 1<br/>R_r(m₍ᵢ₎) = [start_r(i), end_r(i)] , n = |M_r|"]:::key
+P7["PARALLEL DISJOINT SEARCH<br/>each miner inserts only n ∈ R_r(mᵢ) into HeaderTemplate_r"]:::key
+P8{"H(Serialize(Header_r(n))) ≤ Target?"}:::dec
+P9{"Assigned ranges exhausted?"}:::dec
+P10["Post-range policy: low-power idle · or continuous non-overlapping work"]:::proc
+P11["NEW ROUND · new canonical template · new TemplateID<br/>new seed · new nonce ranges"]:::key
+P12["Publish the committed template instantiated with n_success"]:::proc
+P13["VERIFY · template conformity + TemplateID_r<br/>+ n_success ∈ R_r(m_winner) + PoW ≤ Target<br/>+ transactions + pre-committed reward"]:::ver
+P14{"All checks pass and<br/>chain selected?"}:::dec
+P15["COMMIT block B_r to the chain"]:::proc
+P16["Pay the PRE-COMMITTED reward<br/>Reward_r(mᵢ) = sᵢ · R_tot(r) , Σ sᵢ = 1<br/>to every registered miner"]:::rew
+P17["Update state S(B_r) · update M_(r+1) · clear mempool"]:::proc
+P14b["Reject the block · continue under the current round<br/>and chain-selection rules"]:::proc
+P18(["r ← r + 1 · NEXT ROUND"]):::se
+
+INV["Common-Template Invariant: one immutable template per round —<br/>only the nonce varies. Disjoint-Evaluation Invariant: R_r(mᵢ) ∩ R_r(m_j) = ∅,<br/>so no two honest miners hash the same serialized candidate header."]:::inv
+
+S --> P1 --> P2 --> P3
+P3 -- "No" --> P3b --> P2
+P3 -- "Yes" --> P4 --> P5 --> P6 --> P7 --> P8
+P8 -- "No" --> P9
+P9 -- "No · next nonce in range" --> P7
+P9 -- "Yes · no valid hash" --> P10 --> P11
+P11 -- "restart collaborative search" --> P2
+P8 -- "Yes" --> P12 --> P13 --> P14
+P14 -- "No" --> P14b
+P14 -- "Yes" --> P15 --> P16 --> P17 --> P18
+P18 -. "loop" .-> P1
+INV -.- P7
+
+classDef proc fill:#ffffff,stroke:#1a1a1a,stroke-width:1.2px,color:#101010;
+classDef key fill:#e8eef7,stroke:#1f4e79,stroke-width:2px,color:#101010;
+classDef dec fill:#ffffff,stroke:#1f4e79,stroke-width:1.8px,color:#101010;
+classDef ver fill:#f4f4f4,stroke:#404040,stroke-width:1.4px,color:#101010;
+classDef rew fill:#f4f4f4,stroke:#1f4e79,stroke-width:1.6px,color:#101010;
+classDef se fill:#1f4e79,stroke:#101010,stroke-width:1.5px,color:#ffffff;
+classDef inv fill:#fbfbfb,stroke:#5a5a5a,stroke-width:1.2px,stroke-dasharray: 6 4,color:#202020;

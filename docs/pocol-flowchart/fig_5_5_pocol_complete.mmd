@@ -1,0 +1,288 @@
+---
+title: "Figure 5.5 - Complete Proof-of-Collaboration (PoCol) Consensus Workflow"
+config:
+  theme: base
+  themeVariables:
+    fontFamily: "Times New Roman, Georgia, serif"
+    fontSize: "15px"
+    primaryColor: "#ffffff"
+    primaryTextColor: "#101010"
+    primaryBorderColor: "#101010"
+    lineColor: "#202020"
+    background: "#ffffff"
+  flowchart:
+    curve: linear
+    wrappingWidth: 560
+    nodeSpacing: 38
+    rankSpacing: 46
+    padding: 8
+---
+flowchart TB
+
+%% =====================================================================
+%%  Figure 5.5 - Complete PoCol consensus workflow
+%%  Source: R. S. Rasheed, "Proof-of-Collaboration: A Novel Blockchain
+%%  Consensus Algorithm with Highly Efficient Power Consumption",
+%%  Chapter 5, Sections 5.1-5.11. Every element is traceable to a
+%%  numbered section or equation of that chapter.
+%%  Solid boxes = protocol steps.  Diamonds = decisions.
+%%  Dashed boxes = invariants, assumptions and stated limitations.
+%% =====================================================================
+
+START(["START · PoCol network deployment"]):::se
+
+%% ---------------------------------------------------------------------
+subgraph PH1["PHASE 1 · SYSTEM INITIALISATION / GENESIS ROUND r = 0 — §5.7"]
+direction TB
+  G1["Initialise PoCol protocol parameters<br/>version · difficulty target D₀ · permitted nonce-domain size N_max<br/>subsidy R_blk · reward function f_r · tx-collection window Δ_tx"]:::gen
+  G2["Establish the genesis blockchain state, initial balances and ledger state"]:::gen
+  G3["Register the founding miner set M₀<br/>public key · network address · reward address<br/>bootstrapping consortium or first-miner self-registration"]:::gen
+  G4{"All miners agree on M₀ before<br/>nonce-domain distribution?"}:::dec
+  G5["Derive the canonical genesis block template BlockTemplate₀<br/>and the nonce-free HeaderTemplate₀, including the initial<br/>reward-distribution transaction and any bootstrap transactions"]:::gen
+  G6["TemplateID₀ = H(Encode(BlockTemplate₀ without round-specific nonce))"]:::genkey
+  G7{"Every miner verifies TemplateID₀?"}:::dec
+  G8["seed₀ = H(“PoColNonce” ‖ genesis_hash ‖ 0 ‖ TemplateID₀)"]:::genkey
+  G9["Deterministic nonce-domain allocation<br/>ticket₀(mᵢ) → ordered list L₀ → disjoint ranges R₀(mᵢ)"]:::genkey
+  G10["Start the first collaborative search<br/>instantiate Header₀(n) for n ∈ R₀(mᵢ)"]:::gen
+  G11{"H(Serialize(Header₀(n))) ≤ Target?"}:::dec
+  G12["Winner publishes B₀ = committed template + successful nonce;<br/>all nodes verify the complete header, the proof of work,<br/>the transactions and the template commitment"]:::gen
+  G13["Commit B₀ · initialise state S(B₀) with balances and M₀"]:::gen
+  NN["Genesis obeys the same round rules: if the assigned ranges are<br/>exhausted without a solution, a new template and a new round<br/>are derived before the search resumes (§5.8.4)."]:::inv
+end
+
+%% ---------------------------------------------------------------------
+subgraph PH2["PHASE 2 · ROUND START AND COMMITTED-STATE READ, r ≥ 1 — §5.8.1"]
+direction TB
+  A1["Round r starts deterministically the moment B_(r−1) is accepted"]:::proc
+  A2["Read the committed state S(B_(r−1))<br/>previous-block header hash h_(r−1) · registered miner set M_r<br/>balances and application state · pending transactions (mempool)"]:::proc
+end
+
+%% ---------------------------------------------------------------------
+subgraph PH9["PHASE 3a · PRE-COMMITTED COLLABORATIVE REWARD DISTRIBUTION — §5.9"]
+direction TB
+  R1["Total distributable reward  (5.6)<br/>R_tot(r) = R_blk(r) + F_tx(r)"]:::rew
+  R2["Reward-distribution function  (5.7)<br/>f_r : M_r → [0,1] , sᵢ = f_r(mᵢ) ≥ 0 , Σ_(mᵢ ∈ M_r) f_r(mᵢ) = 1"]:::rew
+  R3["Reward paid to each miner  (5.8)<br/>Reward_r(mᵢ) = sᵢ · R_tot(r)"]:::rew
+  R4["Equal-sharing baseline  (5.9)<br/>f_r(mᵢ) = 1 / |M_r| for every mᵢ ∈ M_r"]:::rew
+  R5["Build T_reward(r): one output per mᵢ ∈ M_r paying Reward_r(mᵢ) to its<br/>registered on-chain reward address; inputs are the subsidy R_blk(r)<br/>and the collected fees F_tx(r); placed first in B_r"]:::rew
+  NM["Computed BEFORE mining begins, from S(B_(r−1)) and the protocol rules.<br/>The baseline membership rule pays every registered miner, including inactive<br/>ones; activity-filtered variants over M̃_r ⊆ M_r with renormalised shares are<br/>an explicitly optional deployment variant (§5.9.3)."]:::inv
+end
+
+%% ---------------------------------------------------------------------
+subgraph PH3["PHASE 3b · CANONICAL COMMON-TEMPLATE CONSTRUCTION — §5.8.2"]
+direction TB
+  B1["Open the bounded transaction-collection window Δ_tx<br/>exchange pending transactions by normal gossip"]:::proc
+  B2["Eligible transaction set of round r<br/>received before the cutoff AND valid with respect to S(B_(r−1))"]:::proc
+  B3["Deterministic selection and ordering rule<br/>decreasing fee density up to the block-size limit,<br/>ties broken by lexicographic transaction identifier"]:::proc
+  B4["Compute the Merkle root over the ordered transaction list"]:::proc
+  B5["Embed the pre-committed reward-distribution transaction T_reward(r)"]:::proc
+  B6["Assemble the canonical BlockTemplate_r<br/>previous-block hash · round number · protocol version · target D_r<br/>deterministic timestamp · ordered transaction list · Merkle root<br/>T_reward(r) · every other consensus-critical field — nonce excluded"]:::key
+  B7["Derive the nonce-free header template HeaderTemplate_r<br/>only the nonce field may vary during the active round"]:::key
+  B8["TemplateID_r = H(Encode(BlockTemplate_r without a round-specific nonce value))"]:::key
+  B9{"Locally derived TemplateID_r equals the network-consistent<br/>TemplateID_r announced by peers?"}:::dec
+  B10["Do NOT begin authorised mining · reconcile the transaction / template view<br/>request missing transactions by identifier, validate them,<br/>discard ineligible ones"]:::proc
+  B11["Recompute / re-verify the canonical template"]:::proc
+  B12["FREEZE the template for round r<br/>BlockTemplate_r and HeaderTemplate_r are immutable"]:::key
+  NA["COMMON-TEMPLATE INVARIANT  §5.8.2<br/>For every round r all honest miners use the same immutable block template T_r<br/>and the same derived nonce-free header template. A candidate block is valid for<br/>round r only if all non-nonce consensus-critical fields match T_r; the nonce is<br/>inserted solely to instantiate the candidate header evaluated for proof of work."]:::inv
+  NB["Template agreement is reached entirely through peer-to-peer gossip of<br/>transactions and template identifiers — no centralised coordinator exists.<br/>The ordering rule and its tie-breaking convention are a proposed protocol<br/>requirement of Chapter 5; the Chapter 6 prototype orders transactions by<br/>decreasing fee only, after the winning event, with no agreement step (§6.3)."]:::inv
+end
+
+%% ---------------------------------------------------------------------
+subgraph PH4["PHASE 4 · DETERMINISTIC NONCE-DOMAIN ALLOCATION — §5.6, §5.8.3"]
+direction TB
+  C1["Round seed  (5.2)<br/>seed_r = H(“PoColNonce” ‖ h_(r−1) ‖ r ‖ TemplateID_r)<br/>h_(r−1) = previous committed block-header hash · r = round index<br/>TemplateID_r binds the assignment to the canonical template"]:::key
+  C2["Per-round ticket of every mᵢ ∈ M_r  (5.3)<br/>ticket_r(mᵢ) = H(seed_r ‖ id(mᵢ))"]:::key
+  C3["Pseudo-random deterministic ordering  (5.4)<br/>L_r = m₍₀₎, m₍₁₎, …, m₍n−1₎ sorted by increasing ticket value<br/>ticket_r(m₍₀₎) ≤ ticket_r(m₍₁₎) ≤ … ≤ ticket_r(m₍n−1₎) , n = |M_r|"]:::key
+  C4["Integer partition of the permitted nonce domain  (5.4a, 5.4b)<br/>start_r(i) = ⌊ i · N_max / n ⌋<br/>end_r(i) = ⌊ (i+1) · N_max / n ⌋ − 1"]:::key
+  C5["Assigned range of the miner at position i  (5.5)<br/>R_r(m₍ᵢ₎) = [ start_r(i) , end_r(i) ]"]:::key
+  ND["PARTITION PROPERTIES  §5.6.3<br/>• No overlap  R_r(mᵢ) ∩ R_r(m_j) = ∅ for i ≠ j<br/>• Complete coverage  ⋃ᵢ R_r(m₍ᵢ₎) = N<br/>• Approximately balanced  |R_r(m₍ᵢ₎)| ∈ ⌊N_max/n⌋ , ⌈N_max/n⌉"]:::inv
+  NE["N = 0, 1, …, N_max − 1 is the PERMITTED NONCE DOMAIN of the round<br/>(e.g. 2³² or 2⁶⁴ depending on implementation constraints); it is NOT the<br/>SHA-256 output space. Every honest miner recomputes the ordering and its<br/>own range locally from public inputs — there is no trusted range coordinator."]:::inv
+  NC["DISJOINT-EVALUATION INVARIANT  §5.8.3<br/>For every pair of distinct honest miners, R_r(mᵢ) ∩ R_r(m_j) = ∅; under the<br/>common immutable template they therefore never evaluate the same<br/>serialized candidate header Header_r(n) during the same round."]:::inv
+end
+
+%% ---------------------------------------------------------------------
+subgraph PH5["PHASE 5 · COLLABORATIVE PROOF-OF-WORK SEARCH — all active miners in parallel — §5.8.4"]
+direction TB
+  D1["Miner mᵢ takes only the nonce values n ∈ R_r(mᵢ)"]:::proc
+  D2["Insert n into the nonce field of the common HeaderTemplate_r<br/>→ complete candidate header Header_r(n)"]:::proc
+  D3["Compute H(Serialize(Header_r(n)))"]:::proc
+  D4{"H(Serialize(Header_r(n))) ≤ Target?"}:::dec
+  D5{"Assigned range R_r(mᵢ) exhausted?"}:::dec
+  D6["Continue with the next nonce inside the assigned range"]:::proc
+  D7["Mark the local assigned range as exhausted"]:::proc
+  D8["Miner becomes the successful proposer of round r<br/>publish the already committed BlockTemplate_r instantiated with n_success ·<br/>the reward transaction is NOT modified · broadcast the proposed block"]:::key
+  F1["Registered but INACTIVE miner  mᵢ ∈ M_r , mᵢ ∉ A_r"]:::proc
+  F2["Its range R_r(mᵢ) stays assigned under the deterministic<br/>allocation but may remain unevaluated"]:::proc
+  F3["Effective hash rate decreases<br/>H_eff(r) = Σ_(mᵢ ∈ A_r) Hᵢ(r) ≤ H_tot(r)<br/>λ_blk_eff(r) = H_eff(r) · p_succ(D_r) → longer block intervals<br/>until the difficulty adjustment responds"]:::proc
+  NJ["Only the NONCE varies within one active round. Changing the timestamp,<br/>the transaction set, the reward transaction or any other consensus-critical<br/>field yields a different template and is prohibited inside round r (§5.8.4)."]:::inv
+end
+
+%% ---------------------------------------------------------------------
+subgraph PH6["PHASE 6 · POST-RANGE OPERATING POLICIES — alternatives, declared per configuration — §5.6.6"]
+direction TB
+  E1{"Configured post-range<br/>operating policy?"}:::dec
+  E2["ENERGY-SAVING IDLE POLICY  §5.6.6.1<br/>stop active hashing · enter a low-power idle / listening state until the<br/>end of the current collaborative round · stay connected to the network ·<br/>may receive notice that another miner produced a valid block ·<br/>perform no further mining hashes during the remaining round"]:::proc
+  E3["CONTINUOUS-PERFORMANCE POLICY  §5.6.6.2<br/>do not idle · continue with newly assigned, non-overlapping work<br/>bound to an explicitly identified template or sub-round"]:::proc
+  E4["Wait for a valid block or for the termination of round r"]:::proc
+  NF["Active hashing → low-power state IS the energy-saving mechanism.<br/>The saving comes from the active/idle power difference and the idle duration,<br/>NOT from nonce partitioning alone. The policy also lowers the active network<br/>hash rate, so its effects on block interval, range-exhaustion probability,<br/>liveness and security must be evaluated together with its savings."]:::inv
+  NG["At equal aggregate hash rate, hardware efficiency, active power and<br/>experiment duration, continuous operation is not expected to reduce energy;<br/>its purpose is performance-oriented and any gain must be reported as an<br/>empirical result, not as a consequence of nonce-range separation."]:::inv
+  NI["“End of the current collaborative mining round” denotes the round deadline<br/>or target block interval defined by PoCol — not a multi-block<br/>difficulty-adjustment epoch (§5.6.6.1)."]:::inv
+end
+
+%% ---------------------------------------------------------------------
+subgraph PH7["PHASE 7 · ROUND OUTCOME · UNEVALUATED RANGES AND NO-SOLUTION ROUNDS — §5.6.5, §5.8.4"]
+direction TB
+  N1{"All ranges assigned to ACTIVE miners exhausted, no header at or<br/>below the target, and no valid block received?"}:::dec
+  N2["Round r ends WITHOUT a block · no miner may alter a non-nonce<br/>consensus-critical field and continue under the same round identifier"]:::proc
+  N3["Create a NEW round · derive a new canonical template ·<br/>compute a new TemplateID · compute a new round seed ·<br/>generate new nonce assignments · restart the collaborative search"]:::key
+  N4(["↺ RETURN TO PHASE 3a / 3b<br/>rebuild the canonical template for the new round"]):::conn
+  NH["ALL ACTIVE RANGES EXHAUSTED ≠ THE PERMITTED NONCE DOMAIN IS EXHAUSTED.<br/>When a registered miner is inactive, a nonce satisfying the target may lie inside<br/>its assigned range and never be evaluated in this round; the round is then closed<br/>and a new round with a new template is generated (§5.6.5)."]:::inv
+end
+
+%% ---------------------------------------------------------------------
+subgraph PH8["PHASE 8 · BLOCK PROPOSAL AND VERIFICATION — independently at every receiving node — §5.8.5"]
+direction TB
+  V1["CHECK 1 · Previous-block linkage<br/>prevhash matches B_(r−1) in the local ledger; the block extends the<br/>longest valid chain or a competing chain of comparable length"]:::ver
+  V2["CHECK 2 · Canonical-template conformity<br/>recompute BlockTemplate_r, HeaderTemplate_r and TemplateID_r;<br/>every non-nonce consensus-critical field must match the committed template"]:::ver
+  V3["CHECK 3 · Transactions and Merkle root<br/>the transaction list and Merkle root match the common template and<br/>T_reward(r) is identical to the pre-committed reward transaction"]:::ver
+  V4["CHECK 4 · Successful-nonce range membership<br/>recompute seed_r, the tickets, the ordered list L_r and the ranges;<br/>verify that n_success ∈ R_r(m_winner)"]:::ver
+  V5["CHECK 5 · Transaction validity<br/>validate every transaction against S(B_(r−1)):<br/>no double spending, correct state transitions, valid ledger rules"]:::ver
+  V6["CHECK 6 · Reward-distribution validity  §5.9.2<br/>recompute R_tot(r), M_r and the shares sᵢ, then verify<br/>completeness · correctness · conservation · ledger validity"]:::ver
+  V7["CHECK 7 · Proof of work<br/>H(Serialize(Header_r(n_success))) ≤ Target, and the header Merkle root<br/>and committed fields are consistent with BlockTemplate_r"]:::ver
+  V8["CHECK 8 · Template identifier<br/>a header meeting the target but built from different non-nonce fields carries<br/>TemplateID ≠ TemplateID_r and is REJECTED regardless of its valid PoW"]:::ver
+  V9{"Does the proposed block pass ALL PoCol verification checks?"}:::dec
+  V10["REJECT the block · continue according to the current round<br/>and the chain-selection rules"]:::proc
+  V11["Block becomes eligible for the cumulative-work chain-selection rule"]:::proc
+  V12{"Selected by the chain-selection rule<br/>as the canonical chain?"}:::dec
+  V13["Retain as a competing branch<br/>standard Nakamoto-style fork resolution"]:::proc
+  V14(["↺ RETURN TO PHASE 7<br/>continue under the current round and chain-selection rules"]):::conn
+  NK["Check 4 verifies range membership of the SUCCESSFUL candidate header only;<br/>it does NOT prove that every non-winning miner searched its complete<br/>assigned range (§5.8.5, §5.11.5)."]:::inv
+end
+
+%% ---------------------------------------------------------------------
+subgraph PH10["PHASE 9 · COMMITMENT, STATE UPDATE AND ROUND TRANSITION — §5.8.5, §5.10"]
+direction TB
+  T1["Append B_r to the blockchain · update balances in S(B_r),<br/>including every reward-distribution output"]:::proc
+  T2["Process miner registration, deregistration and inactivity-removal<br/>transactions → update the registered miner set M_(r+1)"]:::proc
+  T3["Remove the confirmed transactions from the mempool"]:::proc
+  T4["r ← r + 1"]:::key
+  T5(["↺ RETURN TO PHASE 2<br/>read the committed state S(B_r) and start round r + 1"]):::conn
+
+  subgraph PH11["SIDE MODULE · DYNAMIC MINER-SET MANAGEMENT — §5.4, §5.10"]
+  direction TB
+    M0{"Miner-set change event?"}:::dec
+    M1["JOINING  §5.4.1, §5.10.1<br/>registration transaction carrying public key / identity, network address and<br/>reward address → validated and included in block B_h → mᵢ ∈ M(r) for every<br/>round r > h → receives a nonce range → becomes eligible under the<br/>applicable reward rule"]:::side
+    M2["EXPLICIT LEAVING  §5.4.2, §5.10.2<br/>signed deregistration transaction → signature valid and miner still in M_h →<br/>confirmed in a block → removed from the registered set, immediately or after<br/>k blocks → no future nonce range and no future reward under the baseline<br/>membership rule; previously earned rewards remain on the ledger"]:::side
+    M3["SILENT LEAVING / INACTIVITY  §5.4.3, §5.10.2<br/>identity remains registered · Hᵢ(r) = 0 · the assigned nonce range may remain<br/>unevaluated · effective active hash rate decreases · the miner is still paid<br/>under the baseline equal-sharing rule until it deregisters or is removed"]:::side
+    M4["OPTIONAL LONG-TERM-INACTIVITY REMOVAL  §5.4.4, §5.10.3<br/>if h − ℓᵢ(h) > Θ_inact the miner becomes eligible for forced removal: any<br/>honest node may propose a removal transaction, and once it is included<br/>mᵢ ∉ M(r) for all subsequent rounds r > h"]:::side
+  end
+end
+
+%% ---------------------------------------------------------------------
+subgraph PH12["PROTOCOL SCOPE / UNRESOLVED REQUIREMENTS — §5.11, §5.12, §6.3, §6.9, §8.5"]
+direction TB
+  L1["Full distributed template agreement — the Δ_tx collection window, mempool<br/>reconciliation, TemplateID computation and verification, and pre-committed<br/>reward enforcement — is SPECIFIED in Chapter 5 but is not implemented as<br/>executable checks and has not been validated experimentally end to end."]:::lim
+  L2["Range membership of the winning nonce does not prove that non-winning<br/>miners searched their complete assigned ranges; contribution auditing<br/>and contribution verification remain incomplete."]:::lim
+  L3["Sybil resistance is not experimentally established; it depends on external<br/>registration and identity policies (curated membership, or costed<br/>registration such as a deposit or a registration proof of work)."]:::lim
+  L4["Incentive compatibility is not established, and quantitative reward fairness<br/>has not been evaluated; both are stated as future work."]:::lim
+  L5["PoW-equivalent common-prefix, chain-growth, chain-quality and double-spend<br/>guarantees have not been formally proved for the complete common-template<br/>protocol; Section 5.11 gives a preliminary informal argument only."]:::lim
+end
+
+%% ========================= MAIN FLOW =================================
+START --> G1
+G1 --> G2 --> G3 --> G4
+G4 -- "No · reconcile M₀" --> G3
+G4 -- "Yes" --> G5 --> G6 --> G7
+G7 -- "No · recompute / verify" --> G5
+G7 -- "Yes" --> G8 --> G9 --> G10 --> G11
+G11 -- "No · next nonce in range" --> G10
+G11 -- "Yes" --> G12 --> G13
+G13 -- "r ← 1 · move to normal PoCol rounds" --> A1
+
+A1 --> A2
+A2 --> R1
+A2 --> B1
+R1 --> R2 --> R3 --> R4 --> R5
+R5 -- "committed before mining begins" --> B5
+B1 --> B2 --> B3 --> B4 --> B5
+B5 --> B6 --> B7 --> B8 --> B9
+B9 -- "No" --> B10 --> B11 --> B8
+B9 -- "Yes" --> B12
+
+B12 --> C1 --> C2 --> C3 --> C4 --> C5
+C5 --> D1
+C5 -. "range of an inactive registered miner" .-> F1
+F1 --> F2 --> F3
+D1 --> D2 --> D3 --> D4
+D4 -- "No" --> D5
+D5 -- "No" --> D6 --> D2
+D5 -- "Yes" --> D7
+D4 -- "Yes" --> D8
+D7 --> E1
+E1 -- "energy saving" --> E2 --> E4
+E1 -- "continuous performance" --> E3 --> E4
+E4 --> N1
+F3 --> N1
+N1 -- "Yes · no-solution round" --> N2 --> N3
+N3 --> N4
+N1 -- "No · a valid block was received" --> V1
+D8 --> V1
+
+V1 --> V2 --> V3 --> V4 --> V5 --> V6 --> V7 --> V8 --> V9
+V9 -- "No" --> V10
+V10 --> V14
+V9 -- "Yes" --> V11 --> V12
+V12 -- "No" --> V13
+V13 --> V14
+V12 -- "Yes · append the block" --> T1
+T1 --> T2 --> T3 --> T4
+T4 --> T5
+T2 -. "miner-set change transactions" .-> M0
+M0 -- "join" --> M1
+M0 -- "explicit leave" --> M2
+M0 -- "silent leave" --> M3
+M0 -- "long inactivity" --> M4
+
+%% ===================== ANNOTATION LINKS ==============================
+NN -.- G11
+NM -.- R4
+NA -.- B12
+NB -.- B9
+ND -.- C5
+NE -.- C4
+NC -.- C5
+NJ -.- D2
+NF -.- E2
+NI -.- E2
+NG -.- E3
+NH -.- N1
+NK -.- V4
+
+%% ========================== STYLING ==================================
+classDef proc fill:#ffffff,stroke:#1a1a1a,stroke-width:1.1px,color:#101010;
+classDef key fill:#e8eef7,stroke:#1f4e79,stroke-width:2px,color:#101010;
+classDef dec fill:#ffffff,stroke:#1f4e79,stroke-width:1.6px,color:#101010;
+classDef ver fill:#f4f4f4,stroke:#404040,stroke-width:1.1px,color:#101010;
+classDef rew fill:#f4f4f4,stroke:#1f4e79,stroke-width:1.3px,color:#101010;
+classDef gen fill:#f7f7f7,stroke:#4a4a4a,stroke-width:1.1px,color:#101010;
+classDef genkey fill:#e8eef7,stroke:#1f4e79,stroke-width:1.6px,color:#101010;
+classDef side fill:#ffffff,stroke:#4a4a4a,stroke-width:1.1px,color:#101010;
+classDef conn fill:#e8eef7,stroke:#1f4e79,stroke-width:1.6px,stroke-dasharray: 4 3,color:#101010;
+classDef se fill:#1f4e79,stroke:#101010,stroke-width:1.5px,color:#ffffff;
+classDef inv fill:#fbfbfb,stroke:#5a5a5a,stroke-width:1.1px,stroke-dasharray: 6 4,color:#202020;
+classDef lim fill:#fbfbfb,stroke:#1a1a1a,stroke-width:1.2px,stroke-dasharray: 6 4,color:#202020;
+
+class START se
+
+style PH1 fill:#fcfcfc,stroke:#6b6b6b,stroke-width:1.4px,color:#101010
+style PH2 fill:#ffffff,stroke:#1f4e79,stroke-width:1.4px,color:#101010
+style PH3 fill:#ffffff,stroke:#1f4e79,stroke-width:2px,color:#101010
+style PH4 fill:#ffffff,stroke:#1f4e79,stroke-width:2px,color:#101010
+style PH5 fill:#ffffff,stroke:#1f4e79,stroke-width:2px,color:#101010
+style PH6 fill:#ffffff,stroke:#6b6b6b,stroke-width:1.4px,color:#101010
+style PH7 fill:#ffffff,stroke:#6b6b6b,stroke-width:1.4px,color:#101010
+style PH8 fill:#ffffff,stroke:#1f4e79,stroke-width:1.8px,color:#101010
+style PH9 fill:#ffffff,stroke:#1f4e79,stroke-width:1.6px,color:#101010
+style PH10 fill:#ffffff,stroke:#6b6b6b,stroke-width:1.4px,color:#101010
+style PH11 fill:#fcfcfc,stroke:#6b6b6b,stroke-width:1.4px,color:#101010
+style PH12 fill:#fbfbfb,stroke:#1a1a1a,stroke-width:1.4px,color:#101010
